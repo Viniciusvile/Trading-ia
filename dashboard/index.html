@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradingView Dashboard</title>
+<style>
+:root {
+  --bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;
+  --text:#e6edf3;--muted:#8b949e;--green:#3fb950;--red:#f85149;
+  --yellow:#d29922;--blue:#58a6ff;--purple:#bc8cff;--orange:#f0883e;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;font-size:13px;display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+/* HEADER */
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;gap:12px;flex-shrink:0;}
+header h1{font-size:14px;font-weight:700;color:var(--blue);white-space:nowrap;}
+.conn{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;}
+.dot.red{background:var(--red);animation:none;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+/* SYMBOL BAR */
+.symbar{display:flex;align-items:center;gap:8px;margin-left:auto;flex-wrap:wrap;}
+.symbar input{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 10px;border-radius:5px;font-size:12px;width:130px;outline:none;position:relative;}
+.symbar input:focus{border-color:var(--blue);}
+.autocomplete{position:absolute;background:var(--surface);border:1px solid var(--border);border-radius:5px;z-index:100;min-width:180px;max-height:200px;overflow-y:auto;display:none;}
+.autocomplete div{padding:6px 10px;cursor:pointer;font-size:12px;}
+.autocomplete div:hover{background:var(--surface2);}
+.tf-btns{display:flex;gap:3px;}
+.tf-btn{background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:4px 8px;border-radius:4px;font-size:11px;cursor:pointer;}
+.tf-btn:hover,.tf-btn.active{border-color:var(--blue);color:var(--blue);}
+/* TABS */
+.tabs{display:flex;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto;}
+.tab{padding:8px 16px;cursor:pointer;font-size:12px;color:var(--muted);white-space:nowrap;border-bottom:2px solid transparent;}
+.tab:hover{color:var(--text);}
+.tab.active{color:var(--blue);border-bottom-color:var(--blue);}
+/* CONTENT */
+.content{flex:1;overflow:hidden;display:flex;}
+.tab-panel{display:none;flex:1;overflow-y:auto;padding:16px;}
+.tab-panel.active{display:flex;flex-direction:column;gap:12px;}
+/* GRID */
+.grid{display:grid;gap:12px;}
+.g2{grid-template-columns:1fr 1fr;}
+.g3{grid-template-columns:1fr 1fr 1fr;}
+.g4{grid-template-columns:repeat(4,1fr);}
+.span2{grid-column:span 2;}
+.span3{grid-column:span 3;}
+/* CARD */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:14px;}
+.card h2{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:10px;}
+/* PRICE */
+.price-big{font-size:32px;font-weight:700;letter-spacing:-1px;}
+.price-sub{font-size:11px;color:var(--muted);margin-top:3px;}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;}
+.badge.long{background:#1a3a20;color:var(--green);}
+.badge.short{background:#3a1a1a;color:var(--red);}
+.badge.neutral{background:var(--surface2);color:var(--muted);}
+/* OHLCV */
+.ohlcv-g{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.ohlcv-g label{font-size:10px;color:var(--muted);display:block;}
+.ohlcv-g span{font-size:13px;font-weight:500;}
+/* TABLES */
+table{width:100%;border-collapse:collapse;}
+td,th{padding:5px 6px;text-align:left;border-bottom:1px solid var(--border);font-size:12px;}
+th{font-size:10px;text-transform:uppercase;color:var(--muted);font-weight:600;}
+tr:last-child td{border-bottom:none;}
+/* BUTTONS */
+btn,button{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:5px;font-size:12px;cursor:pointer;transition:background .15s;}
+button:hover{background:var(--border);}
+button.primary{background:var(--blue);border-color:var(--blue);color:#000;font-weight:600;}
+button.primary:hover{opacity:.85;}
+button.success{background:#1a3a20;border-color:var(--green);color:var(--green);}
+button.danger{background:#3a1a1a;border-color:var(--red);color:var(--red);}
+button.warn{background:#3a2e00;border-color:var(--yellow);color:var(--yellow);}
+button:disabled{opacity:.4;cursor:not-allowed;}
+/* INPUTS */
+input[type=text],input[type=date],textarea,select{
+  background:var(--surface2);border:1px solid var(--border);color:var(--text);
+  padding:6px 10px;border-radius:5px;font-size:12px;outline:none;width:100%;
+}
+input:focus,textarea:focus,select:focus{border-color:var(--blue);}
+textarea{resize:vertical;font-family:'Consolas','Courier New',monospace;font-size:12px;}
+/* FLEX UTILS */
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.spacer{flex:1;}
+/* SIGNAL BAR */
+.signal-bar{padding:10px 14px;border-radius:6px;font-weight:700;font-size:14px;text-align:center;border:1px solid;}
+/* CHECKLIST */
+.chk-item{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px;}
+.chk-item:last-child{border-bottom:none;}
+/* LOG */
+.log{font-size:11px;color:var(--muted);font-family:monospace;padding:4px 0;}
+/* SCANNER */
+.scan-row td:first-child{font-weight:600;}
+/* ALERT ITEMS */
+.alert-item{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);}
+.alert-item:last-child{border-bottom:none;}
+/* REPLAY */
+.replay-controls{display:flex;gap:8px;flex-wrap:wrap;}
+.replay-status{padding:8px 12px;background:var(--surface2);border-radius:5px;font-size:12px;}
+/* PINE EDITOR */
+#pine-editor{height:350px;font-size:12px;line-height:1.5;}
+.pine-errors{margin-top:8px;font-size:11px;font-family:monospace;}
+.pine-error-line{color:var(--red);padding:2px 0;}
+.pine-warn-line{color:var(--yellow);padding:2px 0;}
+/* SCREENSHOTS */
+.screenshot-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;}
+.screenshot-item img{width:100%;border-radius:4px;cursor:pointer;border:2px solid transparent;}
+.screenshot-item img:hover{border-color:var(--blue);}
+.screenshot-item p{font-size:10px;color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* JOURNAL */
+.journal-entry{padding:8px;border:1px solid var(--border);border-radius:5px;background:var(--surface2);margin-bottom:6px;}
+.journal-entry .je-header{display:flex;justify-content:space-between;margin-bottom:4px;font-size:10px;color:var(--muted);}
+.journal-entry .je-note{font-size:12px;line-height:1.5;}
+.je-type{padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;}
+.je-type.note{background:#1a2a3a;color:var(--blue);}
+.je-type.trade{background:#1a3a20;color:var(--green);}
+.je-type.warning{background:#3a2e00;color:var(--yellow);}
+/* UP/DOWN */
+.up{color:var(--green)!important;}
+.down{color:var(--red)!important;}
+/* MUTED */
+.muted{color:var(--muted);}
+/* MODAL */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:999;align-items:center;justify-content:center;}
+.modal-overlay.open{display:flex;}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;max-width:90vw;max-height:90vh;overflow:auto;}
+.modal img{max-width:80vw;max-height:80vh;}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <h1>📊 TradingView Dashboard</h1>
+  <div class="conn"><div class="dot" id="conn-dot"></div><span id="conn-text">Conectando...</span></div>
+  <span class="muted" style="font-size:11px" id="last-update"></span>
+
+  <div class="symbar" style="margin-left:auto;position:relative">
+    <div style="position:relative">
+      <input type="text" id="sym-input" placeholder="Buscar símbolo..." autocomplete="off" oninput="searchSymbol(this.value)" onkeydown="if(event.key==='Enter')changeSymbol()">
+      <div class="autocomplete" id="autocomplete"></div>
+    </div>
+    <button class="primary" onclick="changeSymbol()">Trocar</button>
+    <div class="tf-btns">
+      <button class="tf-btn" onclick="changeTF('1')">1m</button>
+      <button class="tf-btn" onclick="changeTF('5')">5m</button>
+      <button class="tf-btn" onclick="changeTF('15')">15m</button>
+      <button class="tf-btn" onclick="changeTF('60')">1h</button>
+      <button class="tf-btn" onclick="changeTF('240')">4h</button>
+      <button class="tf-btn" onclick="changeTF('D')">1D</button>
+      <button class="tf-btn" onclick="changeTF('W')">1W</button>
+    </div>
+    <button onclick="refreshAll()">🔄</button>
+  </div>
+</header>
+
+<!-- TABS -->
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('dashboard')">📈 Dashboard</div>
+  <div class="tab" onclick="switchTab('scanner')">🔍 Scanner</div>
+  <div class="tab" onclick="switchTab('alerts')">🔔 Alertas</div>
+  <div class="tab" onclick="switchTab('strategy')">📊 Estratégia</div>
+  <div class="tab" onclick="switchTab('replay')">⏪ Replay</div>
+  <div class="tab" onclick="switchTab('pine')">🌲 Pine Editor</div>
+  <div class="tab" onclick="switchTab('screenshots')">📷 Screenshots</div>
+  <div class="tab" onclick="switchTab('journal')">📓 Journal</div>
+</div>
+
+<!-- CONTENT -->
+<div class="content">
+
+<!-- ═══════════════ DASHBOARD ═══════════════ -->
+<div class="tab-panel active" id="tab-dashboard">
+  <div class="grid g3">
+    <div class="card">
+      <h2>Preço Atual</h2>
+      <div class="price-big" id="price">--</div>
+      <div class="price-sub"><span id="sym-label">--</span> | <span id="tf-label">--</span> | <span id="exch-label">--</span></div>
+      <div style="margin-top:8px"><span class="badge neutral" id="signal-badge">AGUARDANDO</span></div>
+    </div>
+    <div class="card">
+      <h2>OHLCV</h2>
+      <div class="ohlcv-g">
+        <div><label>Abertura</label><span id="o">--</span></div>
+        <div><label>Máximo</label><span id="h" class="up">--</span></div>
+        <div><label>Mínimo</label><span id="l" class="down">--</span></div>
+        <div><label>Fechamento</label><span id="c">--</span></div>
+        <div><label>Volume</label><span id="v">--</span></div>
+        <div><label>Variação</label><span id="chg">--</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Indicadores</h2>
+      <table id="ind-table"><tr><td class="muted" colspan="2">Carregando...</td></tr></table>
+    </div>
+  </div>
+
+  <div class="grid g3">
+    <div class="card span2">
+      <h2>Morning Brief — Análise de Entrada</h2>
+      <div id="brief-rec" style="display:none;margin-bottom:10px;padding:10px;border-radius:6px;font-weight:700;font-size:14px;text-align:center"></div>
+      <div id="brief-chk"></div>
+      <div class="muted" style="font-size:11px;margin:6px 0" id="brief-score"></div>
+      <div id="brief-txt" class="muted" style="font-size:12px;line-height:1.6;white-space:pre-wrap">Clique em "Morning Brief" para analisar...</div>
+      <div style="margin-top:10px" class="row">
+        <button class="success" onclick="runBrief()">📋 Morning Brief</button>
+        <span class="muted" id="brief-time" style="font-size:11px"></span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Screenshot</h2>
+      <button onclick="takeScreenshot()">📷 Capturar Gráfico</button>
+      <img id="ss-img" style="display:none;width:100%;border-radius:5px;margin-top:8px" />
+      <div class="muted" style="font-size:10px;margin-top:4px" id="ss-path"></div>
+    </div>
+  </div>
+  <div class="log" id="log"></div>
+</div>
+
+<!-- ═══════════════ SCANNER ═══════════════ -->
+<div class="tab-panel" id="tab-scanner">
+  <div class="card">
+    <h2>Scanner Multi-Símbolo</h2>
+    <div class="row" style="margin-bottom:10px">
+      <input type="text" id="scan-symbols" value="BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT" style="flex:1">
+      <button class="primary" onclick="runScanner()">🔍 Escanear</button>
+      <span class="muted" id="scan-status" style="font-size:11px"></span>
+    </div>
+    <div id="scan-results">
+      <table>
+        <thead><tr><th>Símbolo</th><th>Preço</th><th>Variação</th><th>Tendência</th><th>VWAP</th><th>EMA 9/20</th><th>Sinal</th></tr></thead>
+        <tbody id="scan-tbody"><tr><td colspan="7" class="muted">Execute o scanner para ver resultados</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ ALERTAS ═══════════════ -->
+<div class="tab-panel" id="tab-alerts">
+  <div class="grid g2">
+    <div class="card">
+      <h2>Criar Alerta</h2>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div><label class="muted" style="font-size:11px;display:block;margin-bottom:3px">Condição</label>
+          <select id="alert-cond"><option value="crossing">Cruzando</option><option value="greater_than">Maior que</option><option value="less_than">Menor que</option></select></div>
+        <div><label class="muted" style="font-size:11px;display:block;margin-bottom:3px">Preço</label>
+          <input type="text" id="alert-price" placeholder="Ex: 75000"></div>
+        <div><label class="muted" style="font-size:11px;display:block;margin-bottom:3px">Mensagem</label>
+          <input type="text" id="alert-msg" placeholder="Descrição do alerta"></div>
+        <div class="row">
+          <button class="primary" onclick="createAlert()">+ Criar Alerta</button>
+          <button class="danger" onclick="deleteAllAlerts()">🗑 Deletar Todos</button>
+        </div>
+        <div class="log" id="alert-log"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Alertas Ativos</h2>
+      <button onclick="loadAlerts()" style="margin-bottom:8px">🔄 Atualizar</button>
+      <div id="alert-list"><span class="muted">Carregando...</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ ESTRATÉGIA ═══════════════ -->
+<div class="tab-panel" id="tab-strategy">
+  <div class="row" style="margin-bottom:8px">
+    <button class="primary" onclick="loadStrategy()">🔄 Carregar Resultados</button>
+    <span class="muted" style="font-size:11px">Requer estratégia ativa no gráfico</span>
+  </div>
+  <div class="grid g4" id="strategy-stats">
+    <div class="card"><h2>Net Profit</h2><div style="font-size:22px;font-weight:700" id="st-profit">--</div></div>
+    <div class="card"><h2>Win Rate</h2><div style="font-size:22px;font-weight:700" id="st-winrate">--</div></div>
+    <div class="card"><h2>Total Trades</h2><div style="font-size:22px;font-weight:700" id="st-trades">--</div></div>
+    <div class="card"><h2>Drawdown Máx</h2><div style="font-size:22px;font-weight:700" id="st-drawdown">--</div></div>
+  </div>
+  <div class="card">
+    <h2>Histórico de Trades</h2>
+    <table>
+      <thead><tr><th>#</th><th>Direção</th><th>Entrada</th><th>Saída</th><th>PnL</th><th>PnL %</th></tr></thead>
+      <tbody id="trades-tbody"><tr><td colspan="6" class="muted">Carregue os resultados</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════ REPLAY ═══════════════ -->
+<div class="tab-panel" id="tab-replay">
+  <div class="card">
+    <h2>Controle de Replay</h2>
+    <div class="row" style="margin-bottom:12px">
+      <input type="date" id="replay-date" style="width:160px" value="2025-01-01">
+      <button class="success" onclick="replayStart()">▶ Iniciar</button>
+      <button onclick="replayStep()">⏭ +1 Barra</button>
+      <button onclick="replayAutoplay()">⚡ Auto</button>
+      <button class="danger" onclick="replayStop()">⏹ Parar</button>
+      <button onclick="replayStatus()">📊 Status</button>
+    </div>
+    <div class="row" style="margin-bottom:12px">
+      <label class="muted" style="font-size:11px">Velocidade auto (ms):</label>
+      <input type="text" id="replay-speed" value="500" style="width:70px">
+    </div>
+    <div id="replay-status-box" class="replay-status" style="display:none"></div>
+  </div>
+  <div class="card">
+    <h2>Trades no Replay</h2>
+    <div class="row">
+      <button class="success" onclick="replayTrade('buy')">🟢 Comprar</button>
+      <button class="danger" onclick="replayTrade('sell')">🔴 Vender</button>
+      <button class="warn" onclick="replayTrade('close')">⬛ Fechar</button>
+    </div>
+    <div class="log" id="replay-log" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<!-- ═══════════════ PINE EDITOR ═══════════════ -->
+<div class="tab-panel" id="tab-pine">
+  <div class="card" style="flex:1">
+    <div class="row" style="margin-bottom:8px">
+      <h2 style="margin-bottom:0">Pine Script Editor</h2>
+      <div class="spacer"></div>
+      <input type="text" id="pine-open-name" placeholder="Nome do script..." style="width:180px">
+      <button onclick="pineOpenScript()">📂 Abrir</button>
+      <button onclick="pineLoadSource()">⬇ Carregar</button>
+      <button class="primary" onclick="pineCompile()">▶ Compilar</button>
+      <button onclick="pineSave()">💾 Salvar</button>
+    </div>
+    <div class="row" style="margin-bottom:8px">
+      <button onclick="loadPineList()" style="font-size:11px">📋 Listar Scripts</button>
+      <button onclick="pineGetConsole()" style="font-size:11px">📟 Console</button>
+    </div>
+    <textarea id="pine-editor" placeholder="//@version=6&#10;indicator('Meu Indicador', overlay=true)&#10;plot(close)"></textarea>
+    <div class="pine-errors" id="pine-errors"></div>
+    <div id="pine-console" style="font-size:11px;font-family:monospace;color:var(--muted);margin-top:6px;max-height:80px;overflow-y:auto"></div>
+  </div>
+  <div class="card">
+    <h2>Scripts Salvos</h2>
+    <div id="pine-list"><span class="muted">Clique em "Listar Scripts"</span></div>
+  </div>
+</div>
+
+<!-- ═══════════════ SCREENSHOTS ═══════════════ -->
+<div class="tab-panel" id="tab-screenshots">
+  <div class="row" style="margin-bottom:8px">
+    <button class="primary" onclick="takeScreenshot();setTimeout(loadScreenshots,2000)">📷 Capturar + Atualizar</button>
+    <button onclick="loadScreenshots()">🔄 Atualizar Galeria</button>
+  </div>
+  <div class="screenshot-grid" id="screenshot-grid"><span class="muted">Carregando...</span></div>
+</div>
+
+<!-- ═══════════════ JOURNAL ═══════════════ -->
+<div class="tab-panel" id="tab-journal">
+  <div class="card">
+    <h2>Nova Entrada</h2>
+    <div class="grid g3" style="margin-bottom:8px">
+      <div>
+        <label class="muted" style="font-size:11px;display:block;margin-bottom:3px">Tipo</label>
+        <select id="j-type"><option value="note">Nota</option><option value="trade">Trade</option><option value="warning">Aviso</option></select>
+      </div>
+      <div>
+        <label class="muted" style="font-size:11px;display:block;margin-bottom:3px">Símbolo</label>
+        <input type="text" id="j-symbol" placeholder="Ex: BTCUSDT">
+      </div>
+      <div>
+        <label class="muted" style="font-size:11px;display:block;margin-bottom:3px">Preço</label>
+        <input type="text" id="j-price" placeholder="Preço atual">
+      </div>
+    </div>
+    <textarea id="j-note" rows="3" placeholder="Escreva sua observação, análise ou resultado do trade..."></textarea>
+    <div class="row" style="margin-top:8px">
+      <button class="primary" onclick="addJournalEntry()">+ Adicionar</button>
+      <button onclick="takeScreenshotForJournal()">📷 + Screenshot</button>
+      <button onclick="autoFillJournal()">⚡ Auto-Preencher</button>
+    </div>
+  </div>
+  <div id="journal-list"></div>
+</div>
+
+</div><!-- /content -->
+
+<!-- MODAL SCREENSHOT -->
+<div class="modal-overlay" id="modal" onclick="this.classList.remove('open')">
+  <div class="modal"><img id="modal-img" src="" /></div>
+</div>
+
+<script>
+const B = '';
+let autoTimer = null;
+let currentSymbol = '', currentTF = '240';
+
+// ─── UTILS ──────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+function fmt(n, d=2) {
+  if (n===undefined||n===null) return '--';
+  const num = parseFloat(n);
+  if (isNaN(num)) return String(n);
+  return num.toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});
+}
+function fmtVol(n) {
+  const v=parseFloat(n);
+  if(!v||isNaN(v)) return '--';
+  if(v>1e9) return (v/1e9).toFixed(2)+'B';
+  if(v>1e6) return (v/1e6).toFixed(2)+'M';
+  if(v>1e3) return (v/1e3).toFixed(2)+'K';
+  return v.toFixed(4);
+}
+function parseNum(s) { return parseFloat(String(s||'').replace(/\./g,'').replace(',','.')); }
+function log(msg, elId='log') {
+  const el=$(elId);
+  if(!el) return;
+  const t=new Date().toLocaleTimeString('pt-BR');
+  el.innerHTML=`<span style="color:var(--muted)">[${t}]</span> ${msg}`;
+}
+
+// ─── TABS ───────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i)=>{
+    const panels=['dashboard','scanner','alerts','strategy','replay','pine','screenshots','journal'];
+    t.classList.toggle('active', panels[i]===name);
+  });
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  const panel=$('tab-'+name);
+  if(panel) panel.classList.add('active');
+  // Lazy load
+  if(name==='alerts') loadAlerts();
+  if(name==='screenshots') loadScreenshots();
+  if(name==='journal') loadJournal();
+  if(name==='pine') loadPineList();
+}
+
+// ─── HEALTH & STATE ─────────────────────────────────────────────
+async function checkHealth() {
+  try {
+    const r=await fetch(B+'/api/health').then(r=>r.json());
+    $('conn-dot').className=r.cdp_connected?'dot':'dot red';
+    $('conn-text').textContent=r.cdp_connected?`Conectado — ${r.chart_symbol||''}`:'Desconectado';
+  } catch { $('conn-dot').className='dot red'; $('conn-text').textContent='Servidor offline'; }
+}
+
+async function loadState() {
+  try {
+    const r=await fetch(B+'/api/state').then(r=>r.json());
+    if(!r.success) return;
+    currentTF=r.resolution; currentSymbol=r.symbol;
+    const tfMap={'1':'1m','5':'5m','15':'15m','60':'1h','240':'4h','D':'1D','W':'1W'};
+    $('tf-label').textContent=tfMap[r.resolution]||r.resolution;
+    document.querySelectorAll('.tf-btn').forEach(b=>b.classList.toggle('active',b.textContent===(tfMap[r.resolution]||r.resolution)));
+  } catch {}
+}
+
+async function loadQuote() {
+  try {
+    const r=await fetch(B+'/api/quote').then(r=>r.json());
+    if(!r.success) return;
+    const price=r.last||r.close;
+    $('price').textContent=fmt(price);
+    $('sym-label').textContent=(r.symbol||'').replace('BINANCE:','');
+    $('exch-label').textContent=r.exchange||'';
+    $('o').textContent=fmt(r.open);
+    $('h').textContent=fmt(r.high);
+    $('l').textContent=fmt(r.low);
+    $('c').textContent=fmt(r.close);
+    $('v').textContent=fmtVol(r.volume);
+    const chg=r.close&&r.open?((r.close-r.open)/r.open*100):null;
+    if(chg!==null){const el=$('chg');el.textContent=(chg>=0?'+':'')+chg.toFixed(2)+'%';el.className=chg>=0?'up':'down';}
+  } catch(e){log('Erro preço: '+e.message);}
+}
+
+async function loadIndicators() {
+  try {
+    const r=await fetch(B+'/api/indicators').then(r=>r.json());
+    const t=$('ind-table');
+    if(!r.success||!r.studies?.length){t.innerHTML='<tr><td class="muted" colspan="2">Nenhum indicador</td></tr>';return;}
+    let html=''; let hasLong=false,hasShort=false;
+    for(const s of r.studies){
+      html+=`<tr><td colspan="2" style="color:var(--blue);font-size:10px;padding-top:6px">${s.name}</td></tr>`;
+      for(const [k,v] of Object.entries(s.values||{})){
+        const n=parseNum(v);
+        let c='var(--text)';
+        if(k==='LONG'&&n>0){c='var(--green)';hasLong=true;}
+        if(k==='SHORT'&&n>0){c='var(--red)';hasShort=true;}
+        html+=`<tr><td class="muted">${k}</td><td style="text-align:right;color:${c}">${v}</td></tr>`;
+      }
+    }
+    t.innerHTML=html;
+    const b=$('signal-badge');
+    if(hasLong){b.className='badge long';b.textContent='▲ LONG';}
+    else if(hasShort){b.className='badge short';b.textContent='▼ SHORT';}
+    else{b.className='badge neutral';b.textContent='SEM SINAL';}
+  } catch(e){log('Erro indicadores: '+e.message);}
+}
+
+async function refreshAll() {
+  $('last-update').textContent=new Date().toLocaleTimeString('pt-BR');
+  await Promise.all([checkHealth(),loadQuote(),loadState(),loadIndicators()]);
+}
+
+// ─── SYMBOL / TF ────────────────────────────────────────────────
+let searchTimer=null;
+async function searchSymbol(q) {
+  clearTimeout(searchTimer);
+  const ac=$('autocomplete');
+  if(!q||q.length<2){ac.style.display='none';return;}
+  searchTimer=setTimeout(async()=>{
+    try{
+      const r=await fetch(B+'/api/symbol-search?q='+encodeURIComponent(q)).then(r=>r.json());
+      const results=r.results||r.symbols||[];
+      if(!results.length){ac.style.display='none';return;}
+      ac.innerHTML=results.slice(0,8).map(s=>{
+        const sym=s.symbol||s;
+        return `<div onclick="selectSymbol('${sym}')">${sym} <span style="color:var(--muted);font-size:10px">${s.description||s.exchange||''}</span></div>`;
+      }).join('');
+      ac.style.display='block';
+    }catch{ac.style.display='none';}
+  },300);
+}
+function selectSymbol(s){$('sym-input').value=s;$('autocomplete').style.display='none';}
+document.addEventListener('click',e=>{if(!e.target.closest('.symbar'))$('autocomplete').style.display='none';});
+
+async function changeSymbol() {
+  const s=$('sym-input').value.trim();
+  if(!s) return;
+  log(`Trocando para ${s}...`);
+  try{
+    const r=await fetch(B+'/api/symbol',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})}).then(r=>r.json());
+    log(r.success?`✅ ${s}`:`❌ ${r.error}`);
+    if(r.success) setTimeout(refreshAll,1500);
+  }catch(e){log('Erro: '+e.message);}
+}
+
+async function changeTF(tf) {
+  try{
+    const r=await fetch(B+'/api/timeframe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({timeframe:tf})}).then(r=>r.json());
+    log(r.success?`✅ TF: ${tf}`:`❌ ${r.error}`);
+    if(r.success) setTimeout(refreshAll,1500);
+  }catch(e){log('Erro: '+e.message);}
+}
+
+// ─── SCREENSHOT ─────────────────────────────────────────────────
+async function takeScreenshot() {
+  log('Capturando...');
+  try{
+    const r=await fetch(B+'/api/screenshot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({region:'chart'})}).then(r=>r.json());
+    if(r.success&&r.file_path){
+      log('✅ Salvo: '+r.file_path.split('\\').pop());
+      $('ss-path').textContent=r.file_path.split('\\').pop();
+      $('ss-img').src='/api/screenshot-image?t='+Date.now();
+      $('ss-img').style.display='block';
+    }else{log('❌ '+(r.error||'Falha'));}
+  }catch(e){log('Erro: '+e.message);}
+}
+
+// ─── MORNING BRIEF ──────────────────────────────────────────────
+function chkRow(ok,label,detail) {
+  return `<div class="chk-item"><span>${ok?'✅':'❌'} ${label}</span><span style="color:${ok?'var(--green)':'var(--red)'};font-weight:600">${detail}</span></div>`;
+}
+async function runBrief() {
+  $('brief-txt').textContent='⏳ Analisando...';
+  $('brief-rec').style.display='none'; $('brief-chk').innerHTML=''; $('brief-score').textContent='';
+  try{
+    const r=await fetch(B+'/api/brief').then(r=>r.json());
+    if(!r.success){$('brief-txt').textContent='❌ '+r.error;return;}
+    const sym=r.symbols_scanned?.[0]; if(!sym) return;
+    const q=sym.quote||{},inds=sym.indicators?.studies?.[0]?.values||{};
+    const price=parseNum(q.last||q.close),vwap=parseNum(inds['VWAP']),ema9=parseNum(inds['EMA 9']),ema20=parseNum(inds['EMA 20']),ema200=parseNum(inds['EMA 200']);
+    const hasLong=parseNum(inds['LONG'])>0,hasShort=parseNum(inds['SHORT'])>0;
+    const c1=price>vwap,c2=ema9>ema20,c3=price>ema200,c4=price>ema9,c5=!hasShort;
+    const bullCount=[c1,c2,c3,c4,c5].filter(Boolean).length;
+    const bearCount=[price<vwap,ema9<ema20,price<ema200].filter(Boolean).length;
+    $('brief-chk').innerHTML=
+      chkRow(c1,'Preço acima do VWAP',`$${fmt(price)} vs $${fmt(vwap)}`)+
+      chkRow(c2,'EMA 9 > EMA 20',`${fmt(ema9)} vs ${fmt(ema20)}`)+
+      chkRow(c3,'Preço acima da EMA 200',`$${fmt(price)} vs $${fmt(ema200)}`)+
+      chkRow(c4,'Preço acima da EMA 9',`$${fmt(price)} vs $${fmt(ema9)}`)+
+      chkRow(hasLong,'Sinal LONG ativo',hasLong?'SIM':'NÃO')+
+      chkRow(!hasShort,'Sem sinal SHORT',hasShort?'ATIVO (risco)':'LIMPO');
+    const rec=$('brief-rec');
+    let txt,bg,clr;
+    if(hasLong){txt='🟢 COMPRA — Sinal LONG ativo, todas as condições confirmadas';bg='#1a3a20';clr='var(--green)';}
+    else if(hasShort){txt='🔴 VENDA — Sinal SHORT ativo, não comprar';bg='#3a1a1a';clr='var(--red)';}
+    else if(bullCount>=4){txt=`🟡 QUASE — ${bullCount}/5 condições bullish. Aguarde cruzamento das EMAs`;bg='#3a2e00';clr='var(--yellow)';}
+    else if(bullCount>=3){txt=`⚪ NEUTRO — ${bullCount}/5 bullish. Mercado indefinido`;bg='var(--surface2)';clr='var(--muted)';}
+    else if(bearCount>=3){txt=`🔴 BAIXA — ${bearCount}/3 condições bearish. Não comprar`;bg='#3a1a1a';clr='var(--red)';}
+    else{txt='⚪ AGUARDAR — Condições insuficientes para entrada segura';bg='var(--surface2)';clr='var(--muted)';}
+    rec.style.cssText=`display:block;margin-bottom:10px;padding:10px;border-radius:6px;font-weight:700;font-size:14px;text-align:center;background:${bg};color:${clr};border:1px solid ${clr}`;
+    rec.textContent=txt;
+    $('brief-score').textContent=`Bullish: ${bullCount}/5 | Bearish: ${bearCount}/3 | ${sym.symbol} @ $${fmt(price)}`;
+    const d=vwap?((price-vwap)/vwap*100).toFixed(2):'?';
+    $('brief-txt').textContent=`Distância VWAP: ${d}%\nEMA 9 vs 20: ${ema9>ema20?'Bullish':'Bearish'} (${fmt(Math.abs(ema9-ema20))})\nTendência macro: ${price>ema200?'✅ ALTA':'❌ BAIXA'}\nSinal ativo: ${hasLong?'🟢 LONG':hasShort?'🔴 SHORT':'— nenhum'}`;
+    $('brief-time').textContent='Atualizado às '+new Date().toLocaleTimeString('pt-BR');
+  }catch(e){$('brief-txt').textContent='❌ '+e.message;}
+}
+
+// ─── SCANNER ────────────────────────────────────────────────────
+async function runScanner() {
+  const symbols=$('scan-symbols').value.split(',').map(s=>s.trim()).filter(Boolean);
+  $('scan-status').textContent='Escaneando...';
+  $('scan-tbody').innerHTML=`<tr><td colspan="7" class="muted">⏳ Escaneando ${symbols.length} símbolos...</td></tr>`;
+  try{
+    const r=await fetch(B+'/api/scanner',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbols})}).then(r=>r.json());
+    const rows=r.results||r.symbols_scanned||[];
+    if(!rows.length){$('scan-tbody').innerHTML='<tr><td colspan="7" class="muted">Sem resultados</td></tr>';return;}
+    $('scan-tbody').innerHTML=rows.map(row=>{
+      if(row.error) return `<tr><td>${row.symbol}</td><td colspan="6" class="muted">Erro: ${row.error}</td></tr>`;
+      const q=row.quote||{}; const inds=(row.indicators?.studies||row.studies||[])[0]?.values||{};
+      const price=parseNum(q.last||q.close),vwap=parseNum(inds['VWAP']),ema9=parseNum(inds['EMA 9']),ema20=parseNum(inds['EMA 20']),ema200=parseNum(inds['EMA 200']);
+      const hasLong=parseNum(inds['LONG'])>0,hasShort=parseNum(inds['SHORT'])>0;
+      const chg=q.open?((price-q.open)/q.open*100):0;
+      const trend=price>ema200?'<span style="color:var(--green)">ALTA</span>':'<span style="color:var(--red)">BAIXA</span>';
+      const vwapPos=price>vwap?'<span class="up">▲ Acima</span>':'<span class="down">▼ Abaixo</span>';
+      const emaPos=ema9>ema20?'<span class="up">Bullish</span>':'<span class="down">Bearish</span>';
+      const sig=hasLong?'<span class="badge long">LONG</span>':hasShort?'<span class="badge short">SHORT</span>':'<span class="badge neutral">—</span>';
+      return `<tr class="scan-row"><td><a href="#" onclick="selectAndSwitch('${row.symbol}')" style="color:var(--blue)">${(row.symbol||'').replace('BINANCE:','')}</a></td><td>$${fmt(price)}</td><td class="${chg>=0?'up':'down'}">${chg>=0?'+':''}${chg.toFixed(2)}%</td><td>${trend}</td><td>${vwapPos}</td><td>${emaPos}</td><td>${sig}</td></tr>`;
+    }).join('');
+    $('scan-status').textContent=`${rows.length} símbolos escaneados às ${new Date().toLocaleTimeString('pt-BR')}`;
+  }catch(e){$('scan-status').textContent='Erro: '+e.message;}
+}
+async function selectAndSwitch(sym) {
+  await fetch(B+'/api/symbol',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym.replace('BINANCE:','')})});
+  switchTab('dashboard'); setTimeout(refreshAll,1500);
+}
+
+// ─── ALERTS ─────────────────────────────────────────────────────
+async function loadAlerts() {
+  try{
+    const r=await fetch(B+'/api/alerts').then(r=>r.json());
+    const list=$('alert-list');
+    const items=r.alerts||r.data||[];
+    if(!items.length){list.innerHTML='<span class="muted">Nenhum alerta ativo</span>';return;}
+    list.innerHTML=items.map(a=>`<div class="alert-item"><div><b>${a.condition||a.type||''}</b> — $${a.price||a.value||''}<br><span class="muted" style="font-size:10px">${a.message||a.name||''}</span></div></div>`).join('');
+  }catch(e){$('alert-list').innerHTML='<span style="color:var(--red)">Erro: '+e.message+'</span>';}
+}
+async function createAlert() {
+  const condition=$('alert-cond').value,price=$('alert-price').value,message=$('alert-msg').value;
+  if(!price){log('Preço obrigatório','alert-log');return;}
+  try{
+    const r=await fetch(B+'/api/alerts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({condition,price:parseFloat(price),message})}).then(r=>r.json());
+    log(r.success?'✅ Alerta criado':'❌ '+(r.error||'Falha'),'alert-log');
+    if(r.success) loadAlerts();
+  }catch(e){log('Erro: '+e.message,'alert-log');}
+}
+async function deleteAllAlerts() {
+  try{
+    const r=await fetch(B+'/api/alerts',{method:'DELETE'}).then(r=>r.json());
+    log(r.success?'✅ Alertas deletados':'❌ '+(r.error||'Falha'),'alert-log');
+    if(r.success) loadAlerts();
+  }catch(e){log('Erro: '+e.message,'alert-log');}
+}
+
+// ─── STRATEGY ───────────────────────────────────────────────────
+async function loadStrategy() {
+  try{
+    const [sr,tr]=await Promise.all([
+      fetch(B+'/api/strategy').then(r=>r.json()),
+      fetch(B+'/api/strategy/trades').then(r=>r.json())
+    ]);
+    if(sr.success&&sr.summary){
+      const s=sr.summary;
+      $('st-profit').textContent=fmt(s.net_profit||s.netProfit||0);
+      $('st-profit').className=(s.net_profit||0)>=0?'up':'down';
+      $('st-winrate').textContent=fmt(s.win_rate||s.winRate||0,1)+'%';
+      $('st-trades').textContent=s.total_trades||s.totalTrades||'--';
+      $('st-drawdown').textContent=fmt(s.max_drawdown||s.maxDrawdown||0,1)+'%';
+      $('st-drawdown').className='down';
+    }
+    if(tr.success&&tr.trades?.length){
+      $('trades-tbody').innerHTML=tr.trades.map((t,i)=>`<tr><td>${i+1}</td><td style="color:${t.direction==='long'?'var(--green)':'var(--red)'}">${(t.direction||t.type||'').toUpperCase()}</td><td>$${fmt(t.entry_price||t.entryPrice)}</td><td>$${fmt(t.exit_price||t.exitPrice)}</td><td class="${(t.profit||0)>=0?'up':'down'}">$${fmt(t.profit)}</td><td class="${(t.profit_pct||0)>=0?'up':'down'}">${fmt(t.profit_pct||t.profitPct,2)}%</td></tr>`).join('');
+    }
+  }catch(e){$('st-profit').textContent='Erro: '+e.message;}
+}
+
+// ─── REPLAY ─────────────────────────────────────────────────────
+function showReplayStatus(r) {
+  const box=$('replay-status-box');
+  if(!r.success){box.style.display='none';return;}
+  box.style.display='block';
+  box.innerHTML=`Data: <b>${r.date||'--'}</b> | Posição: <b style="color:${r.position==='long'?'var(--green)':'var(--red)'}">${r.position||'flat'}</b> | PnL: <b class="${(r.pnl||0)>=0?'up':'down'}">$${fmt(r.pnl||0)}</b>`;
+}
+async function replayStart(){
+  const date=$('replay-date').value;
+  try{const r=await fetch(B+'/api/replay/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({date})}).then(r=>r.json());log(r.success?'✅ Replay iniciado':'❌ '+(r.error||'Falha'),'replay-log');showReplayStatus(r);}catch(e){log('Erro: '+e.message,'replay-log');}
+}
+async function replayStep(){
+  try{const r=await fetch(B+'/api/replay/step',{method:'POST'}).then(r=>r.json());log(r.success?'✅ +1 barra':'❌ '+(r.error||'Falha'),'replay-log');}catch(e){log('Erro: '+e.message,'replay-log');}
+}
+async function replayAutoplay(){
+  const speed=parseInt($('replay-speed').value)||500;
+  try{const r=await fetch(B+'/api/replay/autoplay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({speed})}).then(r=>r.json());log(r.success?`✅ Autoplay ${speed}ms`:'❌ '+(r.error||'Falha'),'replay-log');}catch(e){log('Erro: '+e.message,'replay-log');}
+}
+async function replayStop(){
+  try{const r=await fetch(B+'/api/replay/stop',{method:'POST'}).then(r=>r.json());log(r.success?'✅ Replay parado':'❌ '+(r.error||'Falha'),'replay-log');}catch(e){log('Erro: '+e.message,'replay-log');}
+}
+async function replayStatus(){
+  try{const r=await fetch(B+'/api/replay/status').then(r=>r.json());showReplayStatus(r);log('Status atualizado','replay-log');}catch(e){log('Erro: '+e.message,'replay-log');}
+}
+async function replayTrade(action){
+  try{const r=await fetch(B+'/api/replay/trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})}).then(r=>r.json());log(r.success?`✅ Trade: ${action}`:'❌ '+(r.error||'Falha'),'replay-log');}catch(e){log('Erro: '+e.message,'replay-log');}
+}
+
+// ─── PINE EDITOR ────────────────────────────────────────────────
+async function pineLoadSource(){
+  try{const r=await fetch(B+'/api/pine/source').then(r=>r.json());if(r.source)$('pine-editor').value=r.source;}catch(e){alert('Erro: '+e.message);}
+}
+async function pineCompile(){
+  const source=$('pine-editor').value;
+  try{
+    await fetch(B+'/api/pine/source',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source})});
+    const r=await fetch(B+'/api/pine/compile',{method:'POST'}).then(r=>r.json());
+    const errs=r.errors||[];
+    $('pine-errors').innerHTML=errs.length?errs.map(e=>`<div class="${e.severity<=2?'pine-error-line':'pine-warn-line'}">Linha ${e.line}: ${e.message}</div>`).join(''):'<div style="color:var(--green)">✅ Compilado sem erros</div>';
+  }catch(e){$('pine-errors').innerHTML='<div class="pine-error-line">Erro: '+e.message+'</div>';}
+}
+async function pineSave(){
+  try{const r=await fetch(B+'/api/pine/save',{method:'POST'}).then(r=>r.json());alert(r.success?'✅ Script salvo!':'❌ '+(r.error||'Falha'));}catch(e){alert('Erro: '+e.message);}
+}
+async function pineOpenScript(){
+  const name=$('pine-open-name').value.trim(); if(!name) return;
+  try{
+    const r=await fetch(B+'/api/pine/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})}).then(r=>r.json());
+    if(r.success) await pineLoadSource();
+    alert(r.success?`✅ Aberto: ${name}`:'❌ '+(r.error||'Falha'));
+  }catch(e){alert('Erro: '+e.message);}
+}
+async function pineGetConsole(){
+  try{const r=await fetch(B+'/api/pine/console').then(r=>r.json());$('pine-console').textContent=r.output||r.log||'(sem output)';}catch(e){$('pine-console').textContent='Erro: '+e.message;}
+}
+async function loadPineList(){
+  try{
+    const r=await fetch(B+'/api/pine/list').then(r=>r.json());
+    const scripts=r.scripts||r.data||[];
+    $('pine-list').innerHTML=scripts.length?scripts.map(s=>`<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:12px;cursor:pointer" onclick="$('pine-open-name').value='${s.name||s}';pineOpenScript()">${s.name||s} <span class="muted">${s.type||''}</span></div>`).join(''):'<span class="muted">Nenhum script encontrado</span>';
+  }catch(e){$('pine-list').innerHTML='<span style="color:var(--red)">Erro: '+e.message+'</span>';}
+}
+
+// ─── SCREENSHOTS ────────────────────────────────────────────────
+async function loadScreenshots(){
+  try{
+    const r=await fetch(B+'/api/screenshots/list').then(r=>r.json());
+    const grid=$('screenshot-grid');
+    if(!r.files?.length){grid.innerHTML='<span class="muted">Nenhum screenshot</span>';return;}
+    grid.innerHTML=r.files.map(f=>`<div class="screenshot-item"><img src="${f.url}" loading="lazy" onclick="openModal('${f.url}')" /><p>${f.name}</p></div>`).join('');
+  }catch(e){$('screenshot-grid').innerHTML='<span style="color:var(--red)">Erro: '+e.message+'</span>';}
+}
+function openModal(url){$('modal-img').src=url;$('modal').classList.add('open');}
+
+// ─── JOURNAL ────────────────────────────────────────────────────
+async function loadJournal(){
+  try{
+    const r=await fetch(B+'/api/journal').then(r=>r.json());
+    const list=$('journal-list');
+    if(!r.entries?.length){list.innerHTML='<span class="muted">Nenhuma entrada no journal</span>';return;}
+    list.innerHTML=r.entries.map(e=>`<div class="journal-entry"><div class="je-header"><span><span class="je-type ${e.type}">${e.type.toUpperCase()}</span> ${e.symbol?'<b>'+e.symbol+'</b>':''} ${e.price?'@ $'+e.price:''}</span><span>${new Date(e.timestamp).toLocaleString('pt-BR')} <a href="#" onclick="deleteJournalEntry(${e.id})" style="color:var(--red);margin-left:8px">✕</a></span></div><div class="je-note">${e.note}</div></div>`).join('');
+  }catch(e){$('journal-list').innerHTML='<span style="color:var(--red)">Erro: '+e.message+'</span>';}
+}
+async function addJournalEntry(){
+  const note=$('j-note').value.trim(); if(!note) return;
+  try{
+    await fetch(B+'/api/journal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({note,type:$('j-type').value,symbol:$('j-symbol').value,price:$('j-price').value})});
+    $('j-note').value=''; loadJournal();
+  }catch(e){alert('Erro: '+e.message);}
+}
+async function deleteJournalEntry(id){
+  try{await fetch(B+'/api/journal/'+id,{method:'DELETE'});loadJournal();}catch{}
+}
+async function autoFillJournal(){
+  try{
+    const [q,s]=await Promise.all([fetch(B+'/api/quote').then(r=>r.json()),fetch(B+'/api/state').then(r=>r.json())]);
+    $('j-symbol').value=(q.symbol||'').replace('BINANCE:','');
+    $('j-price').value=q.last||q.close||'';
+    $('j-note').value.length===0&&($('j-note').value=`Análise: Preço $${fmt(q.last||q.close)}, TF ${s.resolution||''}`);
+  }catch{}
+}
+async function takeScreenshotForJournal(){
+  await takeScreenshot();
+  const sym=(currentSymbol||'').replace('BINANCE:','');
+  if($('j-symbol').value==='') $('j-symbol').value=sym;
+  if($('j-note').value==='') $('j-note').value='Screenshot capturado';
+}
+
+// ─── AUTO-REFRESH ────────────────────────────────────────────────
+function startAutoRefresh(){clearInterval(autoTimer);autoTimer=setInterval(refreshAll,30000);}
+$('sym-input').addEventListener('keydown',e=>{if(e.key==='Enter')changeSymbol();});
+
+// Init
+refreshAll();
+startAutoRefresh();
+</script>
+</body>
+</html>
