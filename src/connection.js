@@ -43,6 +43,11 @@ export async function getClient() {
 }
 
 export async function connect() {
+  // Prevent long hangs on serverless environments where localhost is unreachable
+  if (process.env.VERCEL || (process.env.NODE_ENV === 'production' && CDP_HOST === 'localhost')) {
+    throw new Error('Local TradingView connection is not available in the cloud environment (Vercel). Please run the system locally or use a tunnel.');
+  }
+
   let lastError;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {

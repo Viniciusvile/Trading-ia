@@ -23,6 +23,8 @@ const JOURNAL_FILE = join(__dirname, 'journal.json');
 
 const app = express();
 app.use(express.json());
+// No Vercel, o static pode ser resolvido pelo vercel.json, 
+// mas mantemos aqui para compatibilidade local.
 app.use(express.static(__dirname));
 
 // ── helpers ──────────────────────────────────────────────────────
@@ -317,7 +319,11 @@ app.delete('/api/journal/:id', (req, res) => {
 app.get('/*splat', (req, res) => res.sendFile(join(__dirname, 'index.html')));
 
 // ── START ─────────────────────────────────────────────────────────
-const PORT = 3333;
-createServer(app).listen(PORT, () => {
-  console.log(`\n✅ Dashboard: http://localhost:${PORT}\n`);
-});
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  const PORT = process.env.PORT || 3333;
+  createServer(app).listen(PORT, () => {
+    console.log(`\n✅ Dashboard: http://localhost:${PORT}\n`);
+  });
+}
+
+export default app;
