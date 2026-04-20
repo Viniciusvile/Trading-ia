@@ -92,27 +92,12 @@ textarea{resize:vertical;font-family:'Consolas','Courier New',monospace;font-siz
 .log{font-size:11px;color:var(--muted);font-family:monospace;padding:4px 0;}
 /* SCANNER */
 .scan-row td:first-child{font-weight:600;}
+/* STRATEGY AUTOCOMPLETE */
+#st-autocomplete div{padding:6px 10px;cursor:pointer;font-size:12px;}
+#st-autocomplete div:hover{background:var(--surface2);}
 /* ALERT ITEMS */
 .alert-item{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);}
 .alert-item:last-child{border-bottom:none;}
-/* REPLAY */
-.replay-controls{display:flex;gap:8px;flex-wrap:wrap;}
-.replay-status{padding:8px 12px;background:var(--surface2);border-radius:5px;font-size:12px;}
-/* PINE EDITOR */
-#pine-editor{height:350px;font-size:12px;line-height:1.5;}
-.pine-errors{margin-top:8px;font-size:11px;font-family:monospace;}
-.pine-error-line{color:var(--red);padding:2px 0;}
-.pine-warn-line{color:var(--yellow);padding:2px 0;}
-/* SCREENSHOTS */
-.screenshot-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;}
-.screenshot-item img{width:100%;border-radius:4px;cursor:pointer;border:2px solid transparent;}
-.screenshot-item img:hover{border-color:var(--blue);}
-.screenshot-item p{font-size:10px;color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-/* JOURNAL */
-.journal-entry{padding:8px;border:1px solid var(--border);border-radius:5px;background:var(--surface2);margin-bottom:6px;}
-.journal-entry .je-header{display:flex;justify-content:space-between;margin-bottom:4px;font-size:10px;color:var(--muted);}
-.journal-entry .je-note{font-size:12px;line-height:1.5;}
-.je-type{padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;}
 .je-type.note{background:#1a2a3a;color:var(--blue);}
 .je-type.trade{background:#1a3a20;color:var(--green);}
 .je-type.warning{background:#3a2e00;color:var(--yellow);}
@@ -121,11 +106,6 @@ textarea{resize:vertical;font-family:'Consolas','Courier New',monospace;font-siz
 .down{color:var(--red)!important;}
 /* MUTED */
 .muted{color:var(--muted);}
-/* MODAL */
-.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:999;align-items:center;justify-content:center;}
-.modal-overlay.open{display:flex;}
-.modal{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;max-width:90vw;max-height:90vh;overflow:auto;}
-.modal img{max-width:80vw;max-height:80vh;}
 </style>
 </head>
 <body>
@@ -161,10 +141,8 @@ textarea{resize:vertical;font-family:'Consolas','Courier New',monospace;font-siz
   <div class="tab" onclick="switchTab('scanner')">🔍 Scanner</div>
   <div class="tab" onclick="switchTab('alerts')">🔔 Alertas</div>
   <div class="tab" onclick="switchTab('strategy')">📊 Estratégia</div>
-  <div class="tab" onclick="switchTab('replay')">⏪ Replay</div>
-  <div class="tab" onclick="switchTab('pine')">🌲 Pine Editor</div>
-  <div class="tab" onclick="switchTab('screenshots')">📷 Screenshots</div>
-  <div class="tab" onclick="switchTab('journal')">📓 Journal</div>
+  <div class="tab" onclick="switchTab('bot')">🤖 Master Bot</div>
+  <div class="tab" onclick="switchTab('strategies')" style="color:#bc8cff;font-weight:700">🎯 Estratégias</div>
 </div>
 
 <!-- CONTENT -->
@@ -220,20 +198,59 @@ textarea{resize:vertical;font-family:'Consolas','Courier New',monospace;font-siz
 
 <!-- ═══════════════ SCANNER ═══════════════ -->
 <div class="tab-panel" id="tab-scanner">
+
+  <!-- Criptomoedas -->
   <div class="card">
-    <h2>Scanner Multi-Símbolo</h2>
-    <div class="row" style="margin-bottom:10px">
-      <input type="text" id="scan-symbols" value="BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT" style="flex:1">
-      <button class="primary" onclick="runScanner()">🔍 Escanear</button>
-      <span class="muted" id="scan-status" style="font-size:11px"></span>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span style="font-size:18px">₿</span>
+      <h2 style="margin-bottom:0">Criptomoedas</h2>
+      <div style="flex:1"></div>
+      <input type="text" id="scan-crypto-symbols"
+        value="BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,DOTUSDT"
+        style="width:380px;font-size:11px">
+      <button class="primary" onclick="runScannerSection('crypto')">🔍 Escanear</button>
+      <span class="muted" id="scan-crypto-status" style="font-size:11px;white-space:nowrap"></span>
     </div>
-    <div id="scan-results">
-      <table>
-        <thead><tr><th>Símbolo</th><th>Preço</th><th>Variação</th><th>Tendência</th><th>VWAP</th><th>EMA 9/20</th><th>Sinal</th></tr></thead>
-        <tbody id="scan-tbody"><tr><td colspan="7" class="muted">Execute o scanner para ver resultados</td></tr></tbody>
-      </table>
+    <table>
+      <thead><tr><th>Símbolo</th><th>Preço</th><th>Variação</th><th>Amplitude</th><th>Volume</th><th>Candle</th><th>Sinal</th></tr></thead>
+      <tbody id="scan-crypto-tbody">
+        <tr><td colspan="7" class="muted" style="text-align:center;padding:14px">Clique em Escanear</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Ações BR e Mundo -->
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span style="font-size:18px">📈</span>
+      <h2 style="margin-bottom:0">Ações (BR e Mundo)</h2>
+      <div style="flex:1"></div>
+      <input type="text" id="scan-stock-symbols"
+        value="TSM,AMD,NVDA,REMX,URA,QUBT,QBTS,TTWO,BBAS3,PETR4,PRIO3"
+        style="width:380px;font-size:11px">
+      <button class="primary" onclick="runScannerSection('stocks')">🔍 Escanear</button>
+      <span class="muted" id="scan-stocks-status" style="font-size:11px;white-space:nowrap"></span>
+    </div>
+    <table>
+      <thead><tr><th>Símbolo</th><th>Preço</th><th>Variação</th><th>Amplitude</th><th>Volume</th><th>Candle</th><th>Sinal</th></tr></thead>
+      <tbody id="scan-stocks-tbody">
+        <tr><td colspan="7" class="muted" style="text-align:center;padding:14px">Clique em Escanear</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Legenda -->
+  <div class="card" style="padding:8px 14px">
+    <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:11px;color:var(--muted);align-items:center">
+      <span style="font-weight:700">Sinais:</span>
+      <span><span style="color:var(--green)">▲ COMPRA</span> — bullish + var &gt; +1%</span>
+      <span><span style="color:#58a6ff">◑ ATENÇÃO</span> — bullish ou var levemente +</span>
+      <span><span style="color:var(--muted)">— NEUTRO</span> — var &lt; 0.3%</span>
+      <span><span style="color:var(--yellow)">◐ CAUTELA</span> — bearish ou var levemente −</span>
+      <span><span style="color:var(--red)">▼ VENDA</span> — bearish + var &lt; −1%</span>
     </div>
   </div>
+
 </div>
 
 <!-- ═══════════════ ALERTAS ═══════════════ -->
@@ -265,123 +282,234 @@ textarea{resize:vertical;font-family:'Consolas','Courier New',monospace;font-siz
 
 <!-- ═══════════════ ESTRATÉGIA ═══════════════ -->
 <div class="tab-panel" id="tab-strategy">
-  <div class="row" style="margin-bottom:8px">
-    <button class="primary" onclick="loadStrategy()">🔄 Carregar Resultados</button>
-    <span class="muted" style="font-size:11px">Requer estratégia ativa no gráfico</span>
+
+  <!-- Header row: seletor de ativo -->
+  <div class="card" style="padding:12px 16px">
+    <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap">
+
+      <div>
+        <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em">Ativo</label>
+        <div style="position:relative">
+          <input type="text" id="st-symbol-input" placeholder="Ex: BTCUSDT, AAPL, PETR4..."
+            style="width:190px;text-transform:uppercase"
+            oninput="stSymbolSearch(this.value)"
+            onkeydown="if(event.key==='Enter')loadStrategy()">
+          <div id="st-autocomplete" style="display:none;position:absolute;top:calc(100% + 4px);left:0;background:var(--surface);border:1px solid var(--border);border-radius:5px;z-index:200;min-width:220px;max-height:200px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.5)"></div>
+        </div>
+      </div>
+
+      <div>
+        <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em">Timeframe</label>
+        <select id="st-timeframe" style="width:120px">
+          <option value="1">1 min</option>
+          <option value="5">5 min</option>
+          <option value="15">15 min</option>
+          <option value="60">1 hora</option>
+          <option value="240" selected>4 horas</option>
+          <option value="D">1 dia</option>
+          <option value="W">1 semana</option>
+        </select>
+      </div>
+
+      <div>
+        <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em">Estratégia</label>
+        <select id="st-strategy-select" style="width:200px">
+          <option value="both">Ambas (Warrior + Stormer)</option>
+          <option value="warrior">Ross Cameron — Warrior</option>
+          <option value="stormer">123 Stormer</option>
+        </select>
+      </div>
+
+      <button class="primary" onclick="loadStrategy()" style="height:34px">🔄 Analisar</button>
+      <button onclick="loadStrategyBacktest()" style="height:34px">📊 Backtest</button>
+
+      <div style="flex:1"></div>
+      <span id="st-symbol-badge" style="font-size:12px;font-weight:700;color:var(--muted)"></span>
+      <span class="muted" style="font-size:11px" id="st-updated"></span>
+    </div>
   </div>
+
+  <!-- Sinal principal -->
+  <div id="st-signal-bar" style="display:none;padding:16px;border-radius:6px;text-align:center;font-size:16px;font-weight:700;border:1px solid"></div>
+
+  <!-- Stats backtest -->
   <div class="grid g4" id="strategy-stats">
     <div class="card"><h2>Net Profit</h2><div style="font-size:22px;font-weight:700" id="st-profit">--</div></div>
     <div class="card"><h2>Win Rate</h2><div style="font-size:22px;font-weight:700" id="st-winrate">--</div></div>
     <div class="card"><h2>Total Trades</h2><div style="font-size:22px;font-weight:700" id="st-trades">--</div></div>
-    <div class="card"><h2>Drawdown Máx</h2><div style="font-size:22px;font-weight:700" id="st-drawdown">--</div></div>
+    <div class="card"><h2>Drawdown Máx</h2><div style="font-size:22px;font-weight:700 " id="st-drawdown">--</div></div>
   </div>
+
+  <!-- Análise ao vivo das duas estratégias -->
+  <div class="grid g2" id="st-live-analysis">
+    <div class="card" id="st-warrior-card">
+      <h2>Ross Cameron — Warrior Trading</h2>
+      <div id="st-warrior-body" style="color:var(--muted);font-size:12px">Clique em Analisar Gráfico.</div>
+    </div>
+    <div class="card" id="st-stormer-card">
+      <h2>123 Stormer — Alexandre Wolwacz</h2>
+      <div id="st-stormer-body" style="color:var(--muted);font-size:12px">Clique em Analisar Gráfico.</div>
+    </div>
+  </div>
+
+  <!-- Mercado atual -->
   <div class="card">
-    <h2>Histórico de Trades</h2>
+    <h2>Contexto do Mercado</h2>
+    <div id="st-market-ctx" style="color:var(--muted);font-size:12px">—</div>
+  </div>
+
+  <!-- Histórico backtest -->
+  <div class="card">
+    <h2>Histórico de Trades (Backtest TradingView)</h2>
     <table>
       <thead><tr><th>#</th><th>Direção</th><th>Entrada</th><th>Saída</th><th>PnL</th><th>PnL %</th></tr></thead>
-      <tbody id="trades-tbody"><tr><td colspan="6" class="muted">Carregue os resultados</td></tr></tbody>
+      <tbody id="trades-tbody"><tr><td colspan="6" class="muted" style="text-align:center;padding:14px">Clique em "Backtest TradingView"</td></tr></tbody>
     </table>
   </div>
+
 </div>
 
-<!-- ═══════════════ REPLAY ═══════════════ -->
-<div class="tab-panel" id="tab-replay">
-  <div class="card">
-    <h2>Controle de Replay</h2>
-    <div class="row" style="margin-bottom:12px">
-      <input type="date" id="replay-date" style="width:160px" value="2025-01-01">
-      <button class="success" onclick="replayStart()">▶ Iniciar</button>
-      <button onclick="replayStep()">⏭ +1 Barra</button>
-      <button onclick="replayAutoplay()">⚡ Auto</button>
-      <button class="danger" onclick="replayStop()">⏹ Parar</button>
-      <button onclick="replayStatus()">📊 Status</button>
-    </div>
-    <div class="row" style="margin-bottom:12px">
-      <label class="muted" style="font-size:11px">Velocidade auto (ms):</label>
-      <input type="text" id="replay-speed" value="500" style="width:70px">
-    </div>
-    <div id="replay-status-box" class="replay-status" style="display:none"></div>
-  </div>
-  <div class="card">
-    <h2>Trades no Replay</h2>
-    <div class="row">
-      <button class="success" onclick="replayTrade('buy')">🟢 Comprar</button>
-      <button class="danger" onclick="replayTrade('sell')">🔴 Vender</button>
-      <button class="warn" onclick="replayTrade('close')">⬛ Fechar</button>
-    </div>
-    <div class="log" id="replay-log" style="margin-top:8px"></div>
-  </div>
-</div>
+<!-- ═══════════════ MASTER BOT ═══════════════ -->
+<div class="tab-panel" id="tab-bot">
 
-<!-- ═══════════════ PINE EDITOR ═══════════════ -->
-<div class="tab-panel" id="tab-pine">
-  <div class="card" style="flex:1">
-    <div class="row" style="margin-bottom:8px">
-      <h2 style="margin-bottom:0">Pine Script Editor</h2>
-      <div class="spacer"></div>
-      <input type="text" id="pine-open-name" placeholder="Nome do script..." style="width:180px">
-      <button onclick="pineOpenScript()">📂 Abrir</button>
-      <button onclick="pineLoadSource()">⬇ Carregar</button>
-      <button class="primary" onclick="pineCompile()">▶ Compilar</button>
-      <button onclick="pineSave()">💾 Salvar</button>
-    </div>
-    <div class="row" style="margin-bottom:8px">
-      <button onclick="loadPineList()" style="font-size:11px">📋 Listar Scripts</button>
-      <button onclick="pineGetConsole()" style="font-size:11px">📟 Console</button>
-    </div>
-    <textarea id="pine-editor" placeholder="//@version=6&#10;indicator('Meu Indicador', overlay=true)&#10;plot(close)"></textarea>
-    <div class="pine-errors" id="pine-errors"></div>
-    <div id="pine-console" style="font-size:11px;font-family:monospace;color:var(--muted);margin-top:6px;max-height:80px;overflow-y:auto"></div>
-  </div>
-  <div class="card">
-    <h2>Scripts Salvos</h2>
-    <div id="pine-list"><span class="muted">Clique em "Listar Scripts"</span></div>
-  </div>
-</div>
-
-<!-- ═══════════════ SCREENSHOTS ═══════════════ -->
-<div class="tab-panel" id="tab-screenshots">
-  <div class="row" style="margin-bottom:8px">
-    <button class="primary" onclick="takeScreenshot();setTimeout(loadScreenshots,2000)">📷 Capturar + Atualizar</button>
-    <button onclick="loadScreenshots()">🔄 Atualizar Galeria</button>
-  </div>
-  <div class="screenshot-grid" id="screenshot-grid"><span class="muted">Carregando...</span></div>
-</div>
-
-<!-- ═══════════════ JOURNAL ═══════════════ -->
-<div class="tab-panel" id="tab-journal">
-  <div class="card">
-    <h2>Nova Entrada</h2>
-    <div class="grid g3" style="margin-bottom:8px">
-      <div>
-        <label class="muted" style="font-size:11px;display:block;margin-bottom:3px">Tipo</label>
-        <select id="j-type"><option value="note">Nota</option><option value="trade">Trade</option><option value="warning">Aviso</option></select>
-      </div>
-      <div>
-        <label class="muted" style="font-size:11px;display:block;margin-bottom:3px">Símbolo</label>
-        <input type="text" id="j-symbol" placeholder="Ex: BTCUSDT">
-      </div>
-      <div>
-        <label class="muted" style="font-size:11px;display:block;margin-bottom:3px">Preço</label>
-        <input type="text" id="j-price" placeholder="Preço atual">
+  <!-- Linha 1: Config + Par de trading -->
+  <div class="grid g2">
+    <div class="card">
+      <h2>Configuração Atual</h2>
+      <div id="bot-config-standard"><span class="muted">Carregando...</span></div>
+      <div style="margin-top:10px;display:flex;gap:6px;align-items:center">
+        <span id="bot-mode-badge-standard" class="badge neutral">--</span>
+        <button class="sm" onclick="loadBotConfig()" style="font-size:11px">↻</button>
       </div>
     </div>
-    <textarea id="j-note" rows="3" placeholder="Escreva sua observação, análise ou resultado do trade..."></textarea>
-    <div class="row" style="margin-top:8px">
-      <button class="primary" onclick="addJournalEntry()">+ Adicionar</button>
-      <button onclick="takeScreenshotForJournal()">📷 + Screenshot</button>
-      <button onclick="autoFillJournal()">⚡ Auto-Preencher</button>
+
+    <div class="card">
+      <h2>Par de Trading</h2>
+
+      <!-- Preset selector -->
+      <div style="margin-bottom:8px">
+        <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">Criptomoeda</label>
+        <select id="bot-symbol-preset" onchange="onPresetChange(this.value)">
+          <optgroup label="Bitcoin">
+            <option value="BTCUSDT">BTC/USDT — Bitcoin</option>
+          </optgroup>
+          <optgroup label="Top Altcoins">
+            <option value="ETHUSDT">ETH/USDT — Ethereum</option>
+            <option value="SOLUSDT">SOL/USDT — Solana</option>
+            <option value="BNBUSDT">BNB/USDT — BNB</option>
+            <option value="XRPUSDT">XRP/USDT — XRP</option>
+            <option value="ADAUSDT">ADA/USDT — Cardano</option>
+            <option value="AVAXUSDT">AVAX/USDT — Avalanche</option>
+            <option value="DOTUSDT">DOT/USDT — Polkadot</option>
+            <option value="LINKUSDT">LINK/USDT — Chainlink</option>
+            <option value="MATICUSDT">MATIC/USDT — Polygon</option>
+            <option value="NEARUSDT">NEAR/USDT — Near Protocol</option>
+            <option value="ARBUSDT">ARB/USDT — Arbitrum</option>
+            <option value="OPUSDT">OP/USDT — Optimism</option>
+            <option value="SUIUSDT">SUI/USDT — Sui</option>
+            <option value="APTUSDT">APT/USDT — Aptos</option>
+            <option value="ATOMUSDT">ATOM/USDT — Cosmos</option>
+          </optgroup>
+          <optgroup label="Meme Coins">
+            <option value="DOGEUSDT">DOGE/USDT — Dogecoin</option>
+            <option value="SHIBUSDT">SHIB/USDT — Shiba Inu</option>
+            <option value="PEPEUSDT">PEPE/USDT — Pepe</option>
+            <option value="WIFUSDT">WIF/USDT — Dogwifhat</option>
+          </optgroup>
+          <optgroup label="DeFi / L2">
+            <option value="UNIUSDT">UNI/USDT — Uniswap</option>
+            <option value="AAVEUSDT">AAVE/USDT — Aave</option>
+            <option value="LTCUSDT">LTC/USDT — Litecoin</option>
+            <option value="TRXUSDT">TRX/USDT — TRON</option>
+          </optgroup>
+          <option value="__custom">✎ Customizado...</option>
+        </select>
+        <input type="text" id="bot-symbol-custom" placeholder="Ex: FETUSDT" style="display:none;margin-top:6px;text-transform:uppercase">
+      </div>
+
+      <!-- Timeframe -->
+      <div style="margin-bottom:10px">
+        <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">Timeframe</label>
+        <select id="bot-timeframe">
+          <option value="1m">1 minuto</option>
+          <option value="5m">5 minutos</option>
+          <option value="15m">15 minutos</option>
+          <option value="30m">30 minutos</option>
+          <option value="1H">1 hora</option>
+          <option value="4H" selected>4 horas (recomendado)</option>
+          <option value="1D">1 dia</option>
+          <option value="1W">1 semana</option>
+        </select>
+      </div>
+
+      <div style="display:flex;gap:6px">
+        <button class="success" onclick="saveBotSymbol()" style="flex:1">💾 Salvar</button>
+        <button class="primary" onclick="runBot()" id="bot-run-btn" style="flex:1">▶ Rodar Bot</button>
+      </div>
+      <div id="bot-save-log" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
     </div>
   </div>
-  <div id="journal-list"></div>
+
+  <!-- Linha 2: Safety check + Decisão -->
+  <div class="grid g2">
+    <div class="card">
+      <h2>Safety Check (última run)</h2>
+      <div id="bot-safety-standard"><span class="muted">Rode o bot para ver.</span></div>
+    </div>
+    <div class="card">
+      <h2>Decisão</h2>
+      <div id="bot-decision-panel"><span class="muted">Aguardando execução...</span></div>
+    </div>
+  </div>
+
+  <!-- Linha 3: Histórico -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h2 style="margin-bottom:0">Histórico de Decisões</h2>
+      <button class="sm" onclick="loadBotLog()">↻ Atualizar</button>
+    </div>
+    <div style="max-height:280px;overflow-y:auto">
+      <table>
+        <thead>
+          <tr><th>Horário</th><th>Símbolo</th><th>TF</th><th>Preço</th><th>Lado</th><th>Status</th><th>Conds</th></tr>
+        </thead>
+        <tbody id="bot-log-tbody-standard"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Linha 4: stdout colapsável -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <h2 style="margin-bottom:0">Saída do Bot (stdout)</h2>
+      <button class="sm" onclick="toggleBotOut()">Mostrar/Ocultar</button>
+    </div>
+    <pre id="bot-stdout-wrap" style="display:none;background:var(--surface2);padding:10px;border-radius:5px;border:1px solid var(--border);font-size:11px;color:var(--muted);line-height:1.5;max-height:300px;overflow:auto;white-space:pre-wrap"><code id="bot-stdout">—</code></pre>
+  </div>
+
+</div>
+
+<!-- ═══════════════ ESTRATÉGIAS ═══════════════ -->
+<div class="tab-panel" id="tab-strategies">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:3px">Estratégia Ativa no Gráfico</div>
+      <div id="active-strategy-label" style="font-size:13px;font-weight:700;color:var(--muted)">Verificando...</div>
+    </div>
+    <button onclick="loadStrategies()">↻ Verificar Gráfico</button>
+  </div>
+
+  <div id="strategies-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="muted">Carregando...</div>
+  </div>
+
+  <div class="card" style="margin-top:4px">
+    <div id="apply-log" style="font-size:11px;color:var(--muted);min-height:20px"></div>
+  </div>
 </div>
 
 </div><!-- /content -->
 
-<!-- MODAL SCREENSHOT -->
-<div class="modal-overlay" id="modal" onclick="this.classList.remove('open')">
-  <div class="modal"><img id="modal-img" src="" /></div>
-</div>
 
 <script>
 const B = '';
@@ -414,18 +542,142 @@ function log(msg, elId='log') {
 
 // ─── TABS ───────────────────────────────────────────────────────
 function switchTab(name) {
-  document.querySelectorAll('.tab').forEach((t,i)=>{
-    const panels=['dashboard','scanner','alerts','strategy','replay','pine','screenshots','journal'];
-    t.classList.toggle('active', panels[i]===name);
+  document.querySelectorAll('.tab').forEach(t => {
+    const panels = ['dashboard','scanner','alerts','strategy','bot'];
+    const idx = [...t.parentElement.querySelectorAll('.tab')].indexOf(t);
+    t.classList.toggle('active', panels[idx] === name);
   });
-  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
-  const panel=$('tab-'+name);
-  if(panel) panel.classList.add('active');
-  // Lazy load
-  if(name==='alerts') loadAlerts();
-  if(name==='screenshots') loadScreenshots();
-  if(name==='journal') loadJournal();
-  if(name==='pine') loadPineList();
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  const panel = $('tab-' + name);
+  if (panel) panel.classList.add('active');
+  if (name === 'alerts') loadAlerts();
+
+  if (name === 'bot') { loadBotConfig(); loadBotLog(); }
+  if (name === 'strategies') loadStrategies();
+}
+
+// ─── BOT LOGIC ──────────────────────────────────────────────────
+function onPresetChange(val){
+  const custom=$('bot-symbol-custom');
+  custom.style.display = val==='__custom' ? 'block' : 'none';
+}
+
+async function saveBotSymbol(){
+  const preset=$('bot-symbol-preset').value;
+  const symbol = preset==='__custom'
+    ? ($('bot-symbol-custom').value||'').toUpperCase().trim()
+    : preset;
+  const timeframe=$('bot-timeframe').value;
+  const logEl=$('bot-save-log');
+  if(!symbol){ logEl.textContent='⚠ Informe um símbolo.'; return; }
+  logEl.textContent='Salvando...';
+  try{
+    const r=await fetch(B+'/api/bot/config',{
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({symbol,timeframe})
+    }).then(r=>r.json());
+    if(r.success){
+      logEl.innerHTML=`<span class="up">✓ Salvo: ${symbol} / ${timeframe}</span>`;
+      loadBotConfig();
+    } else {
+      logEl.innerHTML=`<span class="down">Erro: ${r.error}</span>`;
+    }
+  }catch(e){ logEl.innerHTML=`<span class="down">Erro: ${e.message}</span>`; }
+}
+
+async function loadBotConfig(){
+  try{
+    const r=await fetch(B+'/api/bot/config').then(r=>r.json());
+    if(!r.success) return;
+    $('bot-mode-badge-standard').className='badge '+(r.paperTrading?'neutral':'short');
+    $('bot-mode-badge-standard').textContent=r.paperTrading?'📋 PAPER':'🔴 LIVE';
+    $('bot-config-standard').innerHTML=`
+      <div style="font-size:12px;line-height:1.8;display:grid;grid-template-columns:auto 1fr;gap:0 10px">
+        <span style="color:var(--muted)">Estratégia</span><b>${r.strategy||'—'}</b>
+        <span style="color:var(--muted)">Símbolo/TF</span><b>${r.symbol} / ${r.timeframe}</b>
+        <span style="color:var(--muted)">Portfólio</span><b>$${fmt(r.portfolio)}</b>
+        <span style="color:var(--muted)">Máx/trade</span><b>$${fmt(r.maxTrade)}</b>
+        <span style="color:var(--muted)">Máx/dia</span><b>${r.maxPerDay} trades</b>
+        <span style="color:var(--muted)">Credenciais</span>${r.hasRealKeys?'<span class="up">✓ Configuradas</span>':'<span class="down">⚠ Placeholder</span>'}
+      </div>`;
+    // Sync selectors
+    const sel=$('bot-symbol-preset');
+    if(sel){
+      const opt=[...sel.options].find(o=>o.value===r.symbol);
+      sel.value = opt ? r.symbol : '__custom';
+      if(!opt){ $('bot-symbol-custom').value=r.symbol; $('bot-symbol-custom').style.display='block'; }
+    }
+    const tf=$('bot-timeframe');
+    if(tf) tf.value=r.timeframe;
+  }catch(e){}
+}
+
+async function runBot(){
+  const btn=$('bot-run-btn');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Executando...'; }
+  $('bot-safety-standard').innerHTML='<span style="color:var(--muted)">Rodando bot.js...</span>';
+  $('bot-decision-panel').innerHTML='<span style="color:var(--muted)">Aguarde...</span>';
+  try{
+    const r=await fetch(B+'/api/bot/run',{method:'POST'}).then(r=>r.json());
+    if($('bot-stdout')) $('bot-stdout').textContent=(r.stdout||'')+(r.stderr?'\n---stderr---\n'+r.stderr:'');
+    if(r.last) renderBotResult(r.last);
+    loadBotLog();
+  }catch(e){
+    $('bot-safety-standard').innerHTML=`<span class="down">Erro: ${e.message}</span>`;
+  }
+  if(btn){ btn.disabled=false; btn.textContent='▶ Rodar Bot'; }
+}
+
+function renderBotResult(last){
+  if(!last) return;
+  // Safety check conditions
+  const conds=(last.conditions||[]).map(c=>`
+    <div style="padding:6px 8px;margin-bottom:5px;border-radius:4px;background:${c.pass?'rgba(63,185,80,.1)':'rgba(248,81,73,.1)'};border:1px solid ${c.pass?'var(--green)':'var(--red)'}">
+      <div style="font-weight:600;font-size:12px;color:${c.pass?'var(--green)':'var(--red)'}">${c.pass?'✅':'🚫'} ${c.label}</div>
+      <div style="font-size:10px;color:var(--muted);font-family:monospace;margin-top:2px">esperado: ${c.required} | atual: ${c.actual}</div>
+    </div>`).join('')||'<span style="color:var(--muted)">Sem condições.</span>';
+  $('bot-safety-standard').innerHTML=conds;
+  // Decision panel
+  const blocked=!last.allPass;
+  const side=last.side||'—';
+  const decHtml=`
+    <div style="padding:12px;border-radius:5px;text-align:center;font-weight:700;font-size:14px;background:${blocked?'rgba(248,81,73,.12)':'rgba(63,185,80,.12)'};border:1px solid ${blocked?'var(--red)':'var(--green)'};color:${blocked?'var(--red)':'var(--green)'}">
+      ${blocked?'🚫 TRADE BLOQUEADO':`✅ SINAL ${side}`}
+    </div>
+    ${!blocked?`<div style="margin-top:10px;font-size:12px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
+      <div><span style="color:var(--muted)">Entrada</span><br><b>$${Number(last.price||0).toFixed(2)}</b></div>
+      <div><span style="color:var(--muted)">Stop</span><br><b>$${last.stopPrice?Number(last.stopPrice).toFixed(2):'—'}</b></div>
+      <div><span style="color:var(--muted)">Alvo 2:1</span><br><b>$${last.target?Number(last.target).toFixed(2):'—'}</b></div>
+      <div><span style="color:var(--muted)">Tamanho</span><br><b>$${Number(last.tradeSize||0).toFixed(2)}</b></div>
+    </div>`:''}
+    <div style="font-size:10px;color:var(--muted);margin-top:8px">${(last.timestamp||'').replace('T',' ').slice(0,19)} · ${last.paperTrading?'paper':'live'}</div>`;
+  $('bot-decision-panel').innerHTML=decHtml;
+}
+
+async function loadBotLog(){
+  try{
+    const r=await fetch(B+'/api/bot/log').then(r=>r.json());
+    const rows=(r.trades||[]).map(t=>{
+      const fails=(t.conditions||[]).filter(c=>!c.pass).length;
+      const total=(t.conditions||[]).length;
+      return `<tr>
+        <td style="font-size:11px;color:var(--muted)">${(t.timestamp||'').replace('T',' ').slice(0,19)}</td>
+        <td><b>${t.symbol||'—'}</b></td>
+        <td style="color:var(--muted)">${t.timeframe||'—'}</td>
+        <td style="font-family:monospace">$${Number(t.price||0).toFixed(2)}</td>
+        <td style="color:var(--muted)">${t.side||'—'}</td>
+        <td>${t.allPass?'<span class="up">✓ OK</span>':'<span class="down">✗ Bloqueado</span>'}</td>
+        <td style="font-size:11px;color:var(--muted)">${total-fails}/${total}</td>
+      </tr>`;
+    }).join('');
+    $('bot-log-tbody-standard').innerHTML=rows||'<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:14px">Nenhuma execução ainda.</td></tr>';
+  }catch(e){}
+}
+
+function toggleBotOut(){
+  const el=$('bot-stdout-wrap');
+  if(el) el.style.display=el.style.display==='none'?'block':'none';
 }
 
 // ─── HEALTH & STATE ─────────────────────────────────────────────
@@ -592,29 +844,56 @@ async function runBrief() {
 }
 
 // ─── SCANNER ────────────────────────────────────────────────────
-async function runScanner() {
-  const symbols=$('scan-symbols').value.split(',').map(s=>s.trim()).filter(Boolean);
-  $('scan-status').textContent='Escaneando...';
-  $('scan-tbody').innerHTML=`<tr><td colspan="7" class="muted">⏳ Escaneando ${symbols.length} símbolos...</td></tr>`;
-  try{
-    const r=await fetch(B+'/api/scanner',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbols})}).then(r=>r.json());
-    const rows=r.results||r.symbols_scanned||[];
-    if(!rows.length){$('scan-tbody').innerHTML='<tr><td colspan="7" class="muted">Sem resultados</td></tr>';return;}
-    $('scan-tbody').innerHTML=rows.map(row=>{
-      if(row.error) return `<tr><td>${row.symbol}</td><td colspan="6" class="muted">Erro: ${row.error}</td></tr>`;
-      const q=row.quote||{}; const inds=(row.indicators?.studies||row.studies||[])[0]?.values||{};
-      const price=parseNum(q.last||q.close),vwap=parseNum(inds['VWAP']),ema9=parseNum(inds['EMA 9']),ema20=parseNum(inds['EMA 20']),ema200=parseNum(inds['EMA 200']);
-      const hasLong=parseNum(inds['LONG'])>0,hasShort=parseNum(inds['SHORT'])>0;
-      const chg=q.open?((price-q.open)/q.open*100):0;
-      const trend=price>ema200?'<span style="color:var(--green)">ALTA</span>':'<span style="color:var(--red)">BAIXA</span>';
-      const vwapPos=price>vwap?'<span class="up">▲ Acima</span>':'<span class="down">▼ Abaixo</span>';
-      const emaPos=ema9>ema20?'<span class="up">Bullish</span>':'<span class="down">Bearish</span>';
-      const sig=hasLong?'<span class="badge long">LONG</span>':hasShort?'<span class="badge short">SHORT</span>':'<span class="badge neutral">—</span>';
-      return `<tr class="scan-row"><td><a href="#" onclick="selectAndSwitch('${row.symbol}')" style="color:var(--blue)">${(row.symbol||'').replace('BINANCE:','')}</a></td><td>$${fmt(price)}</td><td class="${chg>=0?'up':'down'}">${chg>=0?'+':''}${chg.toFixed(2)}%</td><td>${trend}</td><td>${vwapPos}</td><td>${emaPos}</td><td>${sig}</td></tr>`;
-    }).join('');
-    $('scan-status').textContent=`${rows.length} símbolos escaneados às ${new Date().toLocaleTimeString('pt-BR')}`;
-  }catch(e){$('scan-status').textContent='Erro: '+e.message;}
+function scanSignal(chg, bullCandle, amplitude) {
+  if (bullCandle && chg > 1)   return `<span style="color:var(--green);font-weight:700">▲ COMPRA</span>`;
+  if (bullCandle && chg > 0.3) return `<span style="color:#58a6ff;font-weight:700">◑ ATENÇÃO</span>`;
+  if (!bullCandle && chg < -1) return `<span style="color:var(--red);font-weight:700">▼ VENDA</span>`;
+  if (!bullCandle && chg < -0.3) return `<span style="color:var(--yellow);font-weight:700">◐ CAUTELA</span>`;
+  return `<span style="color:var(--muted)">— NEUTRO</span>`;
 }
+
+function scanRow(r) {
+  if (r.error) return `<tr><td><b>${r.symbol}</b></td><td colspan="6" class="muted" style="font-size:11px">Erro: ${r.error}</td></tr>`;
+  const close = r.close||0, open = r.open||r.pOpen||close;
+  const chg = open ? ((close - open) / open * 100) : 0;
+  const amp = (r.high && r.low) ? ((r.high - r.low) / r.low * 100) : 0;
+  const bull = close >= open;
+  const candleLabel = bull ? '<span class="up">▲ Alta</span>' : '<span class="down">▼ Baixa</span>';
+  const vol = fmtVol(r.volume);
+  const sig = scanSignal(chg, bull, amp);
+  const sym = (r.symbol||'').replace('BINANCE:','');
+  return `<tr>
+    <td><a href="#" onclick="selectAndSwitch('${r.symbol}')" style="color:#58a6ff;font-weight:700">${sym}</a></td>
+    <td style="font-family:monospace">$${fmt(close)}</td>
+    <td class="${chg>=0?'up':'down'}">${chg>=0?'+':''}${chg.toFixed(2)}%</td>
+    <td style="color:var(--muted)">${amp.toFixed(2)}%</td>
+    <td style="color:var(--muted)">${vol}</td>
+    <td>${candleLabel}</td>
+    <td>${sig}</td>
+  </tr>`;
+}
+
+async function runScannerSection(section) {
+  const inputId = section==='crypto' ? 'scan-crypto-symbols' : 'scan-stock-symbols';
+  const tbodyId = section==='crypto' ? 'scan-crypto-tbody'   : 'scan-stocks-tbody';
+  const statusId = section==='crypto' ? 'scan-crypto-status' : 'scan-stocks-status';
+  const symbols = $(inputId).value.split(',').map(s=>s.trim()).filter(Boolean);
+  $(statusId).textContent = 'Escaneando...';
+  $(tbodyId).innerHTML = `<tr><td colspan="7" class="muted" style="text-align:center;padding:14px">⏳ Escaneando ${symbols.length} símbolos...</td></tr>`;
+  try {
+    const r = await fetch(B+'/api/scanner', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({symbols})
+    }).then(r=>r.json());
+    const rows = r.results || r.symbols_scanned || [];
+    if (!rows.length) { $(tbodyId).innerHTML='<tr><td colspan="7" class="muted" style="text-align:center;padding:14px">Sem resultados</td></tr>'; return; }
+    $(tbodyId).innerHTML = rows.map(scanRow).join('');
+    $(statusId).textContent = `${rows.length} ok · ${new Date().toLocaleTimeString('pt-BR')}`;
+  } catch(e) { $(statusId).textContent = 'Erro: '+e.message; }
+}
+
+// manter compatibilidade com qualquer botão que chame runScanner()
+function runScanner() { runScannerSection('crypto'); }
 async function selectAndSwitch(sym) {
   await fetch(B+'/api/symbol',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym.replace('BINANCE:','')})});
   switchTab('dashboard'); setTimeout(refreshAll,1500);
@@ -648,133 +927,275 @@ async function deleteAllAlerts() {
 }
 
 // ─── STRATEGY ───────────────────────────────────────────────────
-async function loadStrategy() {
-  try{
-    const [sr,tr]=await Promise.all([
+// ── Symbol autocomplete ──────────────────────────────────────────
+let _stAcTimer = null;
+async function stSymbolSearch(q) {
+  const ac = $('st-autocomplete');
+  if (!q || q.length < 2) { ac.style.display = 'none'; return; }
+  clearTimeout(_stAcTimer);
+  _stAcTimer = setTimeout(async () => {
+    try {
+      const r = await fetch(B+'/api/symbol-search?q='+encodeURIComponent(q)).then(r=>r.json());
+      const items = r.results || r.symbols || [];
+      if (!items.length) { ac.style.display = 'none'; return; }
+      ac.innerHTML = items.slice(0,10).map(s => {
+        const sym = s.symbol || s;
+        const exch = s.exchange ? `<span style="color:var(--muted);margin-left:6px;font-size:10px">${s.exchange}</span>` : '';
+        const desc = s.description ? `<div style="color:var(--muted);font-size:10px;margin-top:1px">${s.description}</div>` : '';
+        return `<div onclick="$('st-symbol-input').value='${sym}';$('st-autocomplete').style.display='none'"><span style="font-weight:600">${sym}</span>${exch}${desc}</div>`;
+      }).join('');
+      ac.style.display = 'block';
+    } catch { ac.style.display = 'none'; }
+  }, 280);
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('#st-autocomplete') && e.target.id !== 'st-symbol-input')
+    ($('st-autocomplete') || {}).style && ($('st-autocomplete').style.display = 'none');
+});
+
+// ── Backtest (TradingView strategy tester) ──────────────────────
+async function loadStrategyBacktest() {
+  try {
+    const [sr, tr] = await Promise.all([
       fetch(B+'/api/strategy').then(r=>r.json()),
       fetch(B+'/api/strategy/trades').then(r=>r.json())
     ]);
-    if(sr.success&&sr.summary){
-      const s=sr.summary;
-      $('st-profit').textContent=fmt(s.net_profit||s.netProfit||0);
-      $('st-profit').className=(s.net_profit||0)>=0?'up':'down';
-      $('st-winrate').textContent=fmt(s.win_rate||s.winRate||0,1)+'%';
-      $('st-trades').textContent=s.total_trades||s.totalTrades||'--';
-      $('st-drawdown').textContent=fmt(s.max_drawdown||s.maxDrawdown||0,1)+'%';
-      $('st-drawdown').className='down';
+    if (sr.success && sr.summary) {
+      const s = sr.summary;
+      $('st-profit').textContent = '$'+fmt(s.net_profit||s.netProfit||0);
+      $('st-profit').style.color = (s.net_profit||0)>=0?'var(--green)':'var(--red)';
+      $('st-winrate').textContent = fmt(s.win_rate||s.winRate||0,1)+'%';
+      $('st-trades').textContent = s.total_trades||s.totalTrades||'--';
+      $('st-drawdown').textContent = fmt(s.max_drawdown||s.maxDrawdown||0,1)+'%';
+      $('st-drawdown').style.color = 'var(--red)';
     }
-    if(tr.success&&tr.trades?.length){
-      $('trades-tbody').innerHTML=tr.trades.map((t,i)=>`<tr><td>${i+1}</td><td style="color:${t.direction==='long'?'var(--green)':'var(--red)'}">${(t.direction||t.type||'').toUpperCase()}</td><td>$${fmt(t.entry_price||t.entryPrice)}</td><td>$${fmt(t.exit_price||t.exitPrice)}</td><td class="${(t.profit||0)>=0?'up':'down'}">$${fmt(t.profit)}</td><td class="${(t.profit_pct||0)>=0?'up':'down'}">${fmt(t.profit_pct||t.profitPct,2)}%</td></tr>`).join('');
+    if (tr.success && tr.trades?.length) {
+      $('trades-tbody').innerHTML = tr.trades.map((t,i) => {
+        const pnl = t.profit||0, pct = t.profit_pct||t.profitPct||0;
+        return `<tr>
+          <td style="color:var(--muted)">${i+1}</td>
+          <td style="color:${t.direction==='long'?'var(--green)':'var(--red)'};font-weight:700">${(t.direction||'').toUpperCase()}</td>
+          <td style="font-family:monospace">$${fmt(t.entry_price||t.entryPrice)}</td>
+          <td style="font-family:monospace">$${fmt(t.exit_price||t.exitPrice)}</td>
+          <td class="${pnl>=0?'up':'down'}" style="font-weight:700">$${fmt(pnl)}</td>
+          <td class="${pct>=0?'up':'down'}">${fmt(pct,2)}%</td>
+        </tr>`;
+      }).join('');
+    } else {
+      $('trades-tbody').innerHTML='<tr><td colspan="6" class="muted" style="text-align:center;padding:14px">Sem trades — aplique uma estratégia no gráfico primeiro (aba 🎯 Estratégias)</td></tr>';
     }
-  }catch(e){$('st-profit').textContent='Erro: '+e.message;}
+  } catch(e) { $('trades-tbody').innerHTML=`<tr><td colspan="6" style="color:var(--red)">${e.message}</td></tr>`; }
 }
 
-// ─── REPLAY ─────────────────────────────────────────────────────
-function showReplayStatus(r) {
-  const box=$('replay-status-box');
-  if(!r.success){box.style.display='none';return;}
-  box.style.display='block';
-  box.innerHTML=`Data: <b>${r.date||'--'}</b> | Posição: <b style="color:${r.position==='long'?'var(--green)':'var(--red)'}">${r.position||'flat'}</b> | PnL: <b class="${(r.pnl||0)>=0?'up':'down'}">$${fmt(r.pnl||0)}</b>`;
-}
-async function replayStart(){
-  const date=$('replay-date').value;
-  try{const r=await fetch(B+'/api/replay/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({date})}).then(r=>r.json());log(r.success?'✅ Replay iniciado':'❌ '+(r.error||'Falha'),'replay-log');showReplayStatus(r);}catch(e){log('Erro: '+e.message,'replay-log');}
-}
-async function replayStep(){
-  try{const r=await fetch(B+'/api/replay/step',{method:'POST'}).then(r=>r.json());log(r.success?'✅ +1 barra':'❌ '+(r.error||'Falha'),'replay-log');}catch(e){log('Erro: '+e.message,'replay-log');}
-}
-async function replayAutoplay(){
-  const speed=parseInt($('replay-speed').value)||500;
-  try{const r=await fetch(B+'/api/replay/autoplay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({speed})}).then(r=>r.json());log(r.success?`✅ Autoplay ${speed}ms`:'❌ '+(r.error||'Falha'),'replay-log');}catch(e){log('Erro: '+e.message,'replay-log');}
-}
-async function replayStop(){
-  try{const r=await fetch(B+'/api/replay/stop',{method:'POST'}).then(r=>r.json());log(r.success?'✅ Replay parado':'❌ '+(r.error||'Falha'),'replay-log');}catch(e){log('Erro: '+e.message,'replay-log');}
-}
-async function replayStatus(){
-  try{const r=await fetch(B+'/api/replay/status').then(r=>r.json());showReplayStatus(r);log('Status atualizado','replay-log');}catch(e){log('Erro: '+e.message,'replay-log');}
-}
-async function replayTrade(action){
-  try{const r=await fetch(B+'/api/replay/trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})}).then(r=>r.json());log(r.success?`✅ Trade: ${action}`:'❌ '+(r.error||'Falha'),'replay-log');}catch(e){log('Erro: '+e.message,'replay-log');}
+// ── Análise ao vivo do gráfico vs estratégias ──────────────────
+async function loadStrategy() {
+  $('st-updated').textContent = '⏳ Analisando...';
+  $('st-signal-bar').style.display = 'none';
+  $('st-autocomplete').style.display = 'none';
+  try {
+    // Switch chart to requested symbol/timeframe if provided
+    const symInput = ($('st-symbol-input').value || '').trim().toUpperCase();
+    const tfInput  = $('st-timeframe').value;
+    if (symInput) {
+      $('st-updated').textContent = `⏳ Mudando para ${symInput}...`;
+      await Promise.all([
+        fetch(B+'/api/symbol',    {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:symInput})}).then(r=>r.json()),
+        fetch(B+'/api/timeframe', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({timeframe:tfInput})}).then(r=>r.json()),
+      ]);
+      // Wait for chart to reload before fetching data
+      await new Promise(res => setTimeout(res, 1800));
+    }
+
+    const [quoteR, indR, ohlcvR, stateR] = await Promise.all([
+      fetch(B+'/api/quote').then(r=>r.json()),
+      fetch(B+'/api/indicators').then(r=>r.json()),
+      fetch(B+'/api/ohlcv').then(r=>r.json()),
+      fetch(B+'/api/state').then(r=>r.json()),
+    ]);
+
+    const q = quoteR;
+    const price = parseNum(q.last||q.close||0);
+    const open  = parseNum(q.open||price);
+    const high  = parseNum(q.high||price);
+    const low   = parseNum(q.low||price);
+    const vol   = parseNum(q.volume||0);
+    const sym   = (q.symbol||stateR.symbol||'').replace('BINANCE:','');
+    const tf    = stateR.resolution||'';
+    const tfMap = {'1':'1m','5':'5m','15':'15m','60':'1h','240':'4h','D':'1D','W':'1W'};
+
+    $('st-symbol-badge').textContent = `${sym} · ${tfMap[tf]||tf}`;
+    $('st-updated').textContent = `Atualizado às ${new Date().toLocaleTimeString('pt-BR')}`;
+
+    // Extrair valores dos indicadores
+    const studies = indR.studies||[];
+    const vals = {};
+    for (const s of studies) {
+      for (const [k,v] of Object.entries(s.values||{})) vals[k] = parseNum(v);
+    }
+    const ema9   = vals['EMA 9']  || vals['EMA9']  || 0;
+    const ema20  = vals['EMA 20'] || vals['EMA20'] || 0;
+    const ema200 = vals['EMA 200']|| vals['EMA200']|| 0;
+    const vwap   = vals['VWAP']   || 0;
+    const rsi    = vals['RSI']    || vals['RSI(14)']|| 0;
+    const vol20avg = vals['Volume MA'] || vals['Vol MA'] || 0;
+
+    // OHLCV sumário
+    const ohlcv = ohlcvR.summary || ohlcvR;
+    const chgPct = open ? ((price-open)/open*100) : 0;
+
+    // ── Warrior Trading: VWAP + EMA 9>20>200 + RSI 40-70 + Volume + Pullback ──
+    const w = {
+      aboveVwap:  vwap  ? price > vwap  : null,
+      trendUp:    ema9  ? (ema9 > ema20 && ema20 > ema200) : null,
+      trendDown:  ema9  ? (ema9 < ema20 && ema20 < ema200) : null,
+      rsiOk:      rsi   ? (rsi >= 40 && rsi <= 70) : null,
+      volOk:      (vol20avg && vol) ? vol >= vol20avg * 1.3 : null,
+      rsiVal:     rsi,
+      ema9, ema20, ema200, vwap,
+    };
+    const wLong  = w.aboveVwap && w.trendUp   && w.rsiOk;
+    const wShort = w.aboveVwap===false && w.trendDown && w.rsiOk;
+    const wSig   = wLong ? 'LONG' : wShort ? 'SHORT' : null;
+
+    // ── 123 Stormer: EMA8>EMA80 (usamos EMA9 como proxy de EMA8) + candle atual ──
+    const ema8  = ema9;   // proxy mais próximo disponível
+    const ema80 = ema200; // proxy macro
+    const bull3 = price > open;  // candle atual bullish
+    const s_bull = ema8 > ema80;
+    const s_bear = ema8 < ema80;
+    const sLong  = s_bull && bull3 && price > high * 0.998; // rompimento aproximado
+    const sShort = s_bear && !bull3 && price < low * 1.002;
+    const sSig   = sLong ? 'LONG' : sShort ? 'SHORT' : null;
+
+    // Sinal consolidado (ambas concordam = forte)
+    const bothLong  = wSig==='LONG'  && sSig==='LONG';
+    const bothShort = wSig==='SHORT' && sSig==='SHORT';
+    const anyLong   = wSig==='LONG'  || sSig==='LONG';
+    const anyShort  = wSig==='SHORT' || sSig==='SHORT';
+    const masterSig = bothLong?'LONG_STRONG': bothShort?'SHORT_STRONG': anyLong?'LONG': anyShort?'SHORT':'NEUTRO';
+
+    // Renderizar barra de sinal
+    const sigBar = $('st-signal-bar');
+    sigBar.style.display = 'block';
+    const sigCfg = {
+      LONG_STRONG:  {bg:'rgba(63,185,80,.15)',  border:'var(--green)',  color:'var(--green)',  icon:'▲▲', txt:'COMPRA FORTE — ambas as estratégias confirmam LONG'},
+      LONG:         {bg:'rgba(63,185,80,.08)',  border:'var(--green)',  color:'var(--green)',  icon:'▲',  txt:'SINAL LONG — uma estratégia confirma entrada comprada'},
+      SHORT_STRONG: {bg:'rgba(248,81,73,.15)',  border:'var(--red)',    color:'var(--red)',    icon:'▼▼', txt:'VENDA FORTE — ambas as estratégias confirmam SHORT'},
+      SHORT:        {bg:'rgba(248,81,73,.08)',  border:'var(--red)',    color:'var(--red)',    icon:'▼',  txt:'SINAL SHORT — uma estratégia confirma entrada vendida'},
+      NEUTRO:       {bg:'rgba(139,148,158,.08)',border:'var(--muted)',  color:'var(--muted)',  icon:'—',  txt:'NEUTRO — condições não alinhadas, aguardar setup'},
+    };
+    const sc = sigCfg[masterSig];
+    sigBar.style.cssText = `display:block;padding:16px;border-radius:6px;text-align:center;font-size:15px;font-weight:700;background:${sc.bg};border:1px solid ${sc.border};color:${sc.color}`;
+    sigBar.innerHTML = `${sc.icon} ${sc.txt}`;
+
+    // Strategy visibility filter
+    const stFilter = $('st-strategy-select').value;
+    const showWarrior = stFilter === 'both' || stFilter === 'warrior';
+    const showStormer = stFilter === 'both' || stFilter === 'stormer';
+
+    // ── Renderizar card Warrior ──
+    const wCard = document.getElementById('st-warrior-card');
+    if (wCard) wCard.style.display = showWarrior ? '' : 'none';
+    const wConds = [
+      {label:`Preço ${vwap?'$'+fmt(price):''} ${w.aboveVwap?'ACIMA':'ABAIXO'} do VWAP $${fmt(vwap)}`, pass:w.aboveVwap},
+      {label:`Tendência: EMA9(${fmt(ema9,0)}) ${w.trendUp?'>':ema9<ema20?'<':'='} EMA20(${fmt(ema20,0)}) ${w.trendUp?'>':ema20<ema200?'<':'='} EMA200(${fmt(ema200,0)})`, pass:w.trendUp||w.trendDown},
+      {label:`RSI: ${rsi?rsi.toFixed(1):'N/A'} — ${w.rsiOk?'OK (40-70)':'Fora da faixa ideal'}`, pass:w.rsiOk},
+      {label:`Volume: ${fmtVol(vol)} ${w.volOk===null?'(sem média)':w.volOk?'≥ 1.3x média':'< 1.3x média'}`, pass:w.volOk!==false},
+    ];
+    $('st-warrior-body').innerHTML = condRows(wConds) + sigBadge(wSig);
+
+    // ── Renderizar card Stormer ──
+    const sCard = document.getElementById('st-stormer-card');
+    if (sCard) sCard.style.display = showStormer ? '' : 'none';
+    const sConds = [
+      {label:`EMA(8≈9) $${fmt(ema8,0)} ${s_bull?'>':'<'} EMA(80≈200) $${fmt(ema80,0)} — tendência ${s_bull?'ALTA':'BAIXA'}`, pass:s_bull||s_bear},
+      {label:`Candle atual: ${bull3?'Alta (bullish)':'Baixa (bearish)'} — preço ${chgPct>=0?'+':''}${chgPct.toFixed(2)}%`, pass:true},
+      {label:`Rompimento: close $${fmt(price)} vs high $${fmt(high)} / low $${fmt(low)}`, pass:sLong||sShort},
+    ];
+    $('st-stormer-body').innerHTML = condRows(sConds) + sigBadge(sSig);
+
+    // ── Contexto de mercado ──
+    $('st-market-ctx').innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:12px">
+        <div><div class="muted" style="font-size:10px;margin-bottom:2px">PREÇO</div><b style="font-size:16px">$${fmt(price)}</b></div>
+        <div><div class="muted" style="font-size:10px;margin-bottom:2px">VARIAÇÃO (candle)</div><b class="${chgPct>=0?'up':'down'}" style="font-size:16px">${chgPct>=0?'+':''}${chgPct.toFixed(2)}%</b></div>
+        <div><div class="muted" style="font-size:10px;margin-bottom:2px">VOLUME</div><b style="font-size:16px">${fmtVol(vol)}</b></div>
+        <div><div class="muted" style="font-size:10px;margin-bottom:2px">VWAP</div><b>$${fmt(vwap)}</b> <span class="${price>vwap?'up':'down'}" style="font-size:11px">${price>vwap?'▲ acima':'▼ abaixo'}</span></div>
+        <div><div class="muted" style="font-size:10px;margin-bottom:2px">EMA 9/20/200</div><b>${fmt(ema9,0)} / ${fmt(ema20,0)} / ${fmt(ema200,0)}</b></div>
+        <div><div class="muted" style="font-size:10px;margin-bottom:2px">RSI</div><b class="${rsi>70?'down':rsi<30?'up':''}">${rsi?rsi.toFixed(1):'N/A'}</b> <span class="muted" style="font-size:10px">${rsi>70?'sobrecomprado':rsi<30?'sobrevendido':'neutro'}</span></div>
+      </div>`;
+
+  } catch(e) {
+    $('st-updated').textContent = 'Erro: '+e.message;
+    $('st-warrior-body').innerHTML = `<span style="color:var(--red)">${e.message}</span>`;
+  }
 }
 
-// ─── PINE EDITOR ────────────────────────────────────────────────
-async function pineLoadSource(){
-  try{const r=await fetch(B+'/api/pine/source').then(r=>r.json());if(r.source)$('pine-editor').value=r.source;}catch(e){alert('Erro: '+e.message);}
-}
-async function pineCompile(){
-  const source=$('pine-editor').value;
-  try{
-    await fetch(B+'/api/pine/source',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source})});
-    const r=await fetch(B+'/api/pine/compile',{method:'POST'}).then(r=>r.json());
-    const errs=r.errors||[];
-    $('pine-errors').innerHTML=errs.length?errs.map(e=>`<div class="${e.severity<=2?'pine-error-line':'pine-warn-line'}">Linha ${e.line}: ${e.message}</div>`).join(''):'<div style="color:var(--green)">✅ Compilado sem erros</div>';
-  }catch(e){$('pine-errors').innerHTML='<div class="pine-error-line">Erro: '+e.message+'</div>';}
-}
-async function pineSave(){
-  try{const r=await fetch(B+'/api/pine/save',{method:'POST'}).then(r=>r.json());alert(r.success?'✅ Script salvo!':'❌ '+(r.error||'Falha'));}catch(e){alert('Erro: '+e.message);}
-}
-async function pineOpenScript(){
-  const name=$('pine-open-name').value.trim(); if(!name) return;
-  try{
-    const r=await fetch(B+'/api/pine/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})}).then(r=>r.json());
-    if(r.success) await pineLoadSource();
-    alert(r.success?`✅ Aberto: ${name}`:'❌ '+(r.error||'Falha'));
-  }catch(e){alert('Erro: '+e.message);}
-}
-async function pineGetConsole(){
-  try{const r=await fetch(B+'/api/pine/console').then(r=>r.json());$('pine-console').textContent=r.output||r.log||'(sem output)';}catch(e){$('pine-console').textContent='Erro: '+e.message;}
-}
-async function loadPineList(){
-  try{
-    const r=await fetch(B+'/api/pine/list').then(r=>r.json());
-    const scripts=r.scripts||r.data||[];
-    $('pine-list').innerHTML=scripts.length?scripts.map(s=>`<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:12px;cursor:pointer" onclick="$('pine-open-name').value='${s.name||s}';pineOpenScript()">${s.name||s} <span class="muted">${s.type||''}</span></div>`).join(''):'<span class="muted">Nenhum script encontrado</span>';
-  }catch(e){$('pine-list').innerHTML='<span style="color:var(--red)">Erro: '+e.message+'</span>';}
+function condRows(conds) {
+  return conds.map(c=>`
+    <div style="padding:7px 9px;margin-bottom:5px;border-radius:4px;background:${c.pass?'rgba(63,185,80,.08)':'rgba(248,81,73,.08)'};border:1px solid ${c.pass?'var(--green)':'var(--red)'}">
+      <span style="font-size:12px;color:${c.pass?'var(--green)':'var(--red)'}">${c.pass?'✅':'🚫'} ${c.label}</span>
+    </div>`).join('');
 }
 
-// ─── SCREENSHOTS ────────────────────────────────────────────────
-async function loadScreenshots(){
-  try{
-    const r=await fetch(B+'/api/screenshots/list').then(r=>r.json());
-    const grid=$('screenshot-grid');
-    if(!r.files?.length){grid.innerHTML='<span class="muted">Nenhum screenshot</span>';return;}
-    grid.innerHTML=r.files.map(f=>`<div class="screenshot-item"><img src="${f.url}" loading="lazy" onclick="openModal('${f.url}')" /><p>${f.name}</p></div>`).join('');
-  }catch(e){$('screenshot-grid').innerHTML='<span style="color:var(--red)">Erro: '+e.message+'</span>';}
+function sigBadge(sig) {
+  if (!sig) return `<div style="margin-top:8px;text-align:center;font-size:12px;color:var(--muted)">Sem sinal no momento</div>`;
+  const isLong = sig==='LONG';
+  return `<div style="margin-top:10px;padding:8px;border-radius:4px;text-align:center;font-weight:700;font-size:13px;background:${isLong?'rgba(63,185,80,.15)':'rgba(248,81,73,.15)'};color:${isLong?'var(--green)':'var(--red)'};border:1px solid ${isLong?'var(--green)':'var(--red)'}">
+    ${isLong?'▲ LONG':'▼ SHORT'}
+  </div>`;
 }
-function openModal(url){$('modal-img').src=url;$('modal').classList.add('open');}
 
-// ─── JOURNAL ────────────────────────────────────────────────────
-async function loadJournal(){
+// ─── STRATEGIES ──────────────────────────────────────────────────
+async function loadStrategies(){
   try{
-    const r=await fetch(B+'/api/journal').then(r=>r.json());
-    const list=$('journal-list');
-    if(!r.entries?.length){list.innerHTML='<span class="muted">Nenhuma entrada no journal</span>';return;}
-    list.innerHTML=r.entries.map(e=>`<div class="journal-entry"><div class="je-header"><span><span class="je-type ${e.type}">${e.type.toUpperCase()}</span> ${e.symbol?'<b>'+e.symbol+'</b>':''} ${e.price?'@ $'+e.price:''}</span><span>${new Date(e.timestamp).toLocaleString('pt-BR')} <a href="#" onclick="deleteJournalEntry(${e.id})" style="color:var(--red);margin-left:8px">✕</a></span></div><div class="je-note">${e.note}</div></div>`).join('');
-  }catch(e){$('journal-list').innerHTML='<span style="color:var(--red)">Erro: '+e.message+'</span>';}
+    const [sr, cr] = await Promise.all([
+      fetch(B+'/api/strategies').then(r=>r.json()),
+      fetch(B+'/api/strategies/current').then(r=>r.json())
+    ]);
+    const active = cr.current_id || null;
+    $('active-strategy-label').textContent = active
+      ? (sr.strategies||[]).find(s=>s.id===active)?.name || active
+      : 'Nenhuma estratégia aplicada';
+    const cards = (sr.strategies||[]).map(s => {
+      const isActive = s.id === active;
+      return `<div class="card" style="cursor:pointer;border:1.5px solid ${isActive?'var(--green)':'var(--border)'};transition:border .2s" onclick="applyStrategy('${s.id}')">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+          <div>
+            <div style="font-size:14px;font-weight:700">${s.name}</div>
+            <div style="font-size:11px;color:var(--muted)">${s.author||''}</div>
+          </div>
+          ${isActive?'<span class="badge" style="background:rgba(63,185,80,.15);color:var(--green);border:1px solid var(--green)">✓ ATIVA</span>':''}
+        </div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:10px">${s.description||''}</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">
+          ${(s.indicators||[]).map(i=>`<span style="padding:2px 7px;border-radius:3px;font-size:10px;font-weight:600;background:var(--surface2);color:var(--muted);border:1px solid var(--border)">${i}</span>`).join('')}
+          ${(s.timeframes||[]).map(t=>`<span style="padding:2px 7px;border-radius:3px;font-size:10px;font-weight:600;background:rgba(88,166,255,.1);color:#58a6ff;border:1px solid rgba(88,166,255,.3)">${t}</span>`).join('')}
+        </div>
+        <button class="${isActive?'success':'primary'}" style="width:100%" onclick="event.stopPropagation();applyStrategy('${s.id}')">
+          ${isActive?'✓ Aplicada — Reaplicar':'▶ Aplicar no Gráfico'}
+        </button>
+      </div>`;
+    }).join('');
+    $('strategies-grid').innerHTML = cards || '<span class="muted">Nenhuma estratégia encontrada.</span>';
+  }catch(e){ $('strategies-grid').innerHTML=`<span class="muted">Erro: ${e.message}</span>`; }
 }
-async function addJournalEntry(){
-  const note=$('j-note').value.trim(); if(!note) return;
+
+async function applyStrategy(id){
+  $('apply-log').innerHTML = '⏳ Aplicando estratégia...';
   try{
-    await fetch(B+'/api/journal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({note,type:$('j-type').value,symbol:$('j-symbol').value,price:$('j-price').value})});
-    $('j-note').value=''; loadJournal();
-  }catch(e){alert('Erro: '+e.message);}
-}
-async function deleteJournalEntry(id){
-  try{await fetch(B+'/api/journal/'+id,{method:'DELETE'});loadJournal();}catch{}
-}
-async function autoFillJournal(){
-  try{
-    const [q,s]=await Promise.all([fetch(B+'/api/quote').then(r=>r.json()),fetch(B+'/api/state').then(r=>r.json())]);
-    $('j-symbol').value=(q.symbol||'').replace('BINANCE:','');
-    $('j-price').value=q.last||q.close||'';
-    $('j-note').value.length===0&&($('j-note').value=`Análise: Preço $${fmt(q.last||q.close)}, TF ${s.resolution||''}`);
-  }catch{}
-}
-async function takeScreenshotForJournal(){
-  await takeScreenshot();
-  const sym=(currentSymbol||'').replace('BINANCE:','');
-  if($('j-symbol').value==='') $('j-symbol').value=sym;
-  if($('j-note').value==='') $('j-note').value='Screenshot capturado';
+    const r = await fetch(B+'/api/strategies/apply',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id})
+    }).then(r=>r.json());
+    if(r.success){
+      $('apply-log').innerHTML = `<span style="color:var(--green)">✓ ${r.strategy?.name} aplicada no Pine Editor.</span>`;
+      setTimeout(loadStrategies, 1200);
+    } else {
+      $('apply-log').innerHTML = `<span style="color:var(--red)">Erro: ${r.error||'falha'}</span>`;
+    }
+  }catch(e){ $('apply-log').innerHTML=`<span style="color:var(--red)">Erro: ${e.message}</span>`; }
 }
 
 // ─── AUTO-REFRESH ────────────────────────────────────────────────
