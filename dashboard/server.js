@@ -1421,6 +1421,7 @@ app.get('/api/micro-scalper/log', (req, res) => {
     let todayPnl = 0;
     let todayProfit = 0;
     const processedTs = new Set();
+    const debug = [];
 
     // Data de hoje no formato YYYY-MM-DD (Brasil UTC-3)
     const todayStr = new Date(new Date().getTime() - (3 * 60 * 60 * 1000)).toISOString().split('T')[0];
@@ -1431,7 +1432,6 @@ app.get('/api/micro-scalper/log', (req, res) => {
       for (const tr of (sess.trades || [])) {
         if (!tr.t) continue;
         
-        // Evita duplicatas se o log tiver sessões repetidas
         const trKey = `${tr.t}_${tr.event}`;
         if (processedTs.has(trKey)) continue;
         processedTs.add(trKey);
@@ -1446,9 +1446,13 @@ app.get('/api/micro-scalper/log', (req, res) => {
             const entryVal = entry ? (entry.entryPrice * entry.qty) : 10;
             const pnlUsdt = tr.pnlUsdt !== undefined ? tr.pnlUsdt : (tr.pnlPct * entryVal);
             todayProfit += pnlUsdt;
+            debug.push(`Trade: ${tr.t} | PnL%: ${tr.pnlPct} | EntryVal: ${entryVal} | PnL$: ${pnlUsdt}`);
           }
         }
       }
+    }
+    if (debug.length > 0) {
+      try { writeFileSync(join(ROOT, 'debug-pnl.log'), `Today: ${todayStr}\n` + debug.join('\n') + `\nTotal PnL%: ${todayPnl} | Total PnL$: ${todayProfit}\n`); } catch(e) {}
     }
     res.json({ 
       success: true, 

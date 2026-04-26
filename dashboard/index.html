@@ -1210,6 +1210,7 @@ button.sm{padding:5px 10px;font-size:11px;}
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)">PnL Hoje</div>
       <div id="micro-kpi-pnl" style="font-size:28px;font-weight:700;margin-top:4px">0.00%</div>
       <div id="micro-kpi-profit" style="font-size:14px;color:var(--muted);margin-top:2px">$0.00</div>
+      <div id="micro-kpi-time" style="font-size:9px;color:var(--muted);margin-top:4px;opacity:0.6"></div>
     </div>
   </div>
 
@@ -2555,6 +2556,7 @@ async function loadMicroScalper() {
           kpiProfit.textContent = (profit >= 0 ? '+' : '') + '$' + profit.toFixed(2);
           kpiProfit.style.color = profit > 0 ? '#10b981' : profit < 0 ? '#ef4444' : 'var(--muted)';
       }
+      if ($('micro-kpi-time')) $('micro-kpi-time').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
     }
 
     // Status UI
