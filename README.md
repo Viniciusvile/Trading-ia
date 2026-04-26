@@ -336,6 +336,56 @@ By using this software you agree that:
 
 **Use at your own risk.**
 
+## Micro-Scalper (Binance + TradingView ao vivo)
+
+Bot de scalping que opera na **Binance Spot** e desenha cada operação **em tempo real** no TradingView Desktop (linhas de entry / TP / SL + label de quantidade). Cada trade pode segurar até 30 minutos antes de fechar por timeout.
+
+### Como rodar
+
+1. Configure `.env`:
+   ```
+   BINANCE_API_KEY=...
+   BINANCE_SECRET_KEY=...
+   ```
+2. Garanta que o TradingView Desktop está aberto com CDP em `localhost:9222` (use `npm run tv` ou `tv_launch`).
+3. Execute:
+   ```bash
+   npm run scalp:micro
+   ```
+
+O bot vai:
+- Trocar o símbolo do chart para `BINANCE:XRPUSDT` (configurável).
+- A cada sinal de entrada, desenhar 3 linhas horizontais (azul=entry, verde=TP, vermelho=SL) + label texto.
+- Manter o desenho até a posição fechar (TP / SL / timeout 30min).
+- Limpar e redesenhar no próximo trade.
+
+### Configuração (`rules.json` → `micro_scalper`)
+
+| Campo | Default | Descrição |
+|---|---|---|
+| `symbol` | `XRPUSDT` | Par Binance |
+| `tv_symbol` | `BINANCE:XRPUSDT` | Símbolo no TradingView |
+| `loop_interval_ms` | 2000 | Tempo entre ticks |
+| `tp_pct` | 0.0015 | Take-profit (0.15%) |
+| `sl_pct` | 0.001 | Stop-loss (0.10%) |
+| `max_hold_ms` | 1800000 | Hold máximo (30 min) |
+| `max_trades` | 30 | Trades por sessão |
+| `max_session_ms` | 14400000 | Duração da sessão (4h) |
+| `trade_size_pct` | 0.2 | % do USDT por trade |
+| `max_trade_usdt` | 10 | Cap por trade |
+| `min_trade_usdt` | 5 | Floor (Binance MIN_NOTIONAL) |
+| `daily_loss_stop_pct` | 0.02 | Circuit-breaker em -2% |
+| `draw_on_tradingview` | true | Liga/desliga desenho |
+| `auto_set_tv_symbol` | true | Troca símbolo do chart automaticamente |
+
+### Avisos importantes
+
+- **Fees:** Binance Spot ~0.1% por lado (0.075% com BNB). Round-trip = 0.2% sem desconto. TP de 0.15% sem fee em BNB resulta em prejuízo líquido — habilite "Pay fees with BNB" ou ajuste `tp_pct` para 0.0035+.
+- **MIN_NOTIONAL:** Binance Spot exige notional mínimo (~$5–10 por par). Confirme em `exchangeInfo` antes de baixar `min_trade_usdt`.
+- **CDP obrigatório para visualização:** se a TV Desktop não estiver aberta em modo debug, o desenho falha silenciosamente (logado como warn). O bot continua operando sem visual.
+
+Logs persistem em `micro-scalper-log.json`.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Applies to source code only, not to TradingView's software, data, or trademarks.
