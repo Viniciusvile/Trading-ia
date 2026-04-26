@@ -3,6 +3,8 @@
  * All functions accept plain options objects and return plain JS objects.
  * They throw on error (callers catch and format).
  */
+import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 
 // ── Monaco finder (injected into TV page) ──
@@ -59,9 +61,20 @@ export async function ensurePineEditorOpen() {
 
   await evaluate(`
     (function() {
-      var btn = document.querySelector('[aria-label="Pine"]')
-        || document.querySelector('[data-name="pine-dialog-button"]');
-      if (btn) btn.click();
+      var selectors = [
+        '[aria-label="Pine"]',
+        '[aria-label="Editor Pine"]',
+        '[data-name="pine-dialog-button"]',
+        '[data-name="script-editor"]',
+        '.pine-editor-dialog-button'
+      ];
+      for (var i = 0; i < selectors.length; i++) {
+        var btn = document.querySelector(selectors[i]);
+        if (btn && btn.offsetParent !== null) {
+          btn.click();
+          return;
+        }
+      }
     })()
   `);
 
@@ -615,5 +628,69 @@ export async function listScripts() {
     count: scripts?.scripts?.length || 0,
     source: 'internal_api',
     error: scripts?.error,
+  };
+}
+
+export async function generateFromRules() {
+  const rootDir = process.cwd();
+  const rulesPath = join(rootDir, 'rules.json');
+  
+  if (!existsSync(rulesPath)) {
+    throw new Error('rules.json not found in the current directory.');
+  }
+
+  const rules = JSON.parse(readFileSync(rulesPath, 'utf8'));
+  const strategyName = rules.strategy?.name || 'Generated Strategy';
+  
+  // Base Template
+  let code = `//@version=6\nstrategy("${strategyName}", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=1)\n\n`;
+  
+  // Indicators Section
+  code += `// --- Indicators ---\n`;
+  code += `ema9 = ta.ema(close, 9)\n`;
+  code += `ema20 = ta.ema(close, 20)\n`;
+  code += `ema80 = ta.ema(close, 80)\n`;
+  code += `ema200 = ta.ema(close, 200)\n`;
+  code += `rsiVal = ta.rsi(close, 14)\n`;
+  code += `vwapVal = ta.vwap(close)\n\n`;
+
+  // Plotting Section
+  code += `// --- Plotting ---\n`;
+  code += `plot(ema9, color=color.yellow, title="EMA 9")\n`;
+  code += `plot(ema20, color=color.orange, title="EMA 20")\n`;
+  code += `plot(ema200, color=color.red, linewidth=2, title="EMA 200")\n`;
+  code += `plot(vwapVal, color=color.teal, style=plot.style_linebr, title="VWAP")\n\n`;
+
+  // Logic Section
+  code += `// --- Entry Logic ---\n`;
+  
+  // Determination of Strategy (Warrior or 123)
+  const stratKey = rules.strategy?.key || 'warrior';
+  
+  if (stratKey === 'warrior') {
+    code += `longCondition = close > vwapVal and ema9 > ema20 and close > ema200 and rsiVal >= 40 and rsiVal <= 70\n`;
+    code += `if longCondition\n    strategy.entry("Warrior Long", strategy.long)\n`;
+  } else {
+    // 123 Stormer logic
+    code += `is123Fundo = low[1] < low[2] and low[1] < low\n`;
+    code += `is123Topo = high[1] > high[2] and high[1] > high\n`;
+    code += `longCondition = ema8 > ema80 and is123Fundo and close > high[1]\n`;
+    code += `shortCondition = ema8 < ema80 and is123Topo and close < low[1]\n\n`;
+    code += `if longCondition\n    strategy.entry("123 Long", strategy.long)\n`;
+    code += `if shortCondition\n    strategy.entry("123 Short", strategy.short)\n`;
+  }
+
+  // Inject into editor
+  await setSource({ source: code });
+  
+  // Optional: Smart compile
+  const compileResult = await smartCompile();
+  
+  return { 
+    success: true, 
+    strategy_name: strategyName, 
+    strategy_key: stratKey,
+    compiled: !compileResult.has_errors,
+    errors: compileResult.errors
   };
 }

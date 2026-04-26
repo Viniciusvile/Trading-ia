@@ -72,4 +72,9 @@ export function registerPineTools(server) {
     try { return jsonResult(await core.check({ source })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool('pine_generate_from_rules', 'Read rules.json and generate a corresponding Pine Script V6 strategy on the chart', {}, async () => {
+    try { return jsonResult(await core.generateFromRules()); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
 }

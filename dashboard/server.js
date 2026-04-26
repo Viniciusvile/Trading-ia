@@ -5,8 +5,9 @@ import express from 'express';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
+import { spawn, execSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import * as health from '../src/core/health.js';
 import * as chart from '../src/core/chart.js';
 import * as data from '../src/core/data.js';
@@ -109,6 +110,23 @@ app.post('/api/timeframe', async (req, res) => {
     const { timeframe } = req.body;
     if (!timeframe) return res.status(400).json({ success: false, error: 'timeframe required' });
     res.json(await chart.setTimeframe({ timeframe }));
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ── CHART GOTO TRADE ─────────────────────────────────────────────
+app.post('/api/chart/goto', async (req, res) => {
+  try {
+    const { symbol, timeframe, date } = req.body;
+    if (!symbol || !timeframe || !date) return res.status(400).json({ success: false, error: 'symbol, timeframe, date required' });
+    const tvSymbol = symbol.includes(':') ? symbol : `BINANCE:${symbol}`;
+    const tfMap = { '1m':'1','3m':'3','5m':'5','15m':'15','30m':'30','1h':'60','1H':'60','2h':'120','4h':'240','4H':'240','1d':'D','1D':'D','1w':'W','1W':'W' };
+    const tvTf = tfMap[timeframe] || timeframe.replace(/m$/,'').replace(/[hH]$/, v => String(parseInt(v)*60)).replace(/[dD]$/,'D');
+    await chart.setSymbol({ symbol: tvSymbol });
+    await new Promise(r => setTimeout(r, 1500));
+    await chart.setTimeframe({ timeframe: tvTf });
+    await new Promise(r => setTimeout(r, 1500));
+    await chart.scrollToDate({ date });
+    res.json({ success: true });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
@@ -402,7 +420,9 @@ rsiHigh     = input.int(70,  "RSI Max",     minval=1)
 volMult     = input.float(1.5,"Vol Mínimo (x avg)", minval=0.1, step=0.1)
 rr          = input.float(2.0,"Risco/Retorno", minval=0.5, step=0.1)
 atrLen      = input.int(14,  "ATR Length",  minval=1)
-stopAtr     = input.float(1.5,"Stop (x ATR)", minval=0.1, step=0.1)
+stopAtr     = input.float(1.5, "Stop (x ATR)", minval=0.1, step=0.1)
+trailEnabled = input.bool(true, "Ativar Trailing Stop")
+trailMult    = input.float(2.0, "Arraste (x ATR)", minval=0.1, step=0.1)
 
 // ── Indicators
 emaFast = ta.ema(close, emaFastLen)
@@ -435,10 +455,11 @@ plotshape(shortEntry, "Short", shape.labeldown, location.abovebar, color.new(col
 
 // ── Strategy
 if longEntry
-    stopPrice   = close - atrVal * stopAtr
-    targetPrice = close + (close - stopPrice) * rr
     strategy.entry("Long", strategy.long)
-    strategy.exit("Long TP/SL", "Long", stop=stopPrice, limit=targetPrice)
+    if trailEnabled
+        strategy.exit("Long Exit", "Long", stop=stopPrice, limit=targetPrice, trail_points=close * 0.01 / syminfo.mintick, trail_offset=atrVal * trailMult / syminfo.mintick)
+    else
+        strategy.exit("Long Exit", "Long", stop=stopPrice, limit=targetPrice)
 
 if shortEntry
     stopPrice   = close + atrVal * stopAtr
@@ -454,10 +475,14 @@ strategy("123 Stormer — Alexandre Wolwacz", overlay=true, default_qty_type=str
 emaFastLen = input.int(8,  "EMA Rápida", minval=1)
 emaSlowLen = input.int(80, "EMA Lenta",  minval=1)
 rr         = input.float(2.0, "Risco/Retorno", minval=0.5, step=0.1)
+trailEnabled = input.bool(true, "Ativar Trailing Stop")
+trailMult    = input.float(2.0, "Arraste (x ATR)", minval=0.1, step=0.1)
+atrLen      = input.int(14, "ATR Length", minval=1)
 
 // ── EMAs
 emaFast = ta.ema(close, emaFastLen)
 emaSlow = ta.ema(close, emaSlowLen)
+atrVal  = ta.atr(atrLen)
 
 plot(emaFast, "EMA 8",  color=color.new(color.yellow, 0), linewidth=1)
 plot(emaSlow, "EMA 80", color=color.new(color.red,    0), linewidth=2)
@@ -480,11 +505,10 @@ plotshape(longSignal,  "123 Long",  shape.labelup,   location.belowbar, color.ne
 plotshape(shortSignal, "123 Short", shape.labeldown, location.abovebar, color.new(color.red,  0), text="123↓", size=size.small)
 
 // ── Strategy execution
-if longSignal
-    stopLoss   = low[2]
-    target     = close + (close - stopLoss) * rr
-    strategy.entry("Long", strategy.long)
-    strategy.exit("Long Exit", "Long", stop=stopLoss, limit=target)
+    if trailEnabled
+        strategy.exit("Long Exit", "Long", stop=stopLoss, limit=target, trail_points=close * 0.01 / syminfo.mintick, trail_offset=atrVal * trailMult / syminfo.mintick)
+    else
+        strategy.exit("Long Exit", "Long", stop=stopLoss, limit=target)
 
 if shortSignal
     stopLoss   = high[2]
@@ -552,6 +576,10 @@ const BOT_DIR = resolve(ROOT, '..', 'claude-tradingview-mcp-trading');
 const BOT_LOG = join(BOT_DIR, 'safety-check-log.json');
 const BOT_ENV = join(BOT_DIR, '.env');
 const BOT_RULES = join(BOT_DIR, 'rules.json');
+const BOT_MASTER_STATUS = join(BOT_DIR, 'master-status.json');
+const BOT_MASTER_PID = join(BOT_DIR, 'master.pid');
+
+let masterProcess = null;
 
 function parseEnv(txt) {
   const out = {};
@@ -574,11 +602,13 @@ app.get('/api/bot/config', (_req, res) => {
     if (!existsSync(BOT_DIR)) return res.status(404).json({ success: false, error: 'Pasta do bot não encontrada', dir: BOT_DIR });
     const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
     const rules = existsSync(BOT_RULES) ? JSON.parse(readFileSync(BOT_RULES, 'utf8')) : null;
-    const hasRealKeys = env.BITGET_API_KEY && !/your_api_key_here|^$/.test(env.BITGET_API_KEY);
+    const hasRealKeys = (env.BINANCE_API_KEY && !/your_api_key_here|^$/.test(env.BINANCE_API_KEY)) ||
+                        (env.BITGET_API_KEY && !/your_api_key_here|^$/.test(env.BITGET_API_KEY));
     res.json({
       success: true,
       dir: BOT_DIR,
-      strategy: rules?.strategy?.name || 'n/a',
+      strategyKey: env.BOT_STRATEGY || rules?.strategy?.key || 'warrior',
+      strategy: { stormer: '123 Stormer — Alexandre Wolwacz', warrior: 'Warrior Trading — Ross Cameron', both: 'Ambas (Warrior + Stormer)' }[env.BOT_STRATEGY || rules?.strategy?.key || 'warrior'] || 'Warrior Trading — Ross Cameron',
       symbol: env.SYMBOL || 'BTCUSDT',
       timeframe: env.TIMEFRAME || '4H',
       portfolio: Number(env.PORTFOLIO_VALUE_USD || 0),
@@ -587,17 +617,44 @@ app.get('/api/bot/config', (_req, res) => {
       paperTrading: env.PAPER_TRADING !== 'false',
       hasRealKeys,
       rules,
+      activePlan: rules?.active_plan || null,
+      groupPlans: (rules?.group_plans || []).map(p => ({ name: p.name, description: p.description, symbols: p.symbols })),
+      watchlist: rules?.watchlist || [],
+      watchlistPreset: ['BTCUSDT','ETHUSDT','ENAUSDT','SOLUSDT','RENDERUSDT','PEPEUSDT','XRPUSDT','BONKUSDT'],
     });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ── Update watchlist ──────────────────────────────────────────────
+app.patch('/api/bot/watchlist', (req, res) => {
+  try {
+    if (!existsSync(BOT_RULES)) return res.status(404).json({ success: false, error: 'rules.json não encontrado' });
+    const { watchlist } = req.body || {};
+    if (!Array.isArray(watchlist)) return res.status(400).json({ success: false, error: 'watchlist deve ser um array' });
+    const sanitized = watchlist
+      .map(s => String(s).toUpperCase().trim())
+      .filter(s => /^[A-Z0-9]{3,20}$/.test(s));
+    if (sanitized.length === 0) return res.status(400).json({ success: false, error: 'Nenhum símbolo válido enviado' });
+    const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
+    rules.watchlist = sanitized;
+    writeFileSync(BOT_RULES, JSON.stringify(rules, null, 2));
+    res.json({ success: true, watchlist: sanitized });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 app.patch('/api/bot/config', (req, res) => {
   try {
     if (!existsSync(BOT_ENV)) return res.status(404).json({ success: false, error: '.env não encontrado' });
-    const { symbol, timeframe } = req.body || {};
+    const { symbol, timeframe, strategy, portfolio, maxTrade, trailingEnabled, trailingMult, paperTrading, activePlan } = req.body || {};
+    
+    // Validations
     const allowedTf = ['1m','5m','15m','30m','1H','4H','1D','1W'];
+    const allowedStrat = ['stormer', 'warrior', 'both', 'auto'];
     if (symbol && !/^[A-Z0-9]{3,20}$/.test(symbol)) return res.status(400).json({ success: false, error: 'Símbolo inválido' });
     if (timeframe && !allowedTf.includes(timeframe)) return res.status(400).json({ success: false, error: 'Timeframe inválido' });
+    if (strategy && !allowedStrat.includes(strategy)) return res.status(400).json({ success: false, error: 'Estratégia inválida' });
+
+    // Update .env
     let txt = readFileSync(BOT_ENV, 'utf8');
     const upsert = (key, val) => {
       const re = new RegExp(`^${key}=.*$`, 'm');
@@ -606,8 +663,56 @@ app.patch('/api/bot/config', (req, res) => {
     };
     if (symbol) upsert('SYMBOL', symbol);
     if (timeframe) upsert('TIMEFRAME', timeframe);
+    if (strategy) upsert('BOT_STRATEGY', strategy);
+    if (portfolio !== undefined) upsert('PORTFOLIO_VALUE_USD', portfolio);
+    if (maxTrade !== undefined) upsert('MAX_TRADE_SIZE_USD', maxTrade);
+    if (paperTrading !== undefined) upsert('PAPER_TRADING', paperTrading ? 'true' : 'false');
     writeFileSync(BOT_ENV, txt);
-    res.json({ success: true, symbol, timeframe });
+
+    // Update rules.json if trailing params, strategy or activePlan changed
+    if (trailingEnabled !== undefined || trailingMult !== undefined || strategy || activePlan !== undefined) {
+      if (existsSync(BOT_RULES)) {
+        const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
+        if (trailingEnabled !== undefined || trailingMult !== undefined) {
+          if (!rules.exit_rules_config) rules.exit_rules_config = {};
+          if (!rules.exit_rules_config.trailing_stop) rules.exit_rules_config.trailing_stop = { enabled: false, type: 'atr', multiplier: 2.0 };
+          if (trailingEnabled !== undefined) rules.exit_rules_config.trailing_stop.enabled = !!trailingEnabled;
+          if (trailingMult !== undefined) rules.exit_rules_config.trailing_stop.multiplier = parseFloat(trailingMult);
+        }
+        if (strategy) {
+          if (!rules.strategy) rules.strategy = {};
+          rules.strategy.key = strategy;
+        }
+        if (activePlan !== undefined) rules.active_plan = activePlan || null;
+        writeFileSync(BOT_RULES, JSON.stringify(rules, null, 2));
+      }
+    }
+
+    res.json({ success: true, symbol, timeframe, strategy, portfolio, maxTrade, paperTrading });
+
+    // RESTART MASTERBOT SE ESTIVER RODANDO
+    // Isso garante que mudanças de PAPER_TRADING ou Estratégia entrem em vigor na hora
+    setTimeout(async () => {
+      let pidToKill = masterProcess?.pid;
+      if (!pidToKill && existsSync(BOT_MASTER_PID)) {
+        pidToKill = parseInt(readFileSync(BOT_MASTER_PID, 'utf8'));
+      }
+      if (pidToKill) {
+        console.log(`♻️ Reiniciando MasterBot para aplicar novas configurações...`);
+        try { execSync(`taskkill /F /PID ${pidToKill} /T`); } catch(e){}
+        masterProcess = null;
+        if (existsSync(BOT_MASTER_PID)) unlinkSync(BOT_MASTER_PID);
+
+        // Aguarda 2s e liga de novo
+        setTimeout(() => {
+          masterProcess = spawn('node', ['bot.js', '--master'], { cwd: BOT_DIR, detached: true, stdio: 'ignore' });
+          if (masterProcess.pid) writeFileSync(BOT_MASTER_PID, masterProcess.pid.toString());
+          masterProcess.unref();
+          console.log(`✅ MasterBot reiniciado com sucesso.`);
+        }, 2000);
+      }
+    }, 500);
+
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
@@ -642,6 +747,498 @@ app.post('/api/bot/run', (_req, res) => {
     clearTimeout(timer);
     res.status(500).json({ success: false, error: err.message });
   });
+});
+
+// ── Force Trade (ignora safety check) ───────────────────────────
+app.post('/api/bot/force-trade', (req, res) => {
+  if (!existsSync(BOT_DIR)) return res.status(404).json({ success: false, error: 'Pasta do bot não encontrada' });
+  const { symbol, timeframe, side } = req.body || {};
+  if (!symbol || !timeframe || !side) return res.status(400).json({ success: false, error: 'symbol, timeframe e side são obrigatórios' });
+  const env = { ...process.env, FORCE_SYMBOL: symbol, FORCE_TF: timeframe, FORCE_SIDE: side.toUpperCase(), FORCE_ONCE: '1' };
+  const proc = spawn('node', ['bot.js'], { cwd: BOT_DIR, shell: false, env });
+  let stdout = '', stderr = '';
+  const timer = setTimeout(() => proc.kill('SIGKILL'), 60000);
+  proc.stdout.on('data', d => stdout += d.toString());
+  proc.stderr.on('data', d => stderr += d.toString());
+  proc.on('close', code => {
+    clearTimeout(timer);
+    let last = null;
+    try {
+      if (existsSync(BOT_LOG)) {
+        const log = JSON.parse(readFileSync(BOT_LOG, 'utf8'));
+        last = log.trades?.[log.trades.length - 1] || null;
+      }
+    } catch {}
+    res.json({ success: code === 0, exitCode: code, stdout, stderr, last });
+  });
+  proc.on('error', err => { clearTimeout(timer); res.status(500).json({ success: false, error: err.message }); });
+});
+
+// ── MasterBot Loop Management ────────────────────────────────────
+
+app.get('/api/bot/master/status', (req, res) => {
+  try {
+    let loopState = { status: 'stopped', watchlist: [], lastResults: [] };
+    if (existsSync(BOT_MASTER_STATUS)) {
+      loopState = JSON.parse(readFileSync(BOT_MASTER_STATUS, 'utf8'));
+    }
+    
+    // Check if process is actually alive via PID file or memory
+    let isAlive = !!(masterProcess && !masterProcess.killed);
+    
+    if (!isAlive && existsSync(BOT_MASTER_PID)) {
+      try {
+        const pid = parseInt(readFileSync(BOT_MASTER_PID, 'utf8'));
+        if (pid) {
+          // No Windows, checa via tasklist
+          const stdout = execSync(`tasklist /FI "PID eq ${pid}" /NH`).toString();
+          isAlive = stdout.includes(pid.toString());
+        }
+      } catch (e) { isAlive = false; }
+    }
+
+    if (!isAlive && loopState.status !== 'stopped') {
+      loopState.status = 'stopped';
+    }
+
+    res.json({ success: true, ...loopState, isAlive });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/api/bot/master/start', (req, res) => {
+  try {
+    const { interval } = req.body || {};
+    const allowedIntervals = ['10m', '30m', '1h', '4h'];
+    const safeInterval = allowedIntervals.includes(interval) ? interval : '1h';
+
+    // Matar qualquer instância anterior pelo PID file antes de iniciar nova
+    if (existsSync(BOT_MASTER_PID)) {
+      const oldPid = parseInt(readFileSync(BOT_MASTER_PID, 'utf8'));
+      if (oldPid) {
+        try { execSync(`taskkill /F /PID ${oldPid} /T 2>nul`); } catch {}
+      }
+      unlinkSync(BOT_MASTER_PID);
+    }
+    if (masterProcess && !masterProcess.killed) {
+      try { masterProcess.kill('SIGTERM'); } catch {}
+      masterProcess = null;
+    }
+
+    // Salva o intervalo no .env para que reinícios automáticos o preservem
+    if (existsSync(BOT_ENV)) {
+      let txt = readFileSync(BOT_ENV, 'utf8');
+      const re = /^MASTERBOT_LOOP_INTERVAL=.*$/m;
+      if (re.test(txt)) txt = txt.replace(re, `MASTERBOT_LOOP_INTERVAL=${safeInterval}`);
+      else txt += (txt.endsWith('\n') ? '' : '\n') + `MASTERBOT_LOOP_INTERVAL=${safeInterval}\n`;
+      writeFileSync(BOT_ENV, txt);
+    }
+
+    console.log(`🚀 Iniciando MasterBot em modo LOOP (--master) | intervalo: ${safeInterval}...`);
+    masterProcess = spawn('node', ['bot.js', '--master'], {
+      cwd: BOT_DIR,
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env, MASTERBOT_LOOP_INTERVAL: safeInterval }
+    });
+
+    if (masterProcess.pid) {
+      writeFileSync(BOT_MASTER_PID, masterProcess.pid.toString());
+    }
+
+    masterProcess.unref();
+    res.json({ success: true, pid: masterProcess.pid });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/api/bot/master/stop', (req, res) => {
+  try {
+    let pidToKill = masterProcess?.pid;
+    
+    if (!pidToKill && existsSync(BOT_MASTER_PID)) {
+      pidToKill = parseInt(readFileSync(BOT_MASTER_PID, 'utf8'));
+    }
+
+    if (pidToKill) {
+      console.log(`🛑 Matando MasterBot (PID: ${pidToKill})...`);
+      try {
+        execSync(`taskkill /F /PID ${pidToKill} /T`);
+      } catch (e) { console.log('Processo já estava morto ou erro no kill:', e.message); }
+    }
+
+    masterProcess = null;
+    if (existsSync(BOT_MASTER_PID)) unlinkSync(BOT_MASTER_PID);
+
+    // Atualiza o arquivo de status para que a UI saiba que parou
+    try {
+      if (existsSync(BOT_MASTER_STATUS)) {
+        const state = JSON.parse(readFileSync(BOT_MASTER_STATUS, 'utf8'));
+        state.status = 'stopped';
+        state.nextRun = null;
+        writeFileSync(BOT_MASTER_STATUS, JSON.stringify(state, null, 2));
+      }
+    } catch (e) { console.error('Erro ao limpar status:', e); }
+
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ── POSITIONS ────────────────────────────────────────────────────
+const BOT_POSITIONS = join(BOT_DIR, 'positions.json');
+
+async function syncPositionsWithBinance(env) {
+  const apiKey = env.BINANCE_API_KEY || env.BITGET_API_KEY;
+  const secretKey = env.BINANCE_SECRET_KEY || env.BITGET_SECRET_KEY;
+  if (!apiKey || !secretKey || env.PAPER_TRADING === 'true') return { synced: 0, details: [] };
+  if (!existsSync(BOT_POSITIONS)) return { synced: 0, details: [] };
+
+  const positions = JSON.parse(readFileSync(BOT_POSITIONS, 'utf8'));
+  let synced = 0;
+  const details = [];
+
+  for (const pos of positions) {
+    if (pos.status !== 'open') continue;
+
+    // ── Posições com OCO ativo ────────────────────────────────────
+    if (pos.ocoPlaced && pos.ocoOrderListId) {
+      try {
+        const ts = (await (await fetch('https://api.binance.com/api/v3/time')).json()).serverTime;
+        const qs = `orderListId=${pos.ocoOrderListId}&timestamp=${ts}&recvWindow=10000`;
+        const sig = crypto.createHmac('sha256', secretKey).update(qs).digest('hex');
+        const data = await (await fetch(`https://api.binance.com/api/v3/orderList?${qs}&signature=${sig}`, {
+          headers: { 'X-MBX-APIKEY': apiKey }
+        })).json();
+
+        details.push({ symbol: pos.symbol, ocoId: pos.ocoOrderListId, response: data.listOrderStatus || data.code, msg: data.msg });
+
+        // OCO não existe na Binance → já foi executada e limpa
+        if (data.code === -2011 || data.code === -1121) {
+          pos.status = 'closed'; pos.closedAt = new Date().toISOString();
+          pos.exitReason = 'OCO não encontrada — executada e removida da Binance';
+          pos.exitPrice = null; pos.pnl = null;
+          synced++; continue;
+        }
+
+        if (data.code && data.code < 0) continue; // outro erro de API, pula
+
+        if (data.listOrderStatus === 'ALL_DONE' || data.listStatusType === 'ALL_DONE') {
+          const filledOrder = (data.orderReports || []).find(o => o.status === 'FILLED');
+          if (filledOrder) {
+            const execQty  = parseFloat(filledOrder.executedQty || 0);
+            const quoteQty = parseFloat(filledOrder.cummulativeQuoteQty || 0);
+            const exitPrice = execQty > 0 && quoteQty > 0
+              ? quoteQty / execQty
+              : parseFloat(filledOrder.price) || parseFloat(filledOrder.stopPrice) || pos.entryPrice;
+            const isTP = filledOrder.type === 'LIMIT_MAKER' || exitPrice >= (pos.takeProfitPrice || exitPrice);
+            pos.status      = 'closed';
+            pos.closedAt    = new Date(filledOrder.updateTime || Date.now()).toISOString();
+            pos.exitPrice   = exitPrice;
+            pos.exitReason  = isTP ? `TAKE PROFIT via OCO @ $${exitPrice.toFixed(8)}` : `STOP LOSS via OCO @ $${exitPrice.toFixed(8)}`;
+            pos.exitOrderId = String(filledOrder.orderId);
+            pos.pnl         = parseFloat(((exitPrice - pos.entryPrice) * pos.quantity).toFixed(4));
+            synced++;
+          } else {
+            // ALL_DONE sem FILLED → OCO cancelada inteira (sem execução de venda)
+            pos.status = 'closed'; pos.closedAt = new Date().toISOString();
+            pos.exitReason = 'OCO cancelada — posição encerrada (sem preço de venda)';
+            pos.exitPrice = pos.entryPrice; pos.pnl = 0;
+            synced++;
+          }
+        }
+      } catch (e) {
+        details.push({ symbol: pos.symbol, result: 'exception', error: e.message });
+      }
+      continue;
+    }
+
+    // ── Posições SEM OCO: verifica se a ordem de compra foi preenchida ──
+    if (pos.orderId && !pos.ocoPlaced) {
+      try {
+        const ts = (await (await fetch('https://api.binance.com/api/v3/time')).json()).serverTime;
+        const qs = `symbol=${pos.symbol}&orderId=${pos.orderId}&timestamp=${ts}&recvWindow=10000`;
+        const sig = crypto.createHmac('sha256', secretKey).update(qs).digest('hex');
+        const data = await (await fetch(`https://api.binance.com/api/v3/order?${qs}&signature=${sig}`, {
+          headers: { 'X-MBX-APIKEY': apiKey }
+        })).json();
+        details.push({ symbol: pos.symbol, orderId: pos.orderId, orderStatus: data.status || data.code });
+        // se a ordem de compra foi cancelada/rejeitada → posição nunca abriu de fato
+        if (data.status === 'CANCELED' || data.status === 'REJECTED' || data.status === 'EXPIRED') {
+          pos.status = 'closed'; pos.closedAt = new Date().toISOString();
+          pos.exitReason = `Ordem de compra ${data.status} — posição nunca aberta`;
+          pos.exitPrice = pos.entryPrice; pos.pnl = 0;
+          synced++;
+        }
+      } catch (e) {
+        details.push({ symbol: pos.symbol, result: 'buy_check_exception', error: e.message });
+      }
+    }
+  }
+
+  if (synced > 0) writeFileSync(BOT_POSITIONS, JSON.stringify(positions, null, 2));
+  return { synced, details };
+}
+
+app.get('/api/bot/positions', async (_req, res) => {
+  try {
+    const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
+    await syncPositionsWithBinance(env);
+    const positions = existsSync(BOT_POSITIONS) ? JSON.parse(readFileSync(BOT_POSITIONS, 'utf8')) : [];
+    res.json({ success: true, positions });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/api/bot/positions/sync', async (_req, res) => {
+  try {
+    const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
+    const result = await syncPositionsWithBinance(env);
+    res.json({ success: true, synced: result.synced, details: result.details });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Busca o stepSize do LOT_SIZE para arredondar a quantidade corretamente
+async function getStepSize(symbol) {
+  try {
+    const r = await fetch(`https://api.binance.com/api/v3/exchangeInfo?symbol=${symbol}`);
+    const d = await r.json();
+    const lot = d.symbols?.[0]?.filters?.find(f => f.filterType === 'LOT_SIZE');
+    return lot?.stepSize || '1';
+  } catch(e) { return '1'; }
+}
+
+function floorToStep(qty, stepSize) {
+  const step = parseFloat(stepSize);
+  const decimals = stepSize.includes('.') ? stepSize.replace(/0+$/, '').split('.')[1]?.length || 0 : 0;
+  return parseFloat((Math.floor(qty / step) * step).toFixed(decimals));
+}
+
+app.post('/api/bot/positions/:id/close', async (req, res) => {
+  try {
+    if (!existsSync(BOT_POSITIONS)) return res.status(404).json({ success: false, error: 'positions.json não encontrado' });
+    const positions = JSON.parse(readFileSync(BOT_POSITIONS, 'utf8'));
+    const pos = positions.find(p => p.id === req.params.id && p.status === 'open');
+    if (!pos) return res.status(404).json({ success: false, error: 'Posição não encontrada ou já fechada' });
+
+    const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
+    const apiKey = env.BINANCE_API_KEY || env.BITGET_API_KEY;
+    const secretKey = env.BINANCE_SECRET_KEY || env.BITGET_SECRET_KEY;
+    const paperTrading = env.PAPER_TRADING !== 'false';
+    // ?markOnly=true → apenas marca como fechado sem enviar ordem (já vendeu manualmente)
+    const markOnly = req.query.markOnly === 'true';
+
+    // Buscar preço atual
+    let exitPrice = null;
+    try {
+      const pr = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${pos.symbol}`);
+      exitPrice = parseFloat((await pr.json()).price);
+    } catch(e) {}
+
+    let exitOrderId = null;
+
+    if (!markOnly && !paperTrading && apiKey && secretKey) {
+      // ── Cancelar OCO automático (se tiver listId salvo) ──
+      if (pos.ocoOrderListId && !pos.ocoManual) {
+        try {
+          const timeRes = await fetch('https://api.binance.com/api/v3/time');
+          const ts = (await timeRes.json()).serverTime;
+          const qs = `symbol=${pos.symbol}&orderListId=${pos.ocoOrderListId}&timestamp=${ts}&recvWindow=10000`;
+          const sig = crypto.createHmac('sha256', secretKey).update(qs).digest('hex');
+          await fetch(`https://api.binance.com/api/v3/orderList?${qs}&signature=${sig}`, { method: 'DELETE', headers: { 'X-MBX-APIKEY': apiKey } });
+        } catch(e) {}
+      }
+
+      // ── Buscar saldo real do ativo na Binance ──
+      // Extrai o base asset com match exato (RENDERUSDT → RENDER, BTCUSDT → BTC)
+      const baseAsset = pos.symbol.endsWith('USDT') ? pos.symbol.slice(0, -4)
+                      : pos.symbol.endsWith('BTC')  ? pos.symbol.slice(0, -3)
+                      : pos.symbol.slice(0, -4);
+      // Fallback: pos.quantity * 0.999 (desconta 0.1% de taxa de compra que a Binance já reteve)
+      let actualBalance = parseFloat((pos.quantity * 0.999).toFixed(8));
+      try {
+        const tsRes = await fetch('https://api.binance.com/api/v3/time');
+        const tsNow = (await tsRes.json()).serverTime;
+        const qsAcc = `timestamp=${tsNow}`;
+        const sigAcc = crypto.createHmac('sha256', secretKey).update(qsAcc).digest('hex');
+        const accRes = await fetch(`https://api.binance.com/api/v3/account?${qsAcc}&signature=${sigAcc}`, { headers: { 'X-MBX-APIKEY': apiKey } });
+        const accData = await accRes.json();
+        // Busca exata pelo asset (evita match parcial como "R" casando antes de "RENDER")
+        const bal = accData.balances?.find(b => b.asset === baseAsset);
+        if (bal && parseFloat(bal.free) > 0) actualBalance = parseFloat(bal.free);
+      } catch(e) {}
+
+      // ── SELL MARKET com quantidade ajustada ao LOT_SIZE ──
+      const stepSize = await getStepSize(pos.symbol);
+      const qty = floorToStep(Math.min(pos.quantity, actualBalance), stepSize);
+      if (qty <= 0) return res.status(400).json({ success: false, error: `Saldo insuficiente na carteira Spot. Saldo detectado: ${actualBalance} ${baseAsset}` });
+
+      const timeRes = await fetch('https://api.binance.com/api/v3/time');
+      const timestamp = (await timeRes.json()).serverTime;
+      const qs = `symbol=${pos.symbol}&side=SELL&type=MARKET&quantity=${qty}&recvWindow=10000&timestamp=${timestamp}`;
+      const sig = crypto.createHmac('sha256', secretKey).update(qs).digest('hex');
+      const sellRes = await fetch(`https://api.binance.com/api/v3/order?${qs}&signature=${sig}`, {
+        method: 'POST', headers: { 'X-MBX-APIKEY': apiKey }
+      });
+      const sellData = await sellRes.json();
+      if (sellData.code && sellData.code < 0) {
+        let errMsg = `Binance SELL falhou: [${sellData.code}] ${sellData.msg}`;
+        if (sellData.code === -2010 || sellData.code === -1100) {
+          errMsg = `Saldo indisponível no Spot Trading (código ${sellData.code}). O ativo pode estar em Earn Flexível ou Funding. Resgate manualmente na Binance e tente novamente, ou use "Já Vendido" para marcar como fechado.`;
+        }
+        return res.status(400).json({ success: false, error: errMsg, code: sellData.code });
+      }
+      exitOrderId = String(sellData.orderId);
+      exitPrice = parseFloat(sellData.fills?.[0]?.price) || exitPrice;
+    } else {
+      exitOrderId = markOnly ? 'MARKED-CLOSED' : `PAPER-SELL-${Date.now()}`;
+    }
+
+    const reason = markOnly ? 'Marcado como fechado manualmente (sem ordem)' : 'Fechamento manual pelo dashboard';
+    pos.status = 'closed';
+    pos.closedAt = new Date().toISOString();
+    pos.exitPrice = exitPrice;
+    pos.exitReason = reason;
+    pos.exitOrderId = exitOrderId;
+    pos.pnl = exitPrice ? parseFloat(((exitPrice - pos.entryPrice) * pos.quantity).toFixed(4)) : null;
+
+    writeFileSync(BOT_POSITIONS, JSON.stringify(positions, null, 2));
+    res.json({ success: true, position: pos });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ── PLACE OCO FOR EXISTING POSITION ─────────────────────────────
+app.post('/api/bot/positions/:id/oco', async (req, res) => {
+  try {
+    if (!existsSync(BOT_POSITIONS)) return res.status(404).json({ success: false, error: 'positions.json não encontrado' });
+    const positions = JSON.parse(readFileSync(BOT_POSITIONS, 'utf8'));
+    const pos = positions.find(p => p.id === req.params.id && p.status === 'open');
+    if (!pos) return res.status(404).json({ success: false, error: 'Posição não encontrada' });
+
+    const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
+    const apiKey = env.BINANCE_API_KEY || env.BITGET_API_KEY;
+    const secretKey = env.BINANCE_SECRET_KEY || env.BITGET_SECRET_KEY;
+    if (!apiKey || !secretKey) return res.status(400).json({ success: false, error: 'Sem credenciais da Binance' });
+
+    const { stopPrice, takeProfitPrice } = pos;
+    if (!stopPrice || !takeProfitPrice) return res.status(400).json({ success: false, error: 'Stop ou TP não definidos na posição' });
+
+    // Buscar saldo real do ativo
+    const stepSize = await getStepSize(pos.symbol);
+    const tsA = (await (await fetch('https://api.binance.com/api/v3/time')).json()).serverTime;
+    const qsA = `timestamp=${tsA}`;
+    const sigA = crypto.createHmac('sha256', secretKey).update(qsA).digest('hex');
+    const accData = await (await fetch(`https://api.binance.com/api/v3/account?${qsA}&signature=${sigA}`, { headers: { 'X-MBX-APIKEY': apiKey } })).json();
+    const bal = accData.balances?.find(b => pos.symbol.startsWith(b.asset));
+    const actualQty = bal ? parseFloat(bal.free) : pos.quantity;
+    const qty = floorToStep(Math.min(pos.quantity, actualQty), stepSize);
+    if (qty <= 0) return res.status(400).json({ success: false, error: 'Saldo zero na carteira Spot' });
+
+    // Arredondar preços ao tick size
+    const tickRes = await fetch(`https://api.binance.com/api/v3/exchangeInfo?symbol=${pos.symbol}`);
+    const tickData = await tickRes.json();
+    const priceFilter = tickData.symbols?.[0]?.filters?.find(f => f.filterType === 'PRICE_FILTER');
+    const tickSize = priceFilter?.tickSize || '0.00001';
+    function floorTick(price) {
+      const tick = parseFloat(tickSize);
+      const dec = tickSize.replace(/0+$/, '').split('.')[1]?.length || 0;
+      return parseFloat((Math.floor(price / tick) * tick).toFixed(dec));
+    }
+    const tpPrice  = floorTick(takeProfitPrice);
+    const spPrice  = floorTick(stopPrice);
+    const slpPrice = floorTick(stopPrice * 0.995);
+
+    const ts = (await (await fetch('https://api.binance.com/api/v3/time')).json()).serverTime;
+    const qs = [
+      `symbol=${pos.symbol}`, `side=SELL`, `quantity=${qty}`,
+      `price=${tpPrice}`, `stopPrice=${spPrice}`, `stopLimitPrice=${slpPrice}`,
+      `stopLimitTimeInForce=GTC`, `recvWindow=10000`, `timestamp=${ts}`
+    ].join('&');
+    const sig = crypto.createHmac('sha256', secretKey).update(qs).digest('hex');
+    const ocoRes = await fetch(`https://api.binance.com/api/v3/order/oco?${qs}&signature=${sig}`, {
+      method: 'POST', headers: { 'X-MBX-APIKEY': apiKey }
+    });
+    const ocoData = await ocoRes.json();
+    if (ocoData.code && ocoData.code < 0) return res.status(400).json({ success: false, error: `OCO falhou: [${ocoData.code}] ${ocoData.msg}` });
+
+    pos.ocoPlaced = true;
+    pos.ocoOrderListId = ocoData.orderListId;
+    pos.ocoManual = false;
+    writeFileSync(BOT_POSITIONS, JSON.stringify(positions, null, 2));
+    res.json({ success: true, orderListId: ocoData.orderListId });
+  } catch(e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ── BALANCE ───────────────────────────────────────────────────────
+app.get('/api/bot/balance', async (_req, res) => {
+  try {
+    const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
+    const apiKey = env.BINANCE_API_KEY || env.BITGET_API_KEY;
+    const secretKey = env.BINANCE_SECRET_KEY || env.BITGET_SECRET_KEY;
+    if (!apiKey || !secretKey) return res.json({ success: false, error: 'Sem credenciais' });
+
+    const timeRes = await fetch('https://api.binance.com/api/v3/time');
+    const timestamp = (await timeRes.json()).serverTime;
+    const queryString = `timestamp=${timestamp}`;
+    const signature = crypto.createHmac('sha256', secretKey).update(queryString).digest('hex');
+    const r = await fetch(`https://api.binance.com/api/v3/account?${queryString}&signature=${signature}`, {
+      headers: { 'X-MBX-APIKEY': apiKey }
+    });
+    const data = await r.json();
+    if (data.code && data.code < 0) return res.json({ success: false, error: data.msg });
+    const usdt = data.balances?.find(b => b.asset === 'USDT');
+    res.json({ success: true, usdt: usdt ? parseFloat(usdt.free) : 0 });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ── PORTFOLIO ─────────────────────────────────────────────────────
+app.get('/api/bot/portfolio', async (_req, res) => {
+  try {
+    const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
+    const apiKey = env.BINANCE_API_KEY || env.BITGET_API_KEY;
+    const secretKey = env.BINANCE_SECRET_KEY || env.BITGET_SECRET_KEY;
+    if (!apiKey || !secretKey) return res.json({ success: false, error: 'Sem credenciais' });
+
+    const timeRes = await fetch('https://api.binance.com/api/v3/time');
+    const timestamp = (await timeRes.json()).serverTime;
+    const qs = `timestamp=${timestamp}`;
+    const sig = crypto.createHmac('sha256', secretKey).update(qs).digest('hex');
+    const r = await fetch(`https://api.binance.com/api/v3/account?${qs}&signature=${sig}`, {
+      headers: { 'X-MBX-APIKEY': apiKey }
+    });
+    const data = await r.json();
+    if (data.code && data.code < 0) return res.json({ success: false, error: data.msg });
+
+    const nonZero = (data.balances || []).filter(b => parseFloat(b.free) + parseFloat(b.locked) > 0);
+    const assets = nonZero.filter(b => b.asset !== 'USDT');
+    const usdtBal = nonZero.find(b => b.asset === 'USDT');
+    let total = usdtBal ? parseFloat(usdtBal.free) + parseFloat(usdtBal.locked) : 0;
+    const freeUsdt = usdtBal ? parseFloat(usdtBal.free) : 0;
+
+    // Fetch prices for all non-USDT assets in parallel
+    await Promise.all(assets.map(async b => {
+      try {
+        const pr = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${b.asset}USDT`);
+        const pd = await pr.json();
+        if (pd.price) total += (parseFloat(b.free) + parseFloat(b.locked)) * parseFloat(pd.price);
+      } catch { /* skip asset if no USDT pair */ }
+    }));
+
+    // BRL conversion via public API
+    let brlRate = 5.7;
+    try {
+      const brlRes = await fetch('https://economia.awesomeapi.com.br/json/last/USD-BRL');
+      const brlData = await brlRes.json();
+      brlRate = parseFloat(brlData['USDBRL']?.bid || brlRate);
+    } catch { /* use fallback rate */ }
+
+    res.json({ success: true, total_usdt: total, total_brl: total * brlRate, free_usdt: freeUsdt, brl_rate: brlRate });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ── PRICE ─────────────────────────────────────────────────────────
+app.get('/api/price/:symbol', async (req, res) => {
+  try {
+    const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${req.params.symbol}`);
+    const d = await r.json();
+    res.json({ success: true, symbol: req.params.symbol, price: parseFloat(d.price) });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 // ── FALLBACK ─────────────────────────────────────────────────────

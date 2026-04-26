@@ -102,5 +102,9 @@ register('pine', {
       description: 'Get Pine Script console/log output',
       handler: () => core.getConsole(),
     }],
+    ['generate-from-rules', {
+      description: 'Generate Pine Script from rules.json and apply to chart',
+      handler: () => core.generateFromRules(),
+    }],
   ]),
 });

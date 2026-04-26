@@ -58,6 +58,16 @@ export async function connect() {
       targetInfo = target;
       client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
 
+      // Connection health check: Verify if we are actually in TradingView
+      try {
+        const versionInfo = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/version`).then(r => r.json());
+        if (versionInfo.Browser && (versionInfo.Browser.includes('Chrome') || versionInfo.Browser.includes('Edge')) && !versionInfo.Browser.includes('TradingView')) {
+          console.warn(`Connected to ${versionInfo.Browser} instead of TradingView Desktop. This might cause issues.`);
+        }
+      } catch (e) {
+        // Ignore fetch errors for version info
+      }
+
       // Enable required domains
       await client.Runtime.enable();
       await client.Page.enable();
@@ -65,6 +75,15 @@ export async function connect() {
 
       return client;
     } catch (err) {
+      // Diagnostic helper: If we failed after all retries and it's because of "no target", check if port is held by Chrome
+      if (attempt === MAX_RETRIES - 1 && err.message.includes('No TradingView chart target found')) {
+        try {
+          const v = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/version`).then(r => r.json());
+          if (v.Browser && !v.Browser.toLowerCase().includes('tradingview')) {
+            err.message += ` (Detected ${v.Browser} on port ${CDP_PORT}. Por favor, FECHE O CHROME e use o Fix-TradingView-Port.ps1 na Área de Trabalho para resolver o conflito.)`;
+          }
+        } catch {}
+      }
       lastError = err;
       const delay = Math.min(BASE_DELAY * Math.pow(2, attempt), 30000);
       await new Promise(r => setTimeout(r, delay));
