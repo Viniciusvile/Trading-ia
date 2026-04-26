@@ -141,7 +141,21 @@ async function main() {
         let shouldExit = exitStatus.shouldExit;
         let reason = exitStatus.reason;
 
-        if (cfg.strategy_mode === "turbo-reversion") {
+        // --- NOVO: VERIFICAÇÃO DE STATUS OCO NA BINANCE ---
+        if (pos.ocoId) {
+          try {
+            const ocoStatus = await client.getOCO(pos.ocoId);
+            if (ocoStatus.ok && (ocoStatus.data.listOrderStatus === 'ALL_DONE' || ocoStatus.data.listStatusType === 'ALL_DONE')) {
+              shouldExit = true;
+              reason = "binance_oco_filled";
+              console.log(`  🎯 [BINANCE] Ordem OCO preenchida na exchange! Fechando log...`);
+            }
+          } catch (e) {
+            console.warn(`  ⚠️ Erro ao checar OCO: ${e.message}`);
+          }
+        }
+
+        if (!shouldExit && cfg.strategy_mode === "turbo-reversion") {
           const candles = await client.getKlines(SYMBOL, cfg.candles_interval, cfg.candles_limit);
           const bb = calcBB(candles.map(c => c.close), cfg.bb_length, cfg.bb_mult);
           if (lastPrice >= bb.upper) {
@@ -158,11 +172,14 @@ async function main() {
           if (realizedPct > 0) wins++;
           trades++;
           
+          const pnlUsdt = r.ok ? (exitPx - pos.entryPrice) * pos.qty : 0;
           log.push({
             t: new Date(now).toISOString(),
             event: "exit",
             reason,
             pnlPct: realizedPct,
+            pnlUsdt: pnlUsdt,
+            qty: pos.qty,
             ok: r.ok,
             exitPrice: exitPx
           });

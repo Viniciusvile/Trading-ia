@@ -1419,17 +1419,25 @@ app.get('/api/micro-scalper/log', (req, res) => {
     
     let todayTrades = 0;
     let todayPnl = 0;
+    let todayProfit = 0;
     // Pega a data de hoje baseada na hora local do servidor (Brasil)
     const todayStr = new Date(new Date().getTime() - (3 * 60 * 60 * 1000)).toISOString().split('T')[0];
 
     for (const sess of all) {
+      let lastEntryVal = 0;
       for (const tr of (sess.trades || [])) {
+        if (tr.event === 'entry') {
+          lastEntryVal = (tr.entryPrice || 0) * (tr.qty || 0);
+        }
         flat.push({ session: sess.sessionStart, ...tr });
         
         // Se o trade for de hoje (ajuste grosseiro usando o dia) e for um evento de saída, contabiliza o PnL
         if (tr.t && tr.t.includes(todayStr) && tr.event === 'exit') {
           todayTrades++;
-          if (tr.pnlPct) todayPnl += tr.pnlPct;
+          if (tr.pnlPct) {
+            todayPnl += tr.pnlPct;
+            todayProfit += tr.pnlUsdt || (tr.pnlPct * lastEntryVal);
+          }
         }
       }
     }
@@ -1437,7 +1445,7 @@ app.get('/api/micro-scalper/log', (req, res) => {
       success: true, 
       sessions: all.length, 
       trades: flat.slice(-limit).reverse(),
-      daily: { trades: todayTrades, pnl: todayPnl }
+      daily: { trades: todayTrades, pnl: todayPnl, profit: todayProfit }
     });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
