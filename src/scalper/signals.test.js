@@ -23,7 +23,7 @@ test("calcVWAP weights by volume", () => {
 test("microScalpSignal emits buy on bullish micro-pullback", () => {
   const closes = [100, 100.5, 101, 101.5, 102, 101.95];
   const candles = closes.map((c) => ({ high: c, low: c, close: c, vol: 1 }));
-  const sig = microScalpSignal(candles, { emaPeriod: 3, rsiPeriod: 3, minDip: 0.0001, maxRsi: 90 });
+  const sig = microScalpSignal(candles, { emaPeriod: 3, rsiPeriod: 3, minDip: 0.0001, maxRsi: 99 });
   assert.equal(sig.signal, "buy");
 });
 

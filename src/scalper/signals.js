@@ -46,10 +46,10 @@ export function microScalpSignal(candles, opts = {}) {
   const dipPct = (prev - last) / prev;
   const bumpPct = (last - prev) / prev;
 
-  if (last > ema && dipPct >= minDip && rsi >= minRsi) {
+  if (last > ema && dipPct >= minDip && rsi >= minRsi && rsi <= maxRsi) {
     return { signal: "buy", reason: "bull-trend micro-dip", last, ema, rsi, dipPct };
   }
-  if (last < ema && bumpPct >= minDip && rsi <= maxRsi && rsi >= minRsi) {
+  if (last < ema && bumpPct >= minDip && rsi >= minRsi && rsi <= maxRsi) {
     return { signal: "sell", reason: "bear-trend micro-bounce", last, ema, rsi, bumpPct };
   }
   return { signal: "flat", reason: "no micro setup", last, ema, rsi };
