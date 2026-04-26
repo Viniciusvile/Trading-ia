@@ -133,6 +133,8 @@ async function main() {
           if (bals.usdt < cfg.min_trade_usdt) {
             console.log(`  💤 Insufficient USDT: ${bals.usdt.toFixed(4)}`);
           } else {
+            // Foca o chart no ativo antes de cada entrada — operador acompanha visualmente
+            await ensureTvSymbol();
             const open = await openLong(tradeUsdt);
             if (open.ok) {
               const entryPrice = open.avgPrice || lastPrice;
