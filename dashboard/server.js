@@ -1420,23 +1420,32 @@ app.get('/api/micro-scalper/log', (req, res) => {
     let todayTrades = 0;
     let todayPnl = 0;
     let todayProfit = 0;
-    // Pega a data de hoje baseada na hora local do servidor (Brasil)
+    const processedTs = new Set();
+
+    // Data de hoje no formato YYYY-MM-DD (Brasil UTC-3)
     const todayStr = new Date(new Date().getTime() - (3 * 60 * 60 * 1000)).toISOString().split('T')[0];
 
     for (const sess of all) {
-      let lastEntryVal = 0;
+      const entries = (sess.trades || []).filter(t => t.event === 'entry');
+      
       for (const tr of (sess.trades || [])) {
-        if (tr.event === 'entry') {
-          lastEntryVal = (tr.entryPrice || 0) * (tr.qty || 0);
-        }
+        if (!tr.t) continue;
+        
+        // Evita duplicatas se o log tiver sessões repetidas
+        const trKey = `${tr.t}_${tr.event}`;
+        if (processedTs.has(trKey)) continue;
+        processedTs.add(trKey);
+
         flat.push({ session: sess.sessionStart, ...tr });
         
-        // Se o trade for de hoje (ajuste grosseiro usando o dia) e for um evento de saída, contabiliza o PnL
-        if (tr.t && tr.t.includes(todayStr) && tr.event === 'exit') {
+        if (tr.t.includes(todayStr) && tr.event === 'exit') {
           todayTrades++;
-          if (tr.pnlPct) {
+          if (tr.pnlPct != null) {
             todayPnl += tr.pnlPct;
-            todayProfit += tr.pnlUsdt || (tr.pnlPct * lastEntryVal);
+            const entry = entries.filter(e => e.t < tr.t).pop();
+            const entryVal = entry ? (entry.entryPrice * entry.qty) : 10;
+            const pnlUsdt = tr.pnlUsdt !== undefined ? tr.pnlUsdt : (tr.pnlPct * entryVal);
+            todayProfit += pnlUsdt;
           }
         }
       }
