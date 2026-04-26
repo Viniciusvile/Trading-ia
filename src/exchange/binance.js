@@ -40,7 +40,9 @@ function httpRequest({ hostname, path, method, headers = {}, body = null }) {
   });
 }
 
-export function createBinanceClient({ apiKey, secretKey, hostname = "api.binance.com", recvWindow = 5000 }) {
+let timeOffset = 0;
+
+export function createBinanceClient({ apiKey, secretKey, hostname = "api.binance.com", recvWindow = 10000 }) {
   if (!apiKey || !secretKey) throw new Error("Binance credentials missing (apiKey/secretKey)");
 
   async function publicGet(path, params = {}) {
@@ -54,7 +56,7 @@ export function createBinanceClient({ apiKey, secretKey, hostname = "api.binance
   }
 
   async function signedRequest(method, path, params = {}) {
-    const ts = Date.now();
+    const ts = Date.now() + timeOffset;
     const full = { ...params, recvWindow, timestamp: ts };
     const qs = _buildQuery(full);
     const sig = _sign(secretKey, qs);
@@ -110,13 +112,47 @@ export function createBinanceClient({ apiKey, secretKey, hostname = "api.binance
     });
   }
 
+  async function placeOCO(symbol, side, quantity, price, stopPrice, stopLimitPrice) {
+    return signedRequest("POST", "/api/v3/order/oco", {
+      symbol,
+      side,
+      quantity,
+      price: price.toFixed(4), // Alvo de Lucro
+      stopPrice: stopPrice.toFixed(4), // Ativador do Stop
+      stopLimitPrice: (stopLimitPrice || stopPrice).toFixed(4), // Preço real de venda no Stop
+      stopLimitTimeInForce: "GTC"
+    });
+  }
+
   async function getOrder(symbol, orderId) {
     return signedRequest("GET", "/api/v3/order", { symbol, orderId });
+  }
+
+  async function cancelOCO(symbol, orderListId) {
+    return signedRequest("DELETE", "/api/v3/orderList", { symbol, orderListId });
+  }
+
+  async function syncTime() {
+    try {
+      const start = Date.now();
+      const res = await publicGet("/api/v3/time");
+      const end = Date.now();
+      if (res.ok) {
+        const serverTime = res.data.serverTime;
+        // Ajuste considerando a latência da rede (estimada como metade do round-trip)
+        timeOffset = serverTime - Math.floor((start + end) / 2);
+        console.log(`🕒 Binance Time Sync: offset ${timeOffset}ms`);
+      }
+    } catch (e) {
+      console.warn("🕒 Failed to sync time with Binance:", e.message);
+    }
   }
 
   return {
     publicGet, signedRequest,
     getKlines, getPrice, getBalances,
     placeMarketBuyQuote, placeMarketSellQty, getOrder,
+    placeOCO, cancelOCO,
+    syncTime
   };
 }

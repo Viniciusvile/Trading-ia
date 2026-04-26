@@ -1,3 +1,43 @@
+export function calcStandardDeviation(values) {
+  const avg = values.reduce((a, b) => a + b, 0) / values.length;
+  const squareDiffs = values.map((v) => Math.pow(v - avg, 2));
+  const avgSquareDiff = squareDiffs.reduce((a, b) => a + b, 0) / values.length;
+  return Math.sqrt(avgSquareDiff);
+}
+
+export function calcBB(closes, length = 20, mult = 1.8) {
+  if (closes.length < length) return { basis: closes[closes.length-1], upper: closes[closes.length-1], lower: closes[closes.length-1] };
+  const slice = closes.slice(closes.length - length);
+  const basis = slice.reduce((a, b) => a + b, 0) / length;
+  const dev = calcStandardDeviation(slice);
+  return { basis, upper: basis + dev * mult, lower: basis - dev * mult };
+}
+
+export function turboReversionSignal(candles, opts = {}) {
+  const { bbLen = 20, bbMult = 1.8, rsiLen = 14, rsiLimit = 35, volMult = 1.3 } = opts;
+  if (candles.length < Math.max(bbLen, rsiLen) + 2) return { signal: "flat", reason: "not enough bars" };
+  const closes = candles.map((c) => c.close);
+  const vols = candles.map((c) => c.vol || c.volume || 0);
+  const last = closes[closes.length - 1];
+  const lastVol = vols[vols.length - 1];
+  const bb = calcBB(closes, bbLen, bbMult);
+  const rsi = calcRSI(closes, rsiLen);
+  const volSlice = vols.slice(Math.max(0, vols.length - 20));
+  const avgVol = (volSlice.reduce((a, b) => a + b, 0) / volSlice.length) || 1;
+  const isOversold = last < bb.lower && rsi < rsiLimit;
+  const isVolSpike = lastVol > avgVol * volMult;
+  
+  const conditions = [
+    { label: "RSI < " + rsiLimit, value: rsi.toFixed(1), pass: rsi < rsiLimit },
+    { label: "Preço < Banda Inf.", value: last.toFixed(4) + " / " + bb.lower.toFixed(4), pass: last < bb.lower },
+    { label: "Volume Spike", value: (lastVol/avgVol).toFixed(2) + "x", pass: isVolSpike }
+  ];
+
+  if (isOversold && isVolSpike) return { signal: "buy", reason: "turbo-reversion-bottom", last, lower: bb.lower, rsi, volFactor: (lastVol/avgVol).toFixed(2), conditions };
+  if (last > bb.upper) return { signal: "sell", reason: "turbo-reversion-top", last, upper: bb.upper, rsi, conditions };
+  return { signal: "flat", reason: "no turbo setup", last, lower: bb.lower, rsi, volFactor: (lastVol/avgVol).toFixed(2), conditions };
+}
+
 export function calcEMA(closes, period) {
   if (!closes.length) return 0;
   const k = 2 / (period + 1);
@@ -30,27 +70,55 @@ export function calcVWAP(candles) {
   return cumVol === 0 ? candles[candles.length - 1]?.close ?? 0 : cumTPV / cumVol;
 }
 
+export function calcMACD(closes, fast = 12, slow = 26, signal = 9) {
+  if (closes.length < slow + signal) return { macd: 0, signal: 0, hist: 0 };
+  const kFast = 2 / (fast + 1);
+  const kSlow = 2 / (slow + 1);
+  const kSig  = 2 / (signal + 1);
+  let curFast = closes[0];
+  let curSlow = closes[0];
+  const macdLine = [];
+  for (let i = 0; i < closes.length; i++) {
+    curFast = closes[i] * kFast + curFast * (1 - kFast);
+    curSlow = closes[i] * kSlow + curSlow * (1 - kSlow);
+    macdLine.push(curFast - curSlow);
+  }
+  let curSig = macdLine[0];
+  for (let i = 0; i < macdLine.length; i++) curSig = macdLine[i] * kSig + curSig * (1 - kSig);
+  const lastMacd = macdLine[macdLine.length - 1];
+  return { macd: lastMacd, signal: curSig, hist: lastMacd - curSig };
+}
+
 export function microScalpSignal(candles, opts = {}) {
   const { emaPeriod = 8, rsiPeriod = 3, minDip = 0.0005, maxRsi = 75, minRsi = 25 } = opts;
-
-  if (candles.length < Math.max(emaPeriod, rsiPeriod) + 2) {
-    return { signal: "flat", reason: "not enough bars" };
-  }
-
+  if (candles.length < Math.max(emaPeriod, rsiPeriod) + 2) return { signal: "flat", reason: "not enough bars" };
   const closes = candles.map((c) => c.close);
   const last = closes[closes.length - 1];
   const prev = closes[closes.length - 2];
   const ema = calcEMA(closes, emaPeriod);
   const rsi = calcRSI(closes, rsiPeriod);
-
   const dipPct = (prev - last) / prev;
   const bumpPct = (last - prev) / prev;
-
-  if (last > ema && dipPct >= minDip && rsi >= minRsi && rsi <= maxRsi) {
-    return { signal: "buy", reason: "bull-trend micro-dip", last, ema, rsi, dipPct };
-  }
-  if (last < ema && bumpPct >= minDip && rsi >= minRsi && rsi <= maxRsi) {
-    return { signal: "sell", reason: "bear-trend micro-bounce", last, ema, rsi, bumpPct };
-  }
+  if (last > ema && dipPct >= minDip && rsi >= minRsi && rsi <= maxRsi) return { signal: "buy", reason: "bull-trend micro-dip", last, ema, rsi, dipPct, conditions: [{ label: "Acima da EMA", value: last.toFixed(4) + ">" + ema.toFixed(4), pass: last > ema }, { label: "Dip >= " + (minDip*100).toFixed(2) + "%", value: (dipPct*100).toFixed(2) + "%", pass: dipPct >= minDip }, { label: "RSI no Range", value: rsi.toFixed(1), pass: rsi >= minRsi && rsi <= maxRsi }] };
+  if (last < ema && bumpPct >= minDip && rsi >= minRsi && rsi <= maxRsi) return { signal: "sell", reason: "bear-trend micro-bounce", last, ema, rsi, bumpPct, conditions: [{ label: "Abaixo da EMA", value: last.toFixed(4) + "<" + ema.toFixed(4), pass: last < ema }, { label: "Bounce >= " + (minDip*100).toFixed(2) + "%", value: (bumpPct*100).toFixed(2) + "%", pass: bumpPct >= minDip }, { label: "RSI no Range", value: rsi.toFixed(1), pass: rsi >= minRsi && rsi <= maxRsi }] };
   return { signal: "flat", reason: "no micro setup", last, ema, rsi };
+}
+
+export function wv5gSignal(candles, opts = {}) {
+  const { rsiLow = 30, rsiHigh = 85, emaFast = 9, emaSlow = 20 } = opts;
+  if (candles.length < Math.max(emaSlow, 14) + 2) return { signal: "flat", reason: "not enough bars" };
+  const closes = candles.map((c) => c.close);
+  const last = closes[closes.length - 1];
+  const e9 = calcEMA(closes, emaFast);
+  const e20 = calcEMA(closes, emaSlow);
+  const rsi14 = calcRSI(closes, 14);
+  const macd = calcMACD(closes);
+  const c1_bull = last > e9 && e9 > e20;
+  const c1_bear = last < e9 && e9 < e20;
+  const c2 = rsi14 >= rsiLow && rsi14 <= rsiHigh;
+  const c3_bull = macd.hist > 0;
+  const c3_bear = macd.hist < 0;
+  if (c1_bull && c2 && c3_bull) return { signal: "buy", reason: "wv5g-bull-trend", last, e9, e20, rsi14, macdHist: macd.hist };
+  if (c1_bear && c2 && c3_bear) return { signal: "sell", reason: "wv5g-bear-trend", last, e9, e20, rsi14, macdHist: macd.hist };
+  return { signal: "flat", reason: "no wv5g setup", last, e9, e20, rsi14, macdHist: macd.hist };
 }

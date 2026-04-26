@@ -15,7 +15,8 @@ import * as capture from '../src/core/capture.js';
 import * as alerts from '../src/core/alerts.js';
 import * as replay from '../src/core/replay.js';
 import * as watchlist from '../src/core/watchlist.js';
-
+import { createBinanceClient } from '../src/exchange/binance.js';
+import dotenv from 'dotenv';
 import * as pine from '../src/core/pine.js';
 import { evaluate } from '../src/connection.js';
 
@@ -23,6 +24,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 const SCREENSHOTS_DIR = join(ROOT, 'screenshots');
 const JOURNAL_FILE = join(__dirname, 'journal.json');
+
+dotenv.config({ path: join(ROOT, '.env') });
 
 const app = express();
 app.use(express.json());
@@ -62,6 +65,132 @@ app.get('/api/health', async (req, res) => {
   catch (e) { 
     if (MOCK_MODE || process.env.VERCEL) res.json({ success: true, cdp_connected: true, chart_symbol: 'BTCUSDT', chart_resolution: '240', is_mock: true });
     else res.status(500).json({ success: false, error: e.message }); 
+  }
+});
+
+// ── MICRO-SCALPER LIVE SIGNAL ────────────────────────────────────
+app.get('/api/micro-scalper/signal', async (req, res) => {
+  try {
+    const cfg = getRules().micro_scalper;
+    if (!cfg) return res.status(404).json({ success: false, error: 'Config micro_scalper missing' });
+    const strategyMode = cfg.strategy_mode || "micro-dip";
+
+    const { createBinanceClient } = await import('../src/exchange/binance.js');
+    const client = createBinanceClient({
+      apiKey: process.env.BINANCE_API_KEY,
+      secretKey: process.env.BINANCE_SECRET_KEY
+    });
+    
+    let candles;
+    try {
+      // Pega os candles direto da Binance API (independente do que está na tela)
+      candles = await client.getKlines(cfg.symbol || 'XRPUSDT', cfg.candles_interval || '5m', cfg.candles_limit || 50);
+    } catch (e) {
+      if (MOCK_MODE) {
+        candles = Array.from({length:50}, (_,i)=>({ close: 1.40 + Math.random()*0.05, high: 1.45, low: 1.39, volume: 100000 }));
+      } else throw e;
+    }
+
+    const { wv5gSignal, microScalpSignal, turboReversionSignal } = await import('../src/scalper/signals.js');
+    let sig;
+    const bars = Array.isArray(candles) ? candles : (candles.bars || []);
+
+    if (strategyMode === "wv5g-aggr") {
+      sig = wv5gSignal(bars, { rsiLow: cfg.min_rsi || 30, rsiHigh: cfg.max_rsi || 85, emaFast: cfg.ema_fast || 9, emaSlow: cfg.ema_slow || 20 });
+    } else if (strategyMode === "turbo-reversion") {
+      sig = turboReversionSignal(bars, { bbLen: cfg.bb_length, bbMult: cfg.bb_mult, rsiLen: cfg.rsi_period, rsiLimit: cfg.rsi_limit, volMult: cfg.vol_mult });
+    } else {
+      sig = microScalpSignal(bars, { emaPeriod: cfg.ema_period, rsiPeriod: cfg.rsi_period, minDip: cfg.min_dip_pct, minRsi: cfg.min_rsi, maxRsi: cfg.max_rsi });
+    }
+    
+    res.json({ 
+      success: true, 
+      symbol: cfg.symbol, 
+      mode: strategyMode, 
+      signal: sig,
+      source: 'BINANCE_API (Background)' 
+    });
+  } catch (e) {
+    console.error('❌ [API] Signal Error:', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.patch('/api/micro-scalper/config', (req, res) => {
+  try {
+    const mainRules = JSON.parse(readFileSync(join(ROOT, 'rules.json'), 'utf8'));
+    if (!mainRules.micro_scalper) mainRules.micro_scalper = {};
+    const { strategy_mode, symbol, trade_size_pct } = req.body;
+    if (strategy_mode) mainRules.micro_scalper.strategy_mode = strategy_mode;
+    if (symbol) { mainRules.micro_scalper.symbol = symbol; mainRules.micro_scalper.tv_symbol = 'BINANCE:' + symbol; }
+    if (trade_size_pct) mainRules.micro_scalper.trade_size_pct = trade_size_pct;
+    writeFileSync(join(ROOT, 'rules.json'), JSON.stringify(mainRules, null, 2));
+    res.json({ success: true, config: mainRules.micro_scalper });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/api/micro-scalper/trade', async (req, res) => {
+  console.log('🚀 [API] Rapid Trade Execution requested');
+  try {
+    const rules = getRules().micro_scalper;
+    if (!rules) throw new Error('Config micro_scalper missing');
+    
+    const client = createBinanceClient({
+      apiKey: process.env.BINANCE_API_KEY,
+      secretKey: process.env.BINANCE_SECRET_KEY,
+    });
+
+    await client.syncTime();
+
+    const symbol = rules.symbol || 'BTCUSDT';
+    const side = req.body.side?.toUpperCase() || 'BUY';
+    
+    let result;
+    if (side === 'BUY') {
+      const tradeUsdt = req.body.amount || Math.min(Math.max(balances.usdt * (rules.trade_size_pct || 0.1), rules.min_trade_usdt || 5), rules.max_trade_usdt || 10);
+      
+      console.log(`🛒 Buying ${symbol} with ${tradeUsdt} USDT...`);
+      result = await client.placeMarketBuyQuote(symbol, tradeUsdt.toFixed(2));
+    } else {
+      const baseAsset = symbol.replace('USDT', '');
+      const price = await client.getPrice(symbol);
+      const tradeUsdt = req.body.amount || 10;
+      
+      // Calcula a quantidade com base no valor em USDT desejado
+      const qty = tradeUsdt / price;
+      
+      // Formata a quantidade conforme os decimais configurados (XRP Spot = 0)
+      const decimals = parseInt(rules.qty_decimals ?? 0);
+      const f = Math.pow(10, decimals);
+      const fmtQty = (Math.floor(qty * f) / f).toFixed(decimals);
+      
+      if (parseFloat(fmtQty) <= 0) throw new Error(`Valor de ${tradeUsdt} USDT é muito baixo para gerar uma quantidade mínima de ${baseAsset}.`);
+      
+      console.log(`💰 Selling ${fmtQty} ${baseAsset} (approx ${tradeUsdt} USDT at price ${price})...`);
+      result = await client.placeMarketSellQty(symbol, fmtQty);
+    }
+
+    if (result.ok) {
+      res.json({ success: true, data: result.data });
+    } else {
+      res.status(400).json({ success: false, error: result.data?.msg || 'Binance error' });
+    }
+  } catch (e) {
+    console.error('❌ [API] Rapid Trade Error:', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/micro-scalper/sync-symbol', async (req, res) => {
+  try {
+    const rules = getRules().micro_scalper;
+    if (!rules || !rules.tv_symbol) throw new Error('Config tv_symbol missing in rules.json');
+    console.log(`📺 Syncing TradingView to ${rules.tv_symbol}...`);
+    await chart.setSymbol({ symbol: rules.tv_symbol });
+    res.json({ success: true, symbol: rules.tv_symbol });
+  } catch (e) {
+    console.error('❌ [API] Sync Error:', e.message);
+    res.status(500).json({ success: false, error: e.message });
   }
 });
 
@@ -1283,13 +1412,44 @@ app.get('/api/micro-scalper/status', (_req, res) => {
 app.get('/api/micro-scalper/log', (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
-    if (!existsSync(MICRO_LOG)) return res.json({ success: true, sessions: [], trades: [] });
+    if (!existsSync(MICRO_LOG)) return res.json({ success: true, sessions: [], trades: [], daily: { trades: 0, pnl: 0 } });
+    
     const all = JSON.parse(readFileSync(MICRO_LOG, 'utf8'));
     const flat = [];
+    
+    let todayTrades = 0;
+    let todayPnl = 0;
+    // Pega a data de hoje baseada na hora local do servidor (Brasil)
+    const todayStr = new Date(new Date().getTime() - (3 * 60 * 60 * 1000)).toISOString().split('T')[0];
+
     for (const sess of all) {
-      for (const tr of (sess.trades || [])) flat.push({ session: sess.sessionStart, ...tr });
+      for (const tr of (sess.trades || [])) {
+        flat.push({ session: sess.sessionStart, ...tr });
+        
+        // Se o trade for de hoje (ajuste grosseiro usando o dia) e for um evento de saída, contabiliza o PnL
+        if (tr.t && tr.t.includes(todayStr) && tr.event === 'exit') {
+          todayTrades++;
+          if (tr.pnlPct) todayPnl += tr.pnlPct;
+        }
+      }
     }
-    res.json({ success: true, sessions: all.length, trades: flat.slice(-limit).reverse() });
+    res.json({ 
+      success: true, 
+      sessions: all.length, 
+      trades: flat.slice(-limit).reverse(),
+      daily: { trades: todayTrades, pnl: todayPnl }
+    });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.get('/api/micro-scalper/ai-review', async (_req, res) => {
+  try {
+    const { getAiPerformanceReview } = await import('../src/ai/reviewer.js');
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return res.status(400).json({ success: false, error: 'Chave de API do Gemini não configurada' });
+    
+    const analysis = await getAiPerformanceReview(apiKey);
+    res.json({ success: true, analysis });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
@@ -1331,6 +1491,7 @@ app.post('/api/micro-scalper/stop', (_req, res) => {
     res.json({ success: true, killed: pidToKill });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
+
 
 // ── FALLBACK ─────────────────────────────────────────────────────
 app.get('/*splat', (_req, res) => res.sendFile(join(__dirname, 'index.html')));

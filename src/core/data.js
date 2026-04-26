@@ -138,30 +138,49 @@ export async function getStrategyResults() {
       try {
         var chart = ${CHART_API}._chartWidget;
         var sources = chart.model().model().dataSources();
-        var strat = null;
+        var allMetrics = [];
+        
         for (var i = 0; i < sources.length; i++) {
           var s = sources[i];
-          if (s.metaInfo && s.metaInfo().is_price_study === false && (s.reportData || s.performance)) { strat = s; break; }
-        }
-        if (!strat) return {metrics: {}, source: 'internal_api', error: 'No strategy found on chart. Add a strategy indicator first.'};
-        var metrics = {};
-        if (strat.reportData) {
-          var rd = typeof strat.reportData === 'function' ? strat.reportData() : strat.reportData;
-          if (rd && typeof rd === 'object') {
-            if (typeof rd.value === 'function') rd = rd.value();
-            if (rd) { var keys = Object.keys(rd); for (var k = 0; k < keys.length; k++) { var val = rd[keys[k]]; if (val !== null && val !== undefined && typeof val !== 'function') metrics[keys[k]] = val; } }
+          if (!s.metaInfo || s.metaInfo().is_price_study === true) continue;
+          
+          var metrics = {};
+          if (s.reportData) {
+            var rd = typeof s.reportData === 'function' ? s.reportData() : s.reportData;
+            if (rd && typeof rd === 'object') {
+              if (typeof rd.value === 'function') rd = rd.value();
+              if (rd) { var keys = Object.keys(rd); for (var k = 0; k < keys.length; k++) { var val = rd[keys[k]]; if (val !== null && val !== undefined && typeof val !== 'function') metrics[keys[k]] = val; } }
+            }
+          }
+          if (Object.keys(metrics).length === 0 && s.performance) {
+            var perf = s.performance();
+            if (perf && typeof perf.value === 'function') perf = perf.value();
+            if (perf && typeof perf === 'object') { var pkeys = Object.keys(perf); for (var p = 0; p < pkeys.length; p++) { var pval = perf[pkeys[p]]; if (pval !== null && pval !== undefined && typeof pval !== 'function') metrics[pkeys[p]] = pval; } }
+          }
+          
+          if (Object.keys(metrics).length > 0) {
+            allMetrics.push({
+              name: s.metaInfo().description || s.metaInfo().shortDescription || 'Unknown Strategy',
+              metrics: metrics
+            });
           }
         }
-        if (Object.keys(metrics).length === 0 && strat.performance) {
-          var perf = strat.performance();
-          if (perf && typeof perf.value === 'function') perf = perf.value();
-          if (perf && typeof perf === 'object') { var pkeys = Object.keys(perf); for (var p = 0; p < pkeys.length; p++) { var pval = perf[pkeys[p]]; if (pval !== null && pval !== undefined && typeof pval !== 'function') metrics[pkeys[p]] = pval; } }
-        }
-        return {metrics: metrics, source: 'internal_api'};
+        
+        if (allMetrics.length === 0) return {metrics: {}, source: 'internal_api', error: 'No strategy with metrics found on chart.'};
+        
+        // Retorna a primeira que tiver métricas por compatibilidade, mas agora sabemos que procuramos em todas
+        return {metrics: allMetrics[0].metrics, all: allMetrics, source: 'internal_api'};
       } catch(e) { return {metrics: {}, source: 'internal_api', error: e.message}; }
     })()
   `);
-  return { success: true, metric_count: Object.keys(results?.metrics || {}).length, source: results?.source, metrics: results?.metrics || {}, error: results?.error };
+  return { 
+    success: true, 
+    metric_count: Object.keys(results?.metrics || {}).length, 
+    source: results?.source, 
+    metrics: results?.metrics || {}, 
+    all_strategies: results?.all || [],
+    error: results?.error 
+  };
 }
 
 export async function getTrades({ max_trades } = {}) {

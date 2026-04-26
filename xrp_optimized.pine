@@ -1,0 +1,45 @@
+//@version=6
+strategy("XRP TURBO SCALPER", shorttitle="XRP TURBO", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=10)
+
+// ── Inputs ───────────────────────────────────────────────────
+length     = input.int(20, "Período Bollinger", group="Indicadores")
+mult       = input.float(1.8, "Desvio Padrão (Turbo)", group="Indicadores")
+rsiLen     = input.int(14, "RSI Período", group="Indicadores")
+rsiLimit   = input.int(45, "RSI Máximo para Compra", group="Indicadores")
+volMult    = input.float(1.1, "Pico de Volume (x)", group="Filtros")
+
+slPct      = input.float(0.8, "Stop Loss (%)", group="Saída")
+
+// ── Indicadores ──────────────────────────────────────────────
+[basis, upper, lower] = ta.bb(close, length, mult)
+rsiVal = ta.rsi(close, rsiLen)
+avgVol = ta.sma(volume, 20)
+
+// ── Condição de Compra (Exaustão + Volume) ──────────────────
+// 1. Preço abaixo da banda inferior (desconto)
+// 2. RSI abaixo do limite (sobrevendido)
+// 3. Volume maior que a média (presença de grandes players)
+buyCond = close < lower and rsiVal < rsiLimit and volume > avgVol * volMult
+
+// ── Entrada ──────────────────────────────────────────────────
+var float entryPrice = na
+if buyCond and strategy.position_size == 0
+    entryPrice := close
+    strategy.entry("TurboLong", strategy.long)
+
+// ── Saída Dinâmica (O Segredo do Lucro) ──────────────────────
+if strategy.position_size > 0
+    // Saída 1: Tocou a banda superior (Alvo ideal)
+    // Saída 2: Stop Loss de proteção
+    strategy.exit("Exit", "TurboLong", stop=entryPrice * (1 - slPct / 100), limit=upper)
+    
+    // Saída de Emergência: Preço cruzou a média central e perdeu força
+    if ta.crossunder(close, basis) and close < entryPrice
+        strategy.close("TurboLong", comment="emergency-exit")
+
+// ── Visual ────────────────────────────────────────────────────
+plot(basis, color=color.new(color.gray, 50))
+p1 = plot(upper, color=color.new(color.blue, 50))
+p2 = plot(lower, color=color.new(color.blue, 50))
+fill(p1, p2, color=color.new(color.blue, 96))
+plotshape(buyCond, style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), textcolor=color.white, text="🚀 TURBO", size=size.tiny)

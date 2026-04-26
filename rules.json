@@ -1,7 +1,8 @@
 {
-  "watchlist": ["BTCUSDT"],
+  "watchlist": [
+    "BTCUSDT"
+  ],
   "default_timeframe": "1",
-
   "strategy": {
     "name": "10-Second Momentum Scalper",
     "sources": [
@@ -13,12 +14,10 @@
       "10-second execution loop"
     ]
   },
-
   "indicators": {
     "rsi_14": "Momentum filter. Only trade when RSI is between 30–70 (avoid extremes).",
     "price_momentum": "Compare last close vs previous close. Up = long signal. Down = short signal."
   },
-
   "bias_criteria": {
     "bullish": [
       "Last 1-min candle closed higher than the one before it",
@@ -34,7 +33,6 @@
       "Candle close change is less than 0.05% (chop — skip)"
     ]
   },
-
   "entry_rules": {
     "long": [
       "Last close > previous close by at least 0.05%",
@@ -47,12 +45,10 @@
       "Enter market sell immediately"
     ]
   },
-
   "exit_rules": [
     "Exit automatically after 10 seconds (next loop tick closes previous position)",
     "No manual exit management — pure time-based scalp"
   ],
-
   "risk_rules": [
     "Fixed trade size: 1% of portfolio per trade",
     "Maximum trade size: $3.00",
@@ -60,25 +56,24 @@
     "No stop loss — exit is time-based at next tick",
     "For demo purposes only — minimum BitGet order size may apply"
   ],
-
   "notes": "Demo strategy for YouTube video. Runs 6 trades over 60 seconds, one every 10 seconds. Signal is simple price momentum on 1-min candles with RSI sanity check.",
-
   "micro_scalper": {
     "exchange": "binance",
     "symbol": "XRPUSDT",
     "tv_symbol": "BINANCE:XRPUSDT",
-    "loop_interval_ms": 2000,
-    "max_trades": 30,
-    "max_session_ms": 14400000,
-    "candles_interval": "1m",
-    "candles_limit": 30,
+    "loop_interval_ms": 1000,
+    "max_trades": 100,
+    "max_session_ms": 43200000,
+    "candles_interval": "5m",
+    "candles_limit": 50,
     "ema_period": 8,
-    "rsi_period": 3,
-    "min_dip_pct": 0.0005,
-    "min_rsi": 25,
-    "max_rsi": 75,
-    "tp_pct": 0.0015,
-    "sl_pct": 0.001,
+    "rsi_period": 14,
+    "bb_length": 20,
+    "bb_mult": 1.8,
+    "vol_mult": 1.1,
+    "rsi_limit": 45,
+    "tp_pct": 0.008,
+    "sl_pct": 0.008,
     "max_hold_ms": 1800000,
     "trade_size_pct": 0.2,
     "max_trade_usdt": 10,
@@ -86,8 +81,9 @@
     "cooldown_ms": 5000,
     "daily_loss_stop_pct": 0.02,
     "qty_decimals": 1,
-    "quote_decimals": 2,
+    "quote_decimals": 4,
     "draw_on_tradingview": true,
-    "auto_set_tv_symbol": true
+    "auto_set_tv_symbol": true,
+    "strategy_mode": "turbo-reversion"
   }
 }
