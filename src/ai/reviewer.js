@@ -52,7 +52,16 @@ Responda em Português de forma clara e técnica.
         });
 
         const data = await response.json();
-        return data.candidates?.[0]?.content?.parts?.[0]?.text || "Não foi possível gerar a análise no momento.";
+        
+        if (data.error) {
+            return `Erro da API Gemini: ${data.error.message} (${data.error.status})`;
+        }
+
+        if (!data.candidates || data.candidates.length === 0) {
+            return "O Gemini não retornou sugestões. Verifique os logs do servidor ou se a cota da API foi atingida.";
+        }
+
+        return data.candidates[0].content.parts[0].text;
     } catch (e) {
         return "Erro ao conectar com o Gemini: " + e.message;
     }
