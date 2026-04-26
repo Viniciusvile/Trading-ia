@@ -700,11 +700,11 @@ app.post('/api/strategies/apply', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-// ── BOT (claude-tradingview-mcp-trading) ─────────────────────────
-const BOT_DIR = resolve(ROOT, '..', 'claude-tradingview-mcp-trading');
-const BOT_LOG = join(BOT_DIR, 'safety-check-log.json');
-const BOT_ENV = join(BOT_DIR, '.env');
-const BOT_RULES = join(BOT_DIR, 'rules.json');
+// ── BOT (masterbot consolidado) ─────────────────────────
+const BOT_DIR = join(ROOT, 'masterbot');
+const BOT_LOG = join(ROOT, 'safety-check-log.json');
+const BOT_ENV = join(ROOT, '.env');
+const BOT_RULES = join(ROOT, 'rules.json');
 const BOT_MASTER_STATUS = join(BOT_DIR, 'master-status.json');
 const BOT_MASTER_PID = join(BOT_DIR, 'master.pid');
 
