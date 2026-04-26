@@ -61,5 +61,33 @@
     "For demo purposes only — minimum BitGet order size may apply"
   ],
 
-  "notes": "Demo strategy for YouTube video. Runs 6 trades over 60 seconds, one every 10 seconds. Signal is simple price momentum on 1-min candles with RSI sanity check."
+  "notes": "Demo strategy for YouTube video. Runs 6 trades over 60 seconds, one every 10 seconds. Signal is simple price momentum on 1-min candles with RSI sanity check.",
+
+  "micro_scalper": {
+    "exchange": "binance",
+    "symbol": "XRPUSDT",
+    "tv_symbol": "BINANCE:XRPUSDT",
+    "loop_interval_ms": 2000,
+    "max_trades": 30,
+    "max_session_ms": 14400000,
+    "candles_interval": "1m",
+    "candles_limit": 30,
+    "ema_period": 8,
+    "rsi_period": 3,
+    "min_dip_pct": 0.0005,
+    "min_rsi": 25,
+    "max_rsi": 75,
+    "tp_pct": 0.0015,
+    "sl_pct": 0.001,
+    "max_hold_ms": 1800000,
+    "trade_size_pct": 0.2,
+    "max_trade_usdt": 10,
+    "min_trade_usdt": 5,
+    "cooldown_ms": 5000,
+    "daily_loss_stop_pct": 0.02,
+    "qty_decimals": 1,
+    "quote_decimals": 2,
+    "draw_on_tradingview": true,
+    "auto_set_tv_symbol": true
+  }
 }
