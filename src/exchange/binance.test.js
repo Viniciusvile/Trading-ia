@@ -8,6 +8,11 @@ test("_buildQuery serializes params deterministically", () => {
   assert.equal(q, "symbol=XRPUSDT&side=BUY&type=MARKET&quoteOrderQty=5.00&timestamp=1700000000000");
 });
 
+test("_buildQuery URL-encodes special characters", () => {
+  const q = _buildQuery({ a: "x y", b: "&=?" });
+  assert.equal(q, "a=x%20y&b=%26%3D%3F");
+});
+
 test("_sign produces deterministic HMAC-SHA256 hex", () => {
   const sig = _sign("secret", "symbol=XRPUSDT&timestamp=1700000000000");
   assert.equal(typeof sig, "string");

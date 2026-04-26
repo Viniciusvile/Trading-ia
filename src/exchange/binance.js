@@ -5,7 +5,7 @@ import https from "https";
 export function _buildQuery(params) {
   return Object.entries(params)
     .filter(([, v]) => v !== undefined && v !== null && v !== "")
-    .map(([k, v]) => `${k}=${v}`)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
     .join("&");
 }
 
@@ -32,6 +32,9 @@ function httpRequest({ hostname, path, method, headers = {}, body = null }) {
       });
     });
     req.on("error", reject);
+    req.setTimeout(10_000, () => {
+      req.destroy(new Error(`HTTP timeout after 10s for ${method} ${path}`));
+    });
     if (body) req.write(body);
     req.end();
   });
