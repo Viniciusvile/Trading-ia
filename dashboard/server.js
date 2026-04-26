@@ -1241,6 +1241,97 @@ app.get('/api/price/:symbol', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
+// ── MICRO-SCALPER ────────────────────────────────────────────────
+const MICRO_SCRIPT = join(ROOT, 'micro-scalper.js');
+const MICRO_LOG = join(ROOT, 'micro-scalper-log.json');
+const MICRO_PID = join(ROOT, '.micro-scalper.pid');
+let microProcess = null;
+
+function microIsAlive() {
+  if (microProcess && !microProcess.killed) return { alive: true, pid: microProcess.pid };
+  if (existsSync(MICRO_PID)) {
+    const pid = parseInt(readFileSync(MICRO_PID, 'utf8'));
+    if (pid) {
+      try {
+        const stdout = execSync(`tasklist /FI "PID eq ${pid}" /NH`).toString();
+        if (stdout.includes(pid.toString())) return { alive: true, pid };
+      } catch {}
+    }
+  }
+  return { alive: false, pid: null };
+}
+
+app.get('/api/micro-scalper/config', (_req, res) => {
+  try {
+    const cfg = getRules().micro_scalper || null;
+    res.json({ success: true, config: cfg });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.get('/api/micro-scalper/status', (_req, res) => {
+  try {
+    const liveness = microIsAlive();
+    let lastSession = null;
+    if (existsSync(MICRO_LOG)) {
+      const all = JSON.parse(readFileSync(MICRO_LOG, 'utf8'));
+      if (Array.isArray(all) && all.length) lastSession = all[all.length - 1];
+    }
+    res.json({ success: true, running: liveness.alive, pid: liveness.pid, lastSession });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.get('/api/micro-scalper/log', (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    if (!existsSync(MICRO_LOG)) return res.json({ success: true, sessions: [], trades: [] });
+    const all = JSON.parse(readFileSync(MICRO_LOG, 'utf8'));
+    const flat = [];
+    for (const sess of all) {
+      for (const tr of (sess.trades || [])) flat.push({ session: sess.sessionStart, ...tr });
+    }
+    res.json({ success: true, sessions: all.length, trades: flat.slice(-limit).reverse() });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/api/micro-scalper/start', (_req, res) => {
+  try {
+    const liveness = microIsAlive();
+    if (liveness.alive) return res.json({ success: false, error: 'already running', pid: liveness.pid });
+
+    if (existsSync(MICRO_PID)) {
+      try { unlinkSync(MICRO_PID); } catch {}
+    }
+    if (!existsSync(MICRO_SCRIPT)) {
+      return res.status(404).json({ success: false, error: 'micro-scalper.js not found at ' + MICRO_SCRIPT });
+    }
+
+    console.log(`⚡ Iniciando Micro-Scalper...`);
+    microProcess = spawn('node', [MICRO_SCRIPT], {
+      cwd: ROOT,
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env },
+    });
+    if (microProcess.pid) writeFileSync(MICRO_PID, microProcess.pid.toString());
+    microProcess.unref();
+    res.json({ success: true, pid: microProcess.pid });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/api/micro-scalper/stop', (_req, res) => {
+  try {
+    let pidToKill = microProcess?.pid;
+    if (!pidToKill && existsSync(MICRO_PID)) pidToKill = parseInt(readFileSync(MICRO_PID, 'utf8'));
+    if (!pidToKill) return res.json({ success: false, error: 'not running' });
+
+    console.log(`🛑 Matando Micro-Scalper (PID: ${pidToKill})...`);
+    try { execSync(`taskkill /F /PID ${pidToKill} /T 2>nul`); } catch {}
+    if (microProcess) { try { microProcess.kill('SIGTERM'); } catch {} microProcess = null; }
+    if (existsSync(MICRO_PID)) { try { unlinkSync(MICRO_PID); } catch {} }
+    res.json({ success: true, killed: pidToKill });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
 // ── FALLBACK ─────────────────────────────────────────────────────
 app.get('/*splat', (_req, res) => res.sendFile(join(__dirname, 'index.html')));
 

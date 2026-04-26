@@ -289,6 +289,9 @@ button.sm{padding:5px 10px;font-size:11px;}
     <div class="nav-item" data-tab="positions" onclick="switchTab('positions')">
       <span class="nav-icon">📂</span><span class="nav-label">Posições</span>
     </div>
+    <div class="nav-item" data-tab="micro-scalper" onclick="switchTab('micro-scalper')">
+      <span class="nav-icon">⚡</span><span class="nav-label">Micro-Scalper</span>
+    </div>
     <div class="nav-item" data-tab="alerts" onclick="switchTab('alerts')">
       <span class="nav-icon">🔔</span><span class="nav-label">Alertas</span>
     </div>
@@ -1068,6 +1071,59 @@ button.sm{padding:5px 10px;font-size:11px;}
 
 </div>
 
+<!-- ═══════════════ MICRO-SCALPER ═══════════════ -->
+<div class="tab-panel" id="tab-micro-scalper">
+  <div class="card" style="margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:3px">Status</div>
+        <div id="micro-status-label" style="font-size:18px;font-weight:700">—</div>
+        <div id="micro-status-detail" style="font-size:12px;color:var(--muted);margin-top:2px">—</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button id="micro-start-btn" class="btn btn-primary" onclick="microStart()">▶ Iniciar</button>
+        <button id="micro-stop-btn" class="btn" onclick="microStop()">■ Parar</button>
+        <button class="btn" onclick="loadMicroScalper()">⟳ Atualizar</button>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+    <div class="card">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px">Configuração (rules.json → micro_scalper)</div>
+      <div id="micro-config-grid" style="font-size:12px;display:grid;grid-template-columns:auto 1fr;gap:4px 12px">—</div>
+    </div>
+    <div class="card">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px">Última Sessão</div>
+      <div id="micro-session-summary" style="font-size:12px">—</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)">Trades recentes</div>
+      <div style="font-size:11px;color:var(--muted)">Atualiza a cada 5s</div>
+    </div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead>
+          <tr style="text-align:left;color:var(--muted);font-weight:600;border-bottom:1px solid rgba(255,255,255,.08)">
+            <th style="padding:6px 8px">Hora</th>
+            <th style="padding:6px 8px">Evento</th>
+            <th style="padding:6px 8px">Motivo</th>
+            <th style="padding:6px 8px">Entry</th>
+            <th style="padding:6px 8px">Exit</th>
+            <th style="padding:6px 8px">Qty</th>
+            <th style="padding:6px 8px">PnL %</th>
+          </tr>
+        </thead>
+        <tbody id="micro-trades-tbody"></tbody>
+      </table>
+    </div>
+    <div id="micro-trades-empty" style="padding:16px;text-align:center;color:var(--muted);font-size:12px;display:none">Sem trades ainda. Clique em <b>Iniciar</b> para começar uma sessão.</div>
+  </div>
+</div>
+
 <!-- ═══════════════ ESTRATÉGIAS ═══════════════ -->
 <div class="tab-panel" id="tab-strategies">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -1305,6 +1361,7 @@ const PAGE_TITLES = {
   dashboard:'Dashboard', scanner:'Scanner de Mercado',
   alerts:'Alertas', strategy:'Análise de Estratégia',
   bot:'Master Bot', strategies:'Estratégias Pine', positions:'Posições',
+  'micro-scalper':'Micro-Scalper (Binance + TV)',
 };
 function switchTab(name) {
   try {
@@ -1331,6 +1388,15 @@ function switchTab(name) {
     } else {
       clearInterval(window._positionsInterval);
       window._positionsInterval = null;
+    }
+    if (name === 'micro-scalper') {
+      loadMicroScalper().catch(e => console.error('Micro-scalper load failed:', e));
+      if (!window._microInterval) {
+        window._microInterval = setInterval(() => loadMicroScalper().catch(() => {}), 5000);
+      }
+    } else {
+      clearInterval(window._microInterval);
+      window._microInterval = null;
     }
   } catch(e) {
     console.error('Erro ao trocar aba:', e);
@@ -2284,6 +2350,117 @@ async function closePosition(posId, symbol, markOnly = false) {
 }
 
 let _lastMasterRun = null;
+
+// ── MICRO-SCALPER ────────────────────────────────────────────────
+async function loadMicroScalper() {
+  try {
+    const [statusR, cfgR, logR] = await Promise.all([
+      fetch(B+'/api/micro-scalper/status?t='+Date.now()),
+      fetch(B+'/api/micro-scalper/config'),
+      fetch(B+'/api/micro-scalper/log?limit=50'),
+    ]);
+    const status = statusR.ok ? await statusR.json() : { success:false };
+    const cfgRes = cfgR.ok ? await cfgR.json() : { success:false };
+    const logRes = logR.ok ? await logR.json() : { success:false, trades:[] };
+
+    const lbl = $('micro-status-label');
+    const det = $('micro-status-detail');
+    if (status.success && status.running) {
+      lbl.textContent = '⚡ Rodando';
+      lbl.style.color = '#10b981';
+      det.textContent = 'PID ' + status.pid;
+    } else {
+      lbl.textContent = '⏸ Parado';
+      lbl.style.color = '#94a3b8';
+      det.textContent = status.success ? 'Pronto para iniciar' : (status.error || 'Sem status');
+    }
+
+    const grid = $('micro-config-grid');
+    if (cfgRes.success && cfgRes.config) {
+      const c = cfgRes.config;
+      const fields = [
+        ['Símbolo', c.symbol], ['TV Symbol', c.tv_symbol],
+        ['TP', (c.tp_pct*100).toFixed(3)+'%'], ['SL', (c.sl_pct*100).toFixed(3)+'%'],
+        ['Hold máx.', (c.max_hold_ms/60000)+' min'],
+        ['Loop', (c.loop_interval_ms/1000)+' s'],
+        ['Max trades', c.max_trades], ['Sessão máx.', (c.max_session_ms/3600000)+' h'],
+        ['Tamanho', (c.trade_size_pct*100)+'% USDT'],
+        ['Cap', '$'+c.max_trade_usdt], ['Min', '$'+c.min_trade_usdt],
+        ['Loss-stop', (c.daily_loss_stop_pct*100)+'%'],
+        ['Desenhar TV', c.draw_on_tradingview ? 'sim' : 'não'],
+      ];
+      grid.innerHTML = fields.map(([k,v]) =>
+        `<div style="color:var(--muted)">${k}</div><div style="font-weight:600">${v}</div>`).join('');
+    } else {
+      grid.innerHTML = '<div style="color:#ef4444;grid-column:1/-1">Bloco micro_scalper ausente em rules.json</div>';
+    }
+
+    const sess = status.lastSession;
+    const summary = $('micro-session-summary');
+    if (sess && sess.trades) {
+      const trades = sess.trades;
+      const exits = trades.filter(t => t.event === 'exit');
+      const wins = exits.filter(t => (t.pnlPct || 0) > 0).length;
+      const cum = exits.reduce((s,t) => s + (t.pnlPct || 0), 0);
+      summary.innerHTML = `
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px">
+          <div style="color:var(--muted)">Início</div><div>${new Date(sess.sessionStart).toLocaleString('pt-BR')}</div>
+          <div style="color:var(--muted)">Trades</div><div>${exits.length}</div>
+          <div style="color:var(--muted)">Wins</div><div>${wins} (${exits.length ? ((wins/exits.length)*100).toFixed(1) : 0}%)</div>
+          <div style="color:var(--muted)">Cum. PnL</div><div style="color:${cum>=0?'#10b981':'#ef4444'};font-weight:700">${(cum*100).toFixed(3)}%</div>
+        </div>`;
+    } else {
+      summary.innerHTML = '<div style="color:var(--muted)">Nenhuma sessão registrada ainda.</div>';
+    }
+
+    const tbody = $('micro-trades-tbody');
+    const empty = $('micro-trades-empty');
+    const trades = (logRes.success && logRes.trades) ? logRes.trades : [];
+    if (!trades.length) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+    } else {
+      empty.style.display = 'none';
+      tbody.innerHTML = trades.map(t => {
+        const time = t.t ? new Date(t.t).toLocaleTimeString('pt-BR') : '—';
+        const pnl = (t.pnlPct != null) ? (t.pnlPct*100).toFixed(3)+'%' : '';
+        const pnlColor = (t.pnlPct||0) > 0 ? '#10b981' : (t.pnlPct||0) < 0 ? '#ef4444' : 'var(--muted)';
+        const evColor = t.event === 'entry' ? '#3b82f6' : '#94a3b8';
+        return `<tr style="border-bottom:1px solid rgba(255,255,255,.04)">
+          <td style="padding:6px 8px">${time}</td>
+          <td style="padding:6px 8px;color:${evColor};font-weight:600">${t.event||'—'}</td>
+          <td style="padding:6px 8px;color:var(--muted)">${t.reason || t.signal || ''}</td>
+          <td style="padding:6px 8px">${t.entryPrice ? Number(t.entryPrice).toFixed(4) : '—'}</td>
+          <td style="padding:6px 8px">${t.exitPrice ? Number(t.exitPrice).toFixed(4) : '—'}</td>
+          <td style="padding:6px 8px">${t.qty != null ? Number(t.qty).toFixed(4) : '—'}</td>
+          <td style="padding:6px 8px;color:${pnlColor};font-weight:600">${pnl}</td>
+        </tr>`;
+      }).join('');
+    }
+  } catch(e) {
+    console.error('loadMicroScalper:', e);
+  }
+}
+
+async function microStart() {
+  try {
+    const r = await fetch(B+'/api/micro-scalper/start', { method:'POST' });
+    const d = await r.json();
+    if (d.success) toast('Micro-Scalper iniciado (PID '+d.pid+')', 'success');
+    else toast('Falha ao iniciar: '+(d.error||'?'), 'error');
+    setTimeout(loadMicroScalper, 500);
+  } catch(e) { toast('Erro: '+e.message, 'error'); }
+}
+
+async function microStop() {
+  try {
+    const r = await fetch(B+'/api/micro-scalper/stop', { method:'POST' });
+    const d = await r.json();
+    if (d.success) toast('Micro-Scalper parado', 'success');
+    else toast('Falha ao parar: '+(d.error||'?'), 'error');
+    setTimeout(loadMicroScalper, 500);
+  } catch(e) { toast('Erro: '+e.message, 'error'); }
+}
 
 async function loadMasterStatus() {
   try {
