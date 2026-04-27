@@ -1518,11 +1518,10 @@ app.post('/api/micro-scalper/stop', (_req, res) => {
 app.get('/*splat', (_req, res) => res.sendFile(join(__dirname, 'index.html')));
 
 // ── START ─────────────────────────────────────────────────────────
-if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
-  const PORT = process.env.PORT || 3333;
-  createServer(app).listen(PORT, () => {
-    console.log(`\n✅ Dashboard: http://localhost:${PORT}\n`);
-  });
-}
+const PORT = process.env.PORT || 3333;
+const server = createServer(app);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n✅ Dashboard Server running on port ${PORT}\n`);
+});
 
 export default app;
