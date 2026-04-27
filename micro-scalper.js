@@ -46,8 +46,8 @@ const cfg = JSON.parse(readFileSync(new URL("rules.json", import.meta.url), "utf
 if (!cfg) throw new Error("rules.json is missing 'micro_scalper' block");
 
 const client = createBinanceClient({
-  apiKey: process.env.BINANCE_API_KEY,
-  secretKey: process.env.BINANCE_SECRET_KEY,
+  apiKey: process.env.USE_BINANCE_KEY || process.env.BINANCE_API_KEY,
+  secretKey: process.env.USE_BINANCE_SECRET || process.env.BINANCE_SECRET_KEY,
 });
 
 const SYMBOL = cfg.symbol;

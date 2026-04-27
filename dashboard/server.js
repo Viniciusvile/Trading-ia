@@ -136,8 +136,8 @@ app.post('/api/micro-scalper/trade', async (req, res) => {
     if (!rules) throw new Error('Config micro_scalper missing');
     
     const client = createBinanceClient({
-      apiKey: process.env.BINANCE_API_KEY,
-      secretKey: process.env.BINANCE_SECRET_KEY,
+      apiKey: process.env.USE_BINANCE_KEY || process.env.BINANCE_API_KEY,
+      secretKey: process.env.USE_BINANCE_SECRET || process.env.BINANCE_SECRET_KEY,
     });
 
     await client.syncTime();
