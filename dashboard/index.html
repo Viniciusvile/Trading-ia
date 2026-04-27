@@ -1111,6 +1111,11 @@ button.sm{padding:5px 10px;font-size:11px;}
         <tbody id="pos-closed-tbody"></tbody>
       </table>
     </div>
+    <div id="pos-closed-pagination" style="display:flex;justify-content:center;align-items:center;margin-top:15px;gap:10px;font-size:12px;display:none">
+      <button onclick="changeClosedPage(-1)" class="btn secondary" style="padding:4px 10px;font-size:11px">Anterior</button>
+      <span id="pos-closed-page-info" style="color:var(--muted)">Página 1 de 1</span>
+      <button onclick="changeClosedPage(1)" class="btn secondary" style="padding:4px 10px;font-size:11px">Próxima</button>
+    </div>
   </div>
 
 </div>
@@ -1412,6 +1417,8 @@ const B = window.location.origin;
 let autoTimer = null;
 let serverOffline = false;
 let currentSymbol = '', currentTF = '240';
+let _closedPosPage = 1;
+const _closedPosPerPage = 10;
 
 // ─── TRADINGVIEW WIDGET ─────────────────────────────────────────
 let _tvLastKey = '';
@@ -2292,9 +2299,23 @@ async function loadPositions() {
     const closedEmpty = document.getElementById('pos-closed-empty');
     if (closed.length === 0) {
       closedWrap.style.display = 'none'; closedEmpty.style.display = 'block';
+      $('pos-closed-pagination').style.display = 'none';
     } else {
       closedWrap.style.display = 'block'; closedEmpty.style.display = 'none';
-      closedTbody.innerHTML = [...closed].reverse().map(pos => {
+      
+      const totalPages = Math.ceil(closed.length / _closedPosPerPage);
+      if (_closedPosPage > totalPages) _closedPosPage = totalPages;
+      if (_closedPosPage < 1) _closedPosPage = 1;
+
+      $('pos-closed-pagination').style.display = totalPages > 1 ? 'flex' : 'none';
+      $('pos-closed-page-info').textContent = `Página ${_closedPosPage} de ${totalPages}`;
+
+      const start = (_closedPosPage - 1) * _closedPosPerPage;
+      const end = start + _closedPosPerPage;
+      const reversed = [...closed].reverse();
+      const pageData = reversed.slice(start, end);
+
+      closedTbody.innerHTML = pageData.map(pos => {
         const pnlColor = (pos.pnl || 0) >= 0 ? 'var(--green)' : 'var(--red)';
         const pnlUsd = pos.pnl !== undefined ? (pos.pnl >= 0 ? '+' : '') + '$' + parseFloat(pos.pnl).toFixed(4) : '—';
         const pnlPct = (pos.exitPrice && pos.entryPrice)
@@ -2724,6 +2745,11 @@ async function openMicroTradeDetail(idx) {
 function closeMicroTradeDetail(e) {
     if (e && e.target !== $('micro-trade-detail-overlay')) return;
     $('micro-trade-detail-overlay').style.display = 'none';
+}
+
+function changeClosedPage(delta) {
+    _closedPosPage += delta;
+    loadPositions();
 }
 
 async function microStart() {
