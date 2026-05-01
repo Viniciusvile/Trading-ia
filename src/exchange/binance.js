@@ -112,20 +112,33 @@ export function createBinanceClient({ apiKey, secretKey, hostname = "api.binance
     });
   }
 
-  async function placeOCO(symbol, side, quantity, price, stopPrice, stopLimitPrice) {
+  async function placeOCO(symbol, side, quantity, price, stopPrice, stopLimitPrice, precision = null) {
+    // Calcula precisão automaticamente baseado no preço real
+    // Ex: PEPE ~0.000009 precisa de 8+ decimais, XRP ~0.5 precisa de 4
+    function autoPrecision(p, minPrec = 4) {
+      if (p <= 0) return minPrec;
+      // Quantas casas decimais para ter pelo menos 4 dígitos significativos
+      const needed = Math.max(minPrec, Math.ceil(-Math.log10(p)) + 3);
+      return Math.min(needed, 8);
+    }
+    const prec = precision !== null && precision !== undefined ? precision : autoPrecision(price);
     return signedRequest("POST", "/api/v3/order/oco", {
       symbol,
       side,
       quantity,
-      price: price.toFixed(4), // Alvo de Lucro
-      stopPrice: stopPrice.toFixed(4), // Ativador do Stop
-      stopLimitPrice: (stopLimitPrice || stopPrice).toFixed(4), // Preço real de venda no Stop
+      price: price.toFixed(prec), // Alvo de Lucro
+      stopPrice: stopPrice.toFixed(prec), // Ativador do Stop
+      stopLimitPrice: (stopLimitPrice || stopPrice).toFixed(prec), // Preço real de venda no Stop
       stopLimitTimeInForce: "GTC"
     });
   }
 
   async function getOrder(symbol, orderId) {
     return signedRequest("GET", "/api/v3/order", { symbol, orderId });
+  }
+
+  async function getOCO(orderListId) {
+    return signedRequest("GET", "/api/v3/orderList", { orderListId });
   }
 
   async function cancelOCO(symbol, orderListId) {
@@ -148,11 +161,35 @@ export function createBinanceClient({ apiKey, secretKey, hostname = "api.binance
     }
   }
 
+  /**
+   * Verifica se o BNB Burn (desconto de 25% em taxas spot) está ativado.
+   * Endpoint: GET /sapi/v1/bnbBurn
+   * Retorna: { spotBNBBurn: true|false, interestBNBBurn: true|false }
+   */
+  async function getBnbBurnStatus() {
+    const res = await signedRequest("GET", "/sapi/v1/bnbBurn");
+    if (!res.ok) throw new Error(`getBnbBurnStatus failed: ${JSON.stringify(res.data)}`);
+    return res.data; // { spotBNBBurn: bool, interestBNBBurn: bool }
+  }
+
+  /**
+   * Ativa o BNB Burn para taxas spot (desconto de 25%).
+   * Requer permissão de "Enable Spot & Margin Trading" na API Key.
+   * Endpoint: POST /sapi/v1/bnbBurn
+   */
+  async function enableBnbBurn(spotBNBBurn = true) {
+    const res = await signedRequest("POST", "/sapi/v1/bnbBurn", {
+      spotBNBBurn: spotBNBBurn ? "true" : "false"
+    });
+    if (!res.ok) throw new Error(`enableBnbBurn failed: ${JSON.stringify(res.data)}`);
+    return res.data;
+  }
+
   return {
     publicGet, signedRequest,
     getKlines, getPrice, getBalances,
-    placeMarketBuyQuote, placeMarketSellQty, getOrder,
+    placeMarketBuyQuote, placeMarketSellQty, getOrder, getOCO,
     placeOCO, cancelOCO,
-    syncTime
+    syncTime, getBnbBurnStatus, enableBnbBurn
   };
 }

@@ -9,13 +9,25 @@
  * Cloud mode: deploy to Railway, set env vars, Railway triggers on cron schedule
  */
 
-import "dotenv/config";
+import { config as dotenvConfig } from "dotenv";
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import crypto from "crypto";
 import { execSync } from "child_process";
-import fetch from "node-fetch";
+import nodeFetch from "node-fetch";
+
+// Carrega .env do parent dir (raiz do projeto), independente do cwd.
+// O dashboard faz spawn com cwd=masterbot/, mas as credenciais Binance ficam em ../.env.
+const __envPath = join(dirname(fileURLToPath(import.meta.url)), "..", ".env");
+dotenvConfig({ path: __envPath });
+
+const fetch = (url, opts = {}) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), opts.timeout || 15000);
+  return nodeFetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timeout));
+};
+
 import { validateRules } from "./lib/rules-validator.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -49,7 +61,8 @@ function checkOnboarding() {
       ].join("\n") + "\n",
     );
     try {
-      execSync("open .env");
+      const cmd = process.platform === 'win32' ? 'start' : 'open';
+      execSync(`${cmd} .env`);
     } catch {}
     console.log(
       "Fill in your BitGet credentials in .env then re-run: node bot.js\n",
@@ -61,7 +74,8 @@ function checkOnboarding() {
     console.log(`\n⚠️  Missing credentials in .env: ${missing.join(", ")}`);
     console.log("Opening .env for you now...\n");
     try {
-      execSync("open .env");
+      const cmd = process.platform === 'win32' ? 'start' : 'open';
+      execSync(`${cmd} .env`);
     } catch {}
     console.log("Add the missing values then re-run: node bot.js\n");
     process.exit(0);
@@ -94,8 +108,10 @@ const CONFIG = {
   },
 };
 
-const LOG_FILE = "safety-check-log.json";
+const LOG_FILE = join(__dirname, "safety-check-log.json");
+const CSV_FILE = join(__dirname, "trades.csv");
 const POSITIONS_FILE = join(__dirname, "positions.json");
+const RULES_FILE = join(__dirname, "..", "rules.json");
 
 // ─── Position Tracking ───────────────────────────────────────────────────────
 
@@ -161,11 +177,20 @@ async function sendWhatsApp(message) {
 
 function loadLog() {
   if (!existsSync(LOG_FILE)) return { trades: [] };
-  return JSON.parse(readFileSync(LOG_FILE, "utf8"));
+  const content = readFileSync(LOG_FILE, "utf8");
+  try {
+    const data = JSON.parse(content);
+    if (Array.isArray(data)) return { trades: data };
+    return data;
+  } catch (e) {
+    return { trades: [] };
+  }
 }
 
 function saveLog(log) {
-  writeFileSync(LOG_FILE, JSON.stringify(log, null, 2));
+  // Sempre salva no formato de objeto que o dashboard prefere
+  const data = Array.isArray(log) ? { trades: log } : log;
+  writeFileSync(LOG_FILE, JSON.stringify(data, null, 2));
 }
 
 function countTodaysTrades(log) {
@@ -278,19 +303,49 @@ const _missingPlanWarned = new Set();
 export function calcPlanStopTP(price, atr, plan, side = 'LONG') {
   const dir = side === 'LONG' ? 1 : -1;
   let stop, tp;
-  if (plan.sl.type === 'pct') {
+
+  // Piso mínimo para evitar SL/TP colados ao preço em ativos de micro-preço (BONK, PEPE, etc)
+  // ATR do 1h de meme coins pode ser tão pequeno que SL/TP ficam dentro de 1-2 ticks
+  const MIN_SL_PCT = 0.005; // mínimo 0.5% de distância para SL
+  const MIN_TP_PCT = 0.008; // mínimo 0.8% de distância para TP
+
+  // Formato simplificado novo: sl_atr_mult / tp_atr_mult (números)
+  if (plan.sl_atr_mult != null) {
+    stop = price - dir * atr * plan.sl_atr_mult;
+  } else if (plan.sl?.type === 'pct') {
     stop = price * (1 - dir * plan.sl.value / 100);
-  } else {
+  } else if (plan.sl?.multiplier != null) {
     stop = price - dir * atr * plan.sl.multiplier;
-  }
-  if (plan.tp.type === 'trail') {
-    // Trailing stop: TP inicial largo (10%) — o trail gerencia a saída
-    tp = price * (1 + dir * 10 / 100);
-  } else if (plan.tp.type === 'pct') {
-    tp = price * (1 + dir * plan.tp.value / 100);
   } else {
-    tp = price + dir * atr * plan.tp.multiplier;
+    stop = price - dir * atr * 1.5; // fallback seguro
   }
+
+  if (plan.tp_atr_mult != null) {
+    tp = price + dir * atr * plan.tp_atr_mult;
+  } else if (plan.tp?.type === 'trail') {
+    tp = price * (1 + dir * 10 / 100);
+  } else if (plan.tp?.type === 'pct') {
+    tp = price * (1 + dir * plan.tp.value / 100);
+  } else if (plan.tp?.multiplier != null) {
+    tp = price + dir * atr * plan.tp.multiplier;
+  } else {
+    tp = price + dir * atr * 2.0; // fallback: RR 2:1 vs SL default
+  }
+
+  // Garante distância mínima para LONG (evita rejeição na Binance OCO por preços muito próximos)
+  if (side === 'LONG') {
+    const minStop = price * (1 - MIN_SL_PCT);
+    const minTp   = price * (1 + MIN_TP_PCT);
+    if (stop > minStop) {
+      console.log(`  ⚠️  [calcPlanStopTP] SL muito próximo (${((price-stop)/price*100).toFixed(3)}% < ${MIN_SL_PCT*100}%) — aplicando piso mínimo`);
+      stop = minStop;
+    }
+    if (tp < minTp) {
+      console.log(`  ⚠️  [calcPlanStopTP] TP muito próximo (${((tp-price)/price*100).toFixed(3)}% < ${MIN_TP_PCT*100}%) — aplicando piso mínimo`);
+      tp = minTp;
+    }
+  }
+
   return { stop, tp };
 }
 
@@ -602,15 +657,38 @@ async function placeBinanceOrder(symbol, side, sizeUSD, price) {
   return { orderId: String(data.orderId), executedQty: data.executedQty, status: data.status };
 }
 
-// ─── Price Precision Helper ───────────────────────────────────────────────────
+let _symbolPrecisionCache = {};
 
-function roundToTickSize(price) {
-  if (price >= 10000) return parseFloat(price.toFixed(1));
-  if (price >= 1000)  return parseFloat(price.toFixed(2));
-  if (price >= 1)     return parseFloat(price.toFixed(4));
-  if (price >= 0.1)   return parseFloat(price.toFixed(5));
-  if (price >= 0.01)  return parseFloat(price.toFixed(6));
-  return parseFloat(price.toFixed(7));
+async function getPrecision(symbol) {
+  if (_symbolPrecisionCache[symbol]) return _symbolPrecisionCache[symbol];
+  try {
+    const res = await fetch(`https://api.binance.com/api/v3/exchangeInfo?symbol=${symbol}`);
+    const data = await res.json();
+    const info = data.symbols?.[0];
+    if (!info) return { price: 8, qty: 8 };
+    const pf = info.filters.find(f => f.filterType === 'PRICE_FILTER');
+    const lf = info.filters.find(f => f.filterType === 'LOT_SIZE');
+    const tick = pf ? parseFloat(pf.tickSize) : 0.00000001;
+    const step = lf ? parseFloat(lf.stepSize) : 0.00000001;
+    const countDecimals = (n) => {
+      if (Math.floor(n) === n) return 0;
+      const s = n.toString();
+      if (s.includes('e-')) return parseInt(s.split('e-')[1]);
+      return s.split(".")[1].length || 0;
+    };
+    _symbolPrecisionCache[symbol] = { price: countDecimals(tick), qty: countDecimals(step) };
+    return _symbolPrecisionCache[symbol];
+  } catch (e) { return { price: 8, qty: 8 }; }
+}
+
+async function roundPrice(symbol, price) {
+  const p = await getPrecision(symbol);
+  return parseFloat(price.toFixed(p.price));
+}
+
+async function roundQty(symbol, qty) {
+  const p = await getPrecision(symbol);
+  return parseFloat(qty.toFixed(p.qty));
 }
 
 // ─── OCO Order (Take Profit + Stop Loss via Binance) ─────────────────────────
@@ -625,15 +703,58 @@ async function placeOCOOrder(symbol, quantity, takeProfitPrice, stopPrice) {
     timestamp = Date.now() - 100000;
   }
 
-  const tpPrice  = roundToTickSize(takeProfitPrice);
-  const spPrice  = roundToTickSize(stopPrice);
-  // stopLimitPrice 0.5% below stop to guarantee fill even in fast markets
-  const slpPrice = roundToTickSize(stopPrice * 0.995);
+  // Cancela ordens abertas antes para liberar saldo (evita erro de insufficient balance)
+  try {
+    const cancelRes = await fetch(`https://api.binance.com/api/v3/openOrders?symbol=${symbol}&timestamp=${timestamp}&signature=${crypto.createHmac('sha256', process.env.BINANCE_SECRET_KEY || '').update(`symbol=${symbol}&timestamp=${timestamp}`).digest('hex')}`, {
+      method: 'DELETE',
+      headers: { 'X-MBX-APIKEY': process.env.BINANCE_API_KEY || '' }
+    });
+    const cancelData = await cancelRes.json();
+    if (Array.isArray(cancelData) && cancelData.length > 0) {
+      console.log(`  🧹 [${symbol}] ${cancelData.length} ordens antigas canceladas para liberar saldo.`);
+    }
+  } catch (e) {
+    // Silencioso se não houver ordens
+  }
+
+  // Busca preço atual para evitar erro de "Relationship of prices"
+  let currentPrice = 0;
+  try {
+    const tickerRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+    const tickerData = await tickerRes.json();
+    currentPrice = parseFloat(tickerData.price);
+  } catch (e) {
+    console.log(`⚠️  [${symbol}] Falha ao buscar preço atual para OCO, usando preço de entrada.`);
+  }
+
+  let tpPrice = await roundPrice(symbol, takeProfitPrice);
+  let spPrice = await roundPrice(symbol, stopPrice);
+
+  // Validação de segurança para SELL OCO (fechar compra):
+  // Para meme coins (BONK, PEPE) com preços de micro-valor, garantimos distância mínima
+  if (currentPrice > 0) {
+    // 1. Take Profit deve ser no mínimo 0.15% ACIMA do preço atual
+    const minTpDistance = currentPrice * 1.0015;
+    if (tpPrice <= minTpDistance) {
+      console.log(`  ⚠️  [OCO] TP $${tpPrice} muito próximo do preço $${currentPrice} — ajustando para +0.15%`);
+      tpPrice = await roundPrice(symbol, minTpDistance);
+    }
+    // 2. Stop Price deve ser no mínimo 0.1% ABAIXO do preço atual
+    const maxSpDistance = currentPrice * 0.999;
+    if (spPrice >= maxSpDistance) {
+      console.log(`  ⚠️  [OCO] SL $${spPrice} muito próximo do preço $${currentPrice} — ajustando para -0.1%`);
+      spPrice = await roundPrice(symbol, maxSpDistance);
+    }
+  }
+
+  // stopLimitPrice levemente abaixo do stop para garantir execução
+  const slpPrice = await roundPrice(symbol, spPrice * 0.997);
+  const qtyRounded = await roundQty(symbol, parseFloat(quantity));
 
   const queryString = [
     `symbol=${symbol}`,
     `side=SELL`,
-    `quantity=${quantity}`,
+    `quantity=${qtyRounded}`,
     `price=${tpPrice}`,
     `stopPrice=${spPrice}`,
     `stopLimitPrice=${slpPrice}`,
@@ -669,8 +790,27 @@ async function checkOCOStatus(symbol, orderListId) {
   // listOrderStatus: "EXECUTING" | "ALL_DONE" | "REJECT"
   // listStatusType:  "EXEC_STARTED" | "ALL_DONE"
   const filled = data.listOrderStatus === "ALL_DONE";
-  // Find which order was filled to determine TP vs SL
-  const filledOrder = filled && data.orders?.find(o => o.status === "FILLED");
+  let filledOrder = filled && (data.orderReports || [])?.find(o => o.status === "FILLED");
+
+  // Se o report veio vazio no GET, precisamos buscar os detalhes das ordens individuais
+  if (filled && !filledOrder && data.orders) {
+    for (const ord of data.orders) {
+      try {
+        const oTs = Date.now();
+        const oQs = `symbol=${symbol}&orderId=${ord.orderId}&timestamp=${oTs}&recvWindow=10000`;
+        const oSig = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(oQs).digest("hex");
+        const oRes = await fetch(`${CONFIG.binance.baseUrl}/api/v3/order?${oQs}&signature=${oSig}`, {
+          headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey }
+        });
+        const oData = await oRes.json();
+        if (oData.status === "FILLED") {
+          filledOrder = oData;
+          break;
+        }
+      } catch (e) {}
+    }
+  }
+
   return { filled, listOrderStatus: data.listOrderStatus, orders: data.orders, filledOrder };
 }
 
@@ -685,11 +825,22 @@ async function placeBinanceSellOrder(symbol, quantity) {
   } catch (e) {
     timestamp = Date.now() - 100000;
   }
-  // Use exact quantity string to respect LOT_SIZE precision
-  const qtyStr = String(quantity);
-  const queryString = `symbol=${symbol}&side=SELL&type=MARKET&quantity=${qtyStr}&recvWindow=10000&timestamp=${timestamp}`;
+
+  // 1. LIMPEZA: Cancela QUALQUER ordem aberta para liberar o saldo total
+  try {
+    const cancelRes = await fetch(`https://api.binance.com/api/v3/openOrders?symbol=${symbol}&timestamp=${timestamp}&signature=${crypto.createHmac('sha256', CONFIG.binance.secretKey).update(`symbol=${symbol}&timestamp=${timestamp}`).digest('hex')}`, {
+      method: 'DELETE',
+      headers: { 'X-MBX-APIKEY': CONFIG.binance.apiKey }
+    });
+    console.log(`  🧹 [${symbol}] Ordens abertas canceladas antes da venda final.`);
+  } catch (e) {}
+
+  // 2. PRECISÃO: Arredonda a quantidade conforme as regras da Binance (LOT_SIZE)
+  const qtyRounded = await roundQty(symbol, parseFloat(quantity));
+  const queryString = `symbol=${symbol}&side=SELL&type=MARKET&quantity=${qtyRounded}&recvWindow=10000&timestamp=${timestamp}`;
   const signature = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(queryString).digest("hex");
   const url = `${CONFIG.binance.baseUrl}/api/v3/order?${queryString}&signature=${signature}`;
+  
   const res = await fetch(url, { method: "POST", headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey } });
   const data = await res.json();
   if (data.code && data.code < 0) throw new Error(`Binance SELL failed: [${data.code}] ${data.msg}`);
@@ -713,19 +864,29 @@ async function monitorPositions() {
         try {
           const ocoStatus = await checkOCOStatus(pos.symbol, pos.ocoOrderListId);
           if (ocoStatus.filled) {
-            // Determina qual ordem foi executada (TP ou SL) pelo preço
-            const candles = await fetchCandles(pos.symbol, pos.timeframe, 5);
-            const price = candles[candles.length - 1].close;
-            const wasTP = price >= pos.takeProfitPrice * 0.99;
-            const exitReason = wasTP ? `TAKE PROFIT via OCO @ $${price}` : `STOP LOSS via OCO @ $${price}`;
-            const pnl = parseFloat(((price - pos.entryPrice) * pos.quantity).toFixed(4));
+            // Usa os dados da ordem preenchida (TP ou SL) para precisão no PnL
+            let price = 0;
+            if (ocoStatus.filledOrder) {
+              const execQty = parseFloat(ocoStatus.filledOrder.executedQty || 0);
+              const quoteQty = parseFloat(ocoStatus.filledOrder.cummulativeQuoteQty || 0);
+              price = execQty > 0 ? quoteQty / execQty : parseFloat(ocoStatus.filledOrder.price || ocoStatus.filledOrder.stopPrice);
+            } else {
+              // Fallback para preço atual se por algum motivo não pegou os detalhes
+              const candles = await fetchCandles(pos.symbol, pos.timeframe, 5);
+              price = candles[candles.length - 1].close;
+            }
+
+            const isTP = price >= (pos.takeProfitPrice || price) * 0.999;
+            const exitReason = isTP ? `TAKE PROFIT via OCO @ $${price.toFixed(8)}` : `STOP LOSS via OCO @ $${price.toFixed(8)}`;
+            const pnl = parseFloat(((price - pos.entryPrice) * pos.quantity).toFixed(8));
+            
             Object.assign(pos, { status: "closed", closedAt: new Date().toISOString(), exitPrice: price, exitReason, pnl });
             console.log(`✅ [${pos.symbol}] OCO EXECUTADA: ${exitReason} | PnL: $${pnl}`);
-            sendWhatsApp(`🔴 VENDA ${pos.symbol} ${pos.timeframe}\nMotivo: ${exitReason}\nEntrada: $${pos.entryPrice} → Saída: $${price}\nPnL: $${pnl}`);
+            sendWhatsApp(`🔴 VENDA ${pos.symbol} ${pos.timeframe}\nMotivo: ${exitReason}\nEntrada: $${pos.entryPrice} → Saída: $${price.toFixed(8)}\nPnL: $${pnl}`);
           } else {
             const candles = await fetchCandles(pos.symbol, pos.timeframe, 5);
             const price = candles[candles.length - 1].close;
-            const pnlUnrealized = ((price - pos.entryPrice) * pos.quantity).toFixed(4);
+            const pnlUnrealized = ((price - pos.entryPrice) * pos.quantity).toFixed(8);
             const pct = (((price - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2);
             console.log(`  🔗 [${pos.symbol}] OCO aguardando (listId: ${pos.ocoOrderListId}) | Preço: $${price} | PnL: $${pnlUnrealized} (${pct}%)`);
           }
@@ -741,10 +902,25 @@ async function monitorPositions() {
       if (pos.ocoManual && pos.ocoPlaced && !CONFIG.paperTrading) {
         const candles = await fetchCandles(pos.symbol, pos.timeframe, 5);
         const price = candles[candles.length - 1].close;
-        const pnlUnrealized = ((price - pos.entryPrice) * pos.quantity).toFixed(4);
+        const pnlUnrealized = ((price - pos.entryPrice) * pos.quantity).toFixed(8);
         const pct = (((price - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2);
         console.log(`  🔗 [${pos.symbol}] OCO manual ativa | Preço: $${price} | PnL: $${pnlUnrealized} (${pct}%) | Stop: $${pos.stopPrice} | TP: $${pos.takeProfitPrice}`);
         continue;
+      }
+
+      // ── TENTATIVA DE SINCRONIZAÇÃO OCO (Caso tenha falhado na compra ou bot reiniciado) ──
+      if (!pos.ocoPlaced && !CONFIG.paperTrading && pos.stopPrice && pos.takeProfitPrice) {
+        try {
+          console.log(`  🎯 [${pos.symbol}] Tentando sincronizar OCO para posição aberta #${pos.id}...`);
+          const ocoResult = await placeOCOOrder(pos.symbol, String(pos.quantity), pos.takeProfitPrice, pos.stopPrice);
+          pos.ocoPlaced = true;
+          pos.ocoOrderListId = ocoResult.orderListId;
+          console.log(`  ✅ [${pos.symbol}] OCO sincronizada com sucesso: ID #${pos.ocoOrderListId}`);
+          savePositions(positions);
+          continue;
+        } catch (syncErr) {
+          console.log(`  ❌ [${pos.symbol}] Falha na sincronização OCO automática: ${syncErr.message}`);
+        }
       }
 
       // ── Posição sem OCO (paper trading ou OCO falhou): monitoramento manual ──
@@ -796,7 +972,7 @@ async function monitorPositions() {
 
 // ─── Tax CSV Logging ─────────────────────────────────────────────────────────
 
-const CSV_FILE = "trades.csv";
+// trades.csv
 
 // Always ensure trades.csv exists with headers — open it in Excel/Sheets any time
 function initCsv() {
@@ -933,7 +1109,7 @@ async function runSymbolCycle(symbol, timeframe, rules) {
   if (isAutoMode && !plan) {
     return null; // sem plano em Modo Auto → não opera
   }
-  if (plan && plan.timeframes && !plan.timeframes.includes(timeframe)) {
+  if (plan && plan.timeframes && !plan.timeframes.some(t => t.toLowerCase() === timeframe.toLowerCase())) {
     return null; // silencioso — apenas pula TFs fora do plano
   }
 
@@ -1102,9 +1278,9 @@ async function runSymbolCycle(symbol, timeframe, rules) {
         logEntry.orderPlaced = true;
         logEntry.orderId = order.orderId;
         console.log(`🚀 [${symbol}] LIVE ORDER EXECUTED on Binance: ${order.orderId}`);
-        const execQtyNum = parseFloat(order.executedQty) || (tradeSize / price);
-        // Preserva a precisão LOT_SIZE retornada pela Binance (ex: "90.49000000") — não re-parsear.
-        const execQtyStr = (order.executedQty && parseFloat(order.executedQty) > 0) ? String(order.executedQty) : String(execQtyNum);
+        const execQtyRaw = parseFloat(order.executedQty) || (tradeSize / price);
+        const execQtyNum = execQtyRaw * 0.999; // Deduz 0.1% para evitar erro de saldo na OCO (taxas)
+        const execQtyStr = String(execQtyNum);
 
         // ── OCO: coloca Take Profit + Stop Loss na Binance automaticamente (com 3 retries) ──
         let ocoOrderListId = null;
@@ -1116,7 +1292,7 @@ async function runSymbolCycle(symbol, timeframe, rules) {
               const ocoResult = await placeOCOOrder(symbol, execQtyStr, takeProfitPrice, stopPrice);
               ocoOrderListId = ocoResult.orderListId;
               logEntry.ocoOrderListId = ocoOrderListId;
-              console.log(`🎯 [${symbol}] OCO COLOCADA (tentativa ${attempt+1}): TP $${roundToTickSize(takeProfitPrice)} | Stop $${roundToTickSize(stopPrice)} | ListId: ${ocoOrderListId}`);
+              console.log(`🎯 [${symbol}] OCO COLOCADA (tentativa ${attempt+1}): TP $${takeProfitPrice.toFixed(8)} | Stop $${stopPrice.toFixed(8)} | ListId: ${ocoOrderListId}`);
               break;
             } catch (ocoErr) {
               const last = attempt === delays.length - 1;
@@ -1174,6 +1350,8 @@ async function runSymbolCycle(symbol, timeframe, rules) {
 }
 
 async function run(isMaster = false) {
+  if (isMaster) writeMasterStatus("running", []);
+  
   checkOnboarding();
   
   if (!CONFIG.paperTrading) {
@@ -1186,8 +1364,6 @@ async function run(isMaster = false) {
   console.log(`  🤖 ${isMaster ? "MASTERBOT" : "MANUAL"} CYCLE START: ${new Date().toLocaleString()}`);
   console.log(`  Trade Mode: ${CONFIG.paperTrading ? "📋 PAPER" : "🔴 LIVE"}`);
   console.log("═".repeat(60));
-
-  if (isMaster) writeMasterStatus("running", []);
 
   // ── Monitorar posições abertas ANTES de escanear novos sinais ──
   await monitorPositions();
@@ -1209,7 +1385,7 @@ async function run(isMaster = false) {
   const summary = [];
 
   // Read rules once at start to get the base structures
-  let currentRules = JSON.parse(readFileSync("rules.json", "utf8"));
+  let currentRules = JSON.parse(readFileSync(RULES_FILE, "utf8"));
   const { warnings: ruleWarnings, errors: ruleErrors } = validateRules(currentRules);
   for (const w of ruleWarnings) console.log(`⚠️  rules.json: ${w}`);
   for (const e of ruleErrors) console.error(`❌ rules.json: ${e}`);
@@ -1231,7 +1407,7 @@ async function run(isMaster = false) {
     // If master, we re-load rules to respect UI changes INSTANTLY
     let watchlistToUse = [];
     if (isMaster) {
-      const refreshedRules = JSON.parse(readFileSync("rules.json", "utf8"));
+      const refreshedRules = JSON.parse(readFileSync(RULES_FILE, "utf8"));
       const activePlanName = refreshedRules.active_plan || null;
       const activePlan = activePlanName
         ? (refreshedRules.group_plans || []).find(p => p.name === activePlanName)
@@ -1246,19 +1422,33 @@ async function run(isMaster = false) {
     // Since we are inside a loop that might have been dynamic, we handle the nesting
     const targetSymbols = isMaster ? watchlistToUse : [symbolEntry];
     if (isMaster && symbolEntry === "DYNAMIC") {
-       // Loop through the actual current watchlist
+       // Em Modo Auto, cada símbolo roda nos TFs DO PLANO dele.
+       // Em modo com plano fixo (active_plan) ou estratégia única, usa os TFs globais.
+       const isAutoMode = currentRules?.strategy?.key === 'auto' && !currentRules?.active_plan;
        for (const symbol of targetSymbols) {
-         for (const tf of timeframes) {
-           const result = await runSymbolCycle(symbol, tf, currentRules);
-           if (result) {
-             summary.push(result);
-             const log = loadLog(); log.trades.push(result); saveLog(log); writeTradeCsv(result);
+         let tfsForSymbol = timeframes;
+         if (isAutoMode) {
+           const symPlan = getPlanForSymbol(symbol, currentRules);
+           if (!symPlan) {
+             // Aviso já é emitido em runSymbolCycle (uma vez por símbolo)
+             await runSymbolCycle(symbol, timeframes[0] || "1h", currentRules);
+             continue;
+           }
+           tfsForSymbol = (symPlan.timeframes && symPlan.timeframes.length) ? symPlan.timeframes : timeframes;
+         }
+         for (const tf of tfsForSymbol) {
+           try {
+             const result = await runSymbolCycle(symbol, tf, currentRules);
+             if (result) {
+               summary.push(result);
+               const log = loadLog(); log.trades.push(result); saveLog(log); writeTradeCsv(result);
+             }
+           } catch (cycleErr) {
+             console.error(`  ❌ Erro no ciclo para ${symbol} ${tf}:`, cycleErr.message);
            }
          }
-         if (isMaster) {
-           console.log(`⏳ Aguardando 5s antes do próximo ativo...`);
-           await sleep(5000);
-         }
+         console.log(`⏳ Aguardando 5s antes do próximo ativo...`);
+         await sleep(5000);
        }
        break; // Exit the "DYNAMIC" wrapper
     } else {
@@ -1308,12 +1498,15 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (process.argv.includes("--tax-summary")) {
     generateTaxSummary();
   } else if (process.argv.includes("--master")) {
+    const pidFile = join(__dirname, "master.pid");
+    writeFileSync(pidFile, process.pid.toString());
+    console.log(`📌 Master PID saved to: ${pidFile}`);
     startScheduler();
   } else if (process.env.FORCE_ONCE === '1') {
     // Force trade: executa apenas o símbolo/TF forçado e sai
     const forceSym = process.env.FORCE_SYMBOL;
     const forceTf  = process.env.FORCE_TF;
-    const forceRules = JSON.parse(readFileSync("rules.json", "utf8"));
+    const forceRules = JSON.parse(readFileSync(RULES_FILE, "utf8"));
     console.log(`\n⚡ FORCE TRADE MODE: ${forceSym} ${forceTf} ${process.env.FORCE_SIDE}`);
     runSymbolCycle(forceSym, forceTf, forceRules).then(result => {
       if (result) {
@@ -1333,7 +1526,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 function writeMasterStatus(status = "running", results = []) {
   const statusFile = join(__dirname, "master-status.json");
   const now = Date.now();
-  const rules = JSON.parse(readFileSync("rules.json", "utf8"));
+  const rules = JSON.parse(readFileSync(RULES_FILE, "utf8"));
   const intervalStr = process.env.MASTERBOT_LOOP_INTERVAL || "4h";
   const intervalMs = parseIntervalMs(intervalStr);
 
@@ -1353,7 +1546,7 @@ function writeMasterStatus(status = "running", results = []) {
       timeframe: r.timeframe,
       allPass: r.allPass,
       side: r.side,
-      signal: r.allPass ? (r.side || 'NEUTRO') : 'NEUTRO',
+      signal: r.allPass ? (r.orderPlaced ? (r.side || 'LONG') : 'SEM SALDO') : 'NEUTRO',
       price: r.price || null,
       change_pct: r.price && r.indicators?.vwap
         ? parseFloat((((r.price - r.indicators.vwap) / r.indicators.vwap) * 100).toFixed(2))

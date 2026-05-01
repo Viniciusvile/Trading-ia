@@ -5,7 +5,7 @@ import express from 'express';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, openSync } from 'node:fs';
 import { spawn, execSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import * as health from '../src/core/health.js';
@@ -71,61 +71,101 @@ app.get('/api/health', async (req, res) => {
 // ── MICRO-SCALPER LIVE SIGNAL ────────────────────────────────────
 app.get('/api/micro-scalper/signal', async (req, res) => {
   try {
-    const cfg = getRules().micro_scalper;
-    if (!cfg) return res.status(404).json({ success: false, error: 'Config micro_scalper missing' });
-    const strategyMode = cfg.strategy_mode || "micro-dip";
+    const rules = getRules().micro_scalper;
+    if (!rules) return res.status(404).json({ success: false, error: 'Config micro_scalper missing' });
 
-    const { createBinanceClient } = await import('../src/exchange/binance.js');
-    const client = createBinanceClient({
-      apiKey: process.env.BINANCE_API_KEY,
-      secretKey: process.env.BINANCE_SECRET_KEY
-    });
-    
-    let candles;
-    try {
-      // Pega os candles direto da Binance API (independente do que está na tela)
-      candles = await client.getKlines(cfg.symbol || 'XRPUSDT', cfg.candles_interval || '5m', cfg.candles_limit || 50);
-    } catch (e) {
-      if (MOCK_MODE) {
-        candles = Array.from({length:50}, (_,i)=>({ close: 1.40 + Math.random()*0.05, high: 1.45, low: 1.39, volume: 100000 }));
-      } else throw e;
-    }
-
-    const { wv5gSignal, microScalpSignal, turboReversionSignal } = await import('../src/scalper/signals.js');
-    let sig;
-    const bars = Array.isArray(candles) ? candles : (candles.bars || []);
-
-    if (strategyMode === "wv5g-aggr") {
-      sig = wv5gSignal(bars, { rsiLow: cfg.min_rsi || 30, rsiHigh: cfg.max_rsi || 85, emaFast: cfg.ema_fast || 9, emaSlow: cfg.ema_slow || 20 });
-    } else if (strategyMode === "turbo-reversion") {
-      sig = turboReversionSignal(bars, { bbLen: cfg.bb_length, bbMult: cfg.bb_mult, rsiLen: cfg.rsi_period, rsiLimit: cfg.rsi_limit, volMult: cfg.vol_mult });
-    } else {
-      sig = microScalpSignal(bars, { emaPeriod: cfg.ema_period, rsiPeriod: cfg.rsi_period, minDip: cfg.min_dip_pct, minRsi: cfg.min_rsi, maxRsi: cfg.max_rsi });
-    }
-    
-    res.json({ 
-      success: true, 
-      symbol: cfg.symbol, 
-      mode: strategyMode, 
-      signal: sig,
-      source: 'BINANCE_API (Background)' 
-    });
+    const active = rules.active_symbols || [];
+    const results = await Promise.all(active.map(async (sym) => {
+      try {
+        const sig = await getSymbolSignal(sym, rules);
+        return { symbol: sym, success: true, signal: sig };
+      } catch (e) {
+        return { symbol: sym, success: false, error: e.message };
+      }
+    }));
+    res.json({ success: true, signals: results });
   } catch (e) {
-    console.error('❌ [API] Signal Error:', e.message);
+    console.error('❌ [API] Multi-Signal Error:', e.message);
     res.status(500).json({ success: false, error: e.message });
   }
 });
 
+async function getSymbolSignal(symbol, rules) {
+  const { createBinanceClient } = await import('../src/exchange/binance.js');
+  const { wv5gSignal, microScalpSignal, turboReversionSignal } = await import('../src/scalper/signals.js');
+
+  const client = createBinanceClient({
+    apiKey: process.env.BINANCE_API_KEY,
+    secretKey: process.env.BINANCE_SECRET_KEY
+  });
+  
+  const candles = await client.getKlines(symbol, '5m', 50);
+  const planCfg = (rules.plans && rules.plans[symbol]) ? rules.plans[symbol] : rules;
+  const strategyMode = planCfg.strategy_mode || "micro-dip";
+
+  if (strategyMode === "wv5g-aggr") {
+    return wv5gSignal(candles, { rsiLow: planCfg.min_rsi || 30, rsiHigh: planCfg.max_rsi || 85, emaFast: planCfg.ema_fast || 9, emaSlow: planCfg.ema_slow || 20 });
+  } else if (strategyMode === "turbo-reversion") {
+    return turboReversionSignal(candles, { bbLen: planCfg.bb_length || 20, bbMult: planCfg.bb_mult || 1.8, rsiLen: planCfg.rsi_period || 14, rsiLimit: planCfg.rsi_limit || 45, volMult: planCfg.vol_mult || 1.1, trendEmaPeriod: planCfg.trend_ema_period || 0, trendSlopeBars: planCfg.trend_slope_bars || 5, trendMaxDownPct: planCfg.trend_max_down_pct || 0 });
+  } else {
+    return microScalpSignal(candles, { emaPeriod: planCfg.ema_period || 20, rsiPeriod: planCfg.rsi_period || 3, minDip: planCfg.min_dip_pct || 0.001, minRsi: planCfg.min_rsi || 20, maxRsi: planCfg.max_rsi || 65 });
+  }
+}
+
+const PLAN_PRESETS = {
+  xrp: {
+    symbol: 'XRPUSDT',
+    tv_symbol: 'BINANCE:XRPUSDT',
+    strategy_mode: 'turbo-reversion',
+    rsi_period: 14,
+    rsi_limit: 45,
+    bb_length: 20,
+    bb_mult: 2.0,
+    vol_mult: 1.1
+  },
+  sol: {
+    symbol: 'SOLUSDT',
+    tv_symbol: 'BINANCE:SOLUSDT',
+    strategy_mode: 'micro-dip',
+    ema_period: 20,
+    rsi_period: 3,
+    min_dip_pct: 0.001
+  }
+};
+
+
 app.patch('/api/micro-scalper/config', (req, res) => {
   try {
     const mainRules = JSON.parse(readFileSync(join(ROOT, 'rules.json'), 'utf8'));
-    if (!mainRules.micro_scalper) mainRules.micro_scalper = {};
-    const { strategy_mode, symbol, trade_size_pct } = req.body;
-    if (strategy_mode) mainRules.micro_scalper.strategy_mode = strategy_mode;
-    if (symbol) { mainRules.micro_scalper.symbol = symbol; mainRules.micro_scalper.tv_symbol = 'BINANCE:' + symbol; }
-    if (trade_size_pct) mainRules.micro_scalper.trade_size_pct = trade_size_pct;
+    if (!mainRules.micro_scalper) mainRules.micro_scalper = { active_symbols: [], plans: {} };
+    
+    const { plan, action } = req.body; // action: 'add' | 'remove' | 'toggle'
+    
+    if (plan && PLAN_PRESETS[plan]) {
+      const symbol = PLAN_PRESETS[plan].symbol;
+      if (!mainRules.micro_scalper.plans) mainRules.micro_scalper.plans = {};
+      if (!mainRules.micro_scalper.active_symbols) mainRules.micro_scalper.active_symbols = [];
+
+      mainRules.micro_scalper.plans[symbol] = { ...PLAN_PRESETS[plan] };
+      
+      const is_active = mainRules.micro_scalper.active_symbols.includes(symbol);
+      
+      if (action === 'add') {
+        if (!is_active) mainRules.micro_scalper.active_symbols.push(symbol);
+      } else if (action === 'remove') {
+        mainRules.micro_scalper.active_symbols = mainRules.micro_scalper.active_symbols.filter(s => s !== symbol);
+      } else if (action === 'toggle') {
+        if (is_active) mainRules.micro_scalper.active_symbols = mainRules.micro_scalper.active_symbols.filter(s => s !== symbol);
+        else mainRules.micro_scalper.active_symbols.push(symbol);
+      }
+      
+      // Remove duplicatas
+      mainRules.micro_scalper.active_symbols = [...new Set(mainRules.micro_scalper.active_symbols)];
+    }
+    
+    console.log(`📝 Updated active_symbols: [${mainRules.micro_scalper.active_symbols.join(', ')}]`);
     writeFileSync(join(ROOT, 'rules.json'), JSON.stringify(mainRules, null, 2));
-    res.json({ success: true, config: mainRules.micro_scalper });
+    res.json({ success: true, config: mainRules.micro_scalper, restart_required: true });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
@@ -702,7 +742,7 @@ app.post('/api/strategies/apply', async (req, res) => {
 
 // ── BOT (masterbot consolidado) ─────────────────────────
 const BOT_DIR = join(ROOT, 'masterbot');
-const BOT_LOG = join(ROOT, 'safety-check-log.json');
+const BOT_LOG = join(BOT_DIR, 'safety-check-log.json');
 const BOT_ENV = join(ROOT, '.env');
 const BOT_RULES = join(ROOT, 'rules.json');
 const BOT_MASTER_STATUS = join(BOT_DIR, 'master-status.json');
@@ -845,6 +885,68 @@ app.patch('/api/bot/config', (req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
+// ── EMERGENCY SELL ──────────────────────────────────────────────
+app.post('/api/bot/emergency-sell', async (req, res) => {
+  const { symbol } = req.body;
+  if (!symbol) return res.status(400).json({ success: false, error: 'Símbolo obrigatório' });
+
+  console.log(`🚨 [EMERGENCY] Iniciando liquidação total de ${symbol}...`);
+
+  try {
+    const client = createBinanceClient({
+      apiKey: process.env.BINANCE_API_KEY,
+      secretKey: process.env.BINANCE_SECRET_KEY,
+    });
+    await client.syncTime();
+
+    // 1. Cancelar Ordens Abertas
+    try {
+      console.log(`  🧹 [${symbol}] Cancelando ordens abertas...`);
+      await client.cancelOpenOrders(symbol);
+    } catch (e) {
+      console.warn(`  ⚠️ [${symbol}] Erro ao cancelar ordens (talvez nenhuma aberta):`, e.message);
+    }
+
+    // 2. Pegar Saldo Real (da moeda base, ex: BONK)
+    const asset = symbol.replace('USDT', '');
+    const account = await client.getAccountInfo();
+    const balance = account.balances.find(b => b.asset === asset);
+    const qty = parseFloat(balance?.free || 0);
+
+    if (qty <= 0) {
+      return res.json({ success: true, msg: `Saldo de ${asset} já está zerado.` });
+    }
+
+    // 3. Pegar precisão de quantidade (LOT_SIZE)
+    const exInfo = await fetch(`https://api.binance.com/api/v3/exchangeInfo?symbol=${symbol}`).then(r => r.json());
+    const filter = exInfo.symbols?.[0]?.filters?.find(f => f.filterType === 'LOT_SIZE');
+    const stepSize = parseFloat(filter?.stepSize || '0.00000001');
+    
+    const countDecimals = (n) => {
+      if (Math.floor(n) === n) return 0;
+      const s = n.toString();
+      if (s.includes('e-')) return parseInt(s.split('e-')[1]);
+      return s.split(".")[1].length || 0;
+    };
+    const precision = countDecimals(stepSize);
+    const qtyRounded = qty.toFixed(precision);
+
+    console.log(`  💰 [${symbol}] Vendendo saldo total: ${qtyRounded} ${asset}`);
+
+    // 4. Executar Venda a Mercado
+    const sellRes = await client.placeMarketSellQty(symbol, qtyRounded);
+    
+    if (sellRes.ok) {
+      res.json({ success: true, symbol, qty: qtyRounded, data: sellRes.data });
+    } else {
+      res.status(400).json({ success: false, error: sellRes.data?.msg || 'Erro na venda da Binance' });
+    }
+  } catch (e) {
+    console.error(`❌ [EMERGENCY] Falha crítica ao liquidar ${symbol}:`, e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 app.get('/api/bot/log', (_req, res) => {
   try {
     if (!existsSync(BOT_LOG)) return res.json({ success: true, trades: [] });
@@ -934,6 +1036,42 @@ app.get('/api/bot/master/status', (req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
+app.post('/api/bot/master/config', (req, res) => {
+  try {
+    const { interval } = req.body || {};
+    const allowedIntervals = ['10m', '30m', '1h', '4h'];
+    const safeInterval = allowedIntervals.includes(interval) ? interval : '1h';
+
+    // 1. Atualiza rules.json
+    const rules = getRules();
+    rules.master_interval = safeInterval;
+    writeFileSync(join(ROOT, 'rules.json'), JSON.stringify(rules, null, 2));
+
+    // 2. Atualiza .env
+    const BOT_ENV = join(ROOT, '.env');
+    if (existsSync(BOT_ENV)) {
+      let txt = readFileSync(BOT_ENV, 'utf8');
+      const re = /^MASTERBOT_LOOP_INTERVAL=.*$/m;
+      if (re.test(txt)) txt = txt.replace(re, `MASTERBOT_LOOP_INTERVAL=${safeInterval}`);
+      else txt += (txt.endsWith('\n') ? '' : '\n') + `MASTERBOT_LOOP_INTERVAL=${safeInterval}\n`;
+      writeFileSync(BOT_ENV, txt);
+    }
+
+    // 3. Atualiza master-status.json para refletir na UI imediatamente
+    if (existsSync(BOT_MASTER_STATUS)) {
+      try {
+        const status = JSON.parse(readFileSync(BOT_MASTER_STATUS, 'utf8'));
+        status.interval = safeInterval;
+        writeFileSync(BOT_MASTER_STATUS, JSON.stringify(status, null, 2));
+      } catch (e) {}
+    }
+
+    res.json({ success: true, interval: safeInterval });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 app.post('/api/bot/master/start', (req, res) => {
   try {
     const { interval } = req.body || {};
@@ -963,10 +1101,14 @@ app.post('/api/bot/master/start', (req, res) => {
     }
 
     console.log(`🚀 Iniciando MasterBot em modo LOOP (--master) | intervalo: ${safeInterval}...`);
+    const logFile = join(BOT_DIR, 'masterbot.log');
+    const out = openSync(logFile, 'a');
+    const err = openSync(logFile, 'a');
+
     masterProcess = spawn('node', ['bot.js', '--master'], {
       cwd: BOT_DIR,
       detached: true,
-      stdio: 'ignore',
+      stdio: ['ignore', out, err],
       env: { ...process.env, MASTERBOT_LOOP_INTERVAL: safeInterval }
     });
 
@@ -1050,7 +1192,26 @@ async function syncPositionsWithBinance(env) {
         if (data.code && data.code < 0) continue; // outro erro de API, pula
 
         if (data.listOrderStatus === 'ALL_DONE' || data.listStatusType === 'ALL_DONE') {
-          const filledOrder = (data.orderReports || []).find(o => o.status === 'FILLED');
+          let filledOrder = (data.orderReports || []).find(o => o.status === 'FILLED');
+          
+          // Se não veio no report, busca cada ordem individualmente
+          if (!filledOrder && data.orders) {
+            for (const ord of data.orders) {
+              try {
+                const oTs = (await (await fetch('https://api.binance.com/api/v3/time')).json()).serverTime;
+                const oQs = `symbol=${pos.symbol}&orderId=${ord.orderId}&timestamp=${oTs}&recvWindow=10000`;
+                const oSig = crypto.createHmac('sha256', secretKey).update(oQs).digest('hex');
+                const oData = await (await fetch(`https://api.binance.com/api/v3/order?${oQs}&signature=${oSig}`, {
+                  headers: { 'X-MBX-APIKEY': apiKey }
+                })).json();
+                if (oData.status === 'FILLED') {
+                  filledOrder = oData;
+                  break;
+                }
+              } catch (e) {}
+            }
+          }
+
           if (filledOrder) {
             const execQty  = parseFloat(filledOrder.executedQty || 0);
             const quoteQty = parseFloat(filledOrder.cummulativeQuoteQty || 0);
@@ -1066,10 +1227,17 @@ async function syncPositionsWithBinance(env) {
             pos.pnl         = parseFloat(((exitPrice - pos.entryPrice) * pos.quantity).toFixed(4));
             synced++;
           } else {
-            // ALL_DONE sem FILLED → OCO cancelada inteira (sem execução de venda)
+            // ALL_DONE sem FILLED → OCO cancelada inteira (tentativa de buscar preço atual para não zerar PnL)
+            let currentPrice = pos.entryPrice;
+            try {
+              const ticker = await (await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${pos.symbol}`)).json();
+              currentPrice = parseFloat(ticker.price) || pos.entryPrice;
+            } catch (e) {}
+            
             pos.status = 'closed'; pos.closedAt = new Date().toISOString();
-            pos.exitReason = 'OCO cancelada — posição encerrada (sem preço de venda)';
-            pos.exitPrice = pos.entryPrice; pos.pnl = 0;
+            pos.exitReason = 'OCO encerrada/cancelada (usando preço atual)';
+            pos.exitPrice = currentPrice;
+            pos.pnl = parseFloat(((currentPrice - pos.entryPrice) * pos.quantity).toFixed(4));
             synced++;
           }
         }
@@ -1264,14 +1432,39 @@ app.post('/api/bot/positions/:id/oco', async (req, res) => {
     const tickData = await tickRes.json();
     const priceFilter = tickData.symbols?.[0]?.filters?.find(f => f.filterType === 'PRICE_FILTER');
     const tickSize = priceFilter?.tickSize || '0.00001';
+    // Buscar preço atual para validar relação OCO
+    const tickerRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${pos.symbol}`);
+    const tickerData = await tickerRes.json();
+    const currentPrice = parseFloat(tickerData.price);
+
+
+    
     function floorTick(price) {
       const tick = parseFloat(tickSize);
       const dec = tickSize.replace(/0+$/, '').split('.')[1]?.length || 0;
       return parseFloat((Math.floor(price / tick) * tick).toFixed(dec));
     }
-    const tpPrice  = floorTick(takeProfitPrice);
-    const spPrice  = floorTick(stopPrice);
-    const slpPrice = floorTick(stopPrice * 0.995);
+    function ceilTick(price) {
+      const tick = parseFloat(tickSize);
+      const dec = tickSize.replace(/0+$/, '').split('.')[1]?.length || 0;
+      return parseFloat((Math.ceil(price / tick) * tick).toFixed(dec));
+    }
+
+    let tpPrice  = floorTick(takeProfitPrice);
+    let spPrice  = floorTick(stopPrice);
+    let slpPrice = floorTick(stopPrice * 0.998); // Reduzido o gap de 0.5% para 0.2%
+
+    // Garantir relação de preços (Para SELL OCO)
+    // 1. Preço (TP) deve ser MAIOR que o preço atual
+    if (tpPrice <= currentPrice) {
+      tpPrice = ceilTick(currentPrice * 1.0005); // Força 0.05% acima para validar OCO
+    }
+    // 2. StopPrice deve ser MENOR que o preço atual
+    if (spPrice >= currentPrice) {
+      spPrice = floorTick(currentPrice * 0.9995); // Força 0.05% abaixo para validar OCO
+    }
+    // 3. StopLimit deve ser MENOR ou IGUAL ao StopPrice
+    if (slpPrice > spPrice) slpPrice = spPrice;
 
     const ts = (await (await fetch('https://api.binance.com/api/v3/time')).json()).serverTime;
     const qs = [

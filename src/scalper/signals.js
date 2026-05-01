@@ -14,8 +14,8 @@ export function calcBB(closes, length = 20, mult = 1.8) {
 }
 
 export function turboReversionSignal(candles, opts = {}) {
-  const { bbLen = 20, bbMult = 1.8, rsiLen = 14, rsiLimit = 35, volMult = 1.3 } = opts;
-  if (candles.length < Math.max(bbLen, rsiLen) + 2) return { signal: "flat", reason: "not enough bars" };
+  const { bbLen = 20, bbMult = 1.8, rsiLen = 14, rsiLimit = 35, volMult = 1.3, trendEmaPeriod = 0, trendSlopeBars = 5, trendMaxDownPct = 0 } = opts;
+  if (candles.length < Math.max(bbLen, rsiLen, trendEmaPeriod) + 2) return { signal: "flat", reason: "not enough bars" };
   const closes = candles.map((c) => c.close);
   const vols = candles.map((c) => c.vol || c.volume || 0);
   const last = closes[closes.length - 1];
@@ -26,16 +26,30 @@ export function turboReversionSignal(candles, opts = {}) {
   const avgVol = (volSlice.reduce((a, b) => a + b, 0) / volSlice.length) || 1;
   const isOversold = last < bb.lower && rsi < rsiLimit;
   const isVolSpike = lastVol > avgVol * volMult;
-  
+
+  let trendOk = true;
+  let trendInfo = null;
+  if (trendEmaPeriod > 0) {
+    const emaNow = calcEMA(closes, trendEmaPeriod);
+    const emaPrev = calcEMA(closes.slice(0, closes.length - trendSlopeBars), trendEmaPeriod);
+    const slopePct = (emaNow - emaPrev) / emaPrev;
+    const slopeOk = slopePct >= -trendMaxDownPct;
+    const aboveEma = last >= emaNow;
+    // Para reversão, o slope positivo é mais importante que o preço estar acima da EMA no exato momento do dip
+    trendOk = slopeOk; 
+    trendInfo = { ema: emaNow.toFixed(4), slopePct: (slopePct*100).toFixed(3)+"%", aboveEma, pass: trendOk };
+  }
+
   const conditions = [
     { label: "RSI < " + rsiLimit, value: rsi.toFixed(1), pass: rsi < rsiLimit },
     { label: "Preço < Banda Inf.", value: last.toFixed(4) + " / " + bb.lower.toFixed(4), pass: last < bb.lower },
-    { label: "Volume Spike", value: (lastVol/avgVol).toFixed(2) + "x", pass: isVolSpike }
+    { label: "Volume Spike", value: (lastVol/avgVol).toFixed(2) + "x", pass: isVolSpike },
+    ...(trendInfo ? [{ label: `Preço ≥ EMA${trendEmaPeriod} & slope ≥ -${(trendMaxDownPct*100).toFixed(2)}%`, value: `${trendInfo.aboveEma?'✓':'✗'} ${trendInfo.slopePct}`, pass: trendInfo.pass }] : [])
   ];
 
-  if (isOversold && isVolSpike) return { signal: "buy", reason: "turbo-reversion-bottom", last, lower: bb.lower, rsi, volFactor: (lastVol/avgVol).toFixed(2), conditions };
+  if (isOversold && isVolSpike && trendOk) return { signal: "buy", reason: "turbo-reversion-bottom", last, lower: bb.lower, rsi, volFactor: (lastVol/avgVol).toFixed(2), conditions };
   if (last > bb.upper) return { signal: "sell", reason: "turbo-reversion-top", last, upper: bb.upper, rsi, conditions };
-  return { signal: "flat", reason: "no turbo setup", last, lower: bb.lower, rsi, volFactor: (lastVol/avgVol).toFixed(2), conditions };
+  return { signal: "flat", reason: trendOk ? "no turbo setup" : "downtrend filter", last, lower: bb.lower, rsi, volFactor: (lastVol/avgVol).toFixed(2), conditions };
 }
 
 export function calcEMA(closes, period) {
@@ -101,7 +115,12 @@ export function microScalpSignal(candles, opts = {}) {
   const bumpPct = (last - prev) / prev;
   if (last > ema && dipPct >= minDip && rsi >= minRsi && rsi <= maxRsi) return { signal: "buy", reason: "bull-trend micro-dip", last, ema, rsi, dipPct, conditions: [{ label: "Acima da EMA", value: last.toFixed(4) + ">" + ema.toFixed(4), pass: last > ema }, { label: "Dip >= " + (minDip*100).toFixed(2) + "%", value: (dipPct*100).toFixed(2) + "%", pass: dipPct >= minDip }, { label: "RSI no Range", value: rsi.toFixed(1), pass: rsi >= minRsi && rsi <= maxRsi }] };
   if (last < ema && bumpPct >= minDip && rsi >= minRsi && rsi <= maxRsi) return { signal: "sell", reason: "bear-trend micro-bounce", last, ema, rsi, bumpPct, conditions: [{ label: "Abaixo da EMA", value: last.toFixed(4) + "<" + ema.toFixed(4), pass: last < ema }, { label: "Bounce >= " + (minDip*100).toFixed(2) + "%", value: (bumpPct*100).toFixed(2) + "%", pass: bumpPct >= minDip }, { label: "RSI no Range", value: rsi.toFixed(1), pass: rsi >= minRsi && rsi <= maxRsi }] };
-  return { signal: "flat", reason: "no micro setup", last, ema, rsi };
+  const conditions = [
+    { label: "Preço > EMA", value: last.toFixed(4) + " > " + ema.toFixed(4), pass: last > ema },
+    { label: "Dip >= " + (minDip*100).toFixed(2) + "%", value: (dipPct*100).toFixed(2) + "%", pass: dipPct >= minDip },
+    { label: "RSI " + minRsi + "-" + maxRsi, value: rsi.toFixed(1), pass: rsi >= minRsi && rsi <= maxRsi }
+  ];
+  return { signal: "flat", reason: "no micro setup", last, ema, rsi, conditions };
 }
 
 export function wv5gSignal(candles, opts = {}) {
@@ -120,5 +139,10 @@ export function wv5gSignal(candles, opts = {}) {
   const c3_bear = macd.hist < 0;
   if (c1_bull && c2 && c3_bull) return { signal: "buy", reason: "wv5g-bull-trend", last, e9, e20, rsi14, macdHist: macd.hist };
   if (c1_bear && c2 && c3_bear) return { signal: "sell", reason: "wv5g-bear-trend", last, e9, e20, rsi14, macdHist: macd.hist };
-  return { signal: "flat", reason: "no wv5g setup", last, e9, e20, rsi14, macdHist: macd.hist };
+  const conditions = [
+    { label: "Trend (P > E9 > E20)", value: `${last.toFixed(4)} > ${e9.toFixed(4)} > ${e20.toFixed(4)}`, pass: c1_bull },
+    { label: "RSI Range ("+rsiLow+"-"+rsiHigh+")", value: rsi14.toFixed(1), pass: c2 },
+    { label: "MACD Hist > 0", value: macd.hist.toFixed(6), pass: c3_bull }
+  ];
+  return { signal: "flat", reason: "no wv5g setup", last, e9, e20, rsi14, macdHist: macd.hist, conditions };
 }

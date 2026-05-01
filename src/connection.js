@@ -28,7 +28,7 @@ const KNOWN_PATHS = {
 
 export { KNOWN_PATHS };
 
-export async function getClient() {
+export async function getClient(opts = {}) {
   if (client) {
     try {
       // Quick liveness check
@@ -39,17 +39,20 @@ export async function getClient() {
       targetInfo = null;
     }
   }
-  return connect();
+  return connect(opts);
 }
 
-export async function connect() {
+export async function connect(opts = {}) {
+  const maxRetries = opts.fast ? 1 : MAX_RETRIES;
+  const baseDelay = opts.fast ? 100 : BASE_DELAY;
+
   // Prevent long hangs on serverless environments where localhost is unreachable
   if (process.env.VERCEL || (process.env.NODE_ENV === 'production' && CDP_HOST === 'localhost')) {
-    throw new Error('Local TradingView connection is not available in the cloud environment (Vercel). Please run the system locally or use a tunnel.');
+    throw new Error('Local TradingView connection is not available in the cloud environment (Vercel).');
   }
 
   let lastError;
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const target = await findChartTarget();
       if (!target) {
@@ -57,16 +60,6 @@ export async function connect() {
       }
       targetInfo = target;
       client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
-
-      // Connection health check: Verify if we are actually in TradingView
-      try {
-        const versionInfo = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/version`).then(r => r.json());
-        if (versionInfo.Browser && (versionInfo.Browser.includes('Chrome') || versionInfo.Browser.includes('Edge')) && !versionInfo.Browser.includes('TradingView')) {
-          console.warn(`Connected to ${versionInfo.Browser} instead of TradingView Desktop. This might cause issues.`);
-        }
-      } catch (e) {
-        // Ignore fetch errors for version info
-      }
 
       // Enable required domains
       await client.Runtime.enable();
@@ -76,20 +69,24 @@ export async function connect() {
       return client;
     } catch (err) {
       // Diagnostic helper: If we failed after all retries and it's because of "no target", check if port is held by Chrome
-      if (attempt === MAX_RETRIES - 1 && err.message.includes('No TradingView chart target found')) {
+      if (attempt === maxRetries - 1 && err.message.includes('No TradingView chart target found')) {
         try {
-          const v = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/version`).then(r => r.json());
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 1000);
+          const v = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/version`, { signal: controller.signal }).then(r => r.json()).finally(() => clearTimeout(timeout));
           if (v.Browser && !v.Browser.toLowerCase().includes('tradingview')) {
-            err.message += ` (Detected ${v.Browser} on port ${CDP_PORT}. Por favor, FECHE O CHROME e use o Fix-TradingView-Port.ps1 na Área de Trabalho para resolver o conflito.)`;
+            err.message += ` (Conflito: Chrome detectado na porta 9222. Feche o Chrome.)`;
           }
         } catch {}
       }
       lastError = err;
-      const delay = Math.min(BASE_DELAY * Math.pow(2, attempt), 30000);
-      await new Promise(r => setTimeout(r, delay));
+      if (attempt < maxRetries - 1) {
+        const delay = Math.min(baseDelay * Math.pow(2, attempt), 5000);
+        await new Promise(r => setTimeout(r, delay));
+      }
     }
   }
-  throw new Error(`CDP connection failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);
+  throw new Error(`CDP connection failed: ${lastError?.message}`);
 }
 
 async function findChartTarget() {
@@ -109,7 +106,7 @@ export async function getTargetInfo() {
 }
 
 export async function evaluate(expression, opts = {}) {
-  const c = await getClient();
+  const c = await getClient(opts);
   const result = await c.Runtime.evaluate({
     expression,
     returnByValue: true,
