@@ -46,7 +46,7 @@ function saveJournal(entries) {
 }
 
 let lastScreenshotPath = null;
-const MOCK_MODE = true; // Forçado para Vercel/Demo 
+const MOCK_MODE = process.env.MOCK_MODE === 'true';
 
 const MOCK_DATA = {
   quote: { success: true, symbol: 'BTCUSDT', last: 98450.25, open: 97100.00, high: 99200.50, low: 96800.20, close: 98450.25, volume: 12500, exchange: 'BINANCE' },
@@ -1699,7 +1699,7 @@ app.post('/api/micro-scalper/stop', (_req, res) => {
     if (!pidToKill) return res.json({ success: false, error: 'not running' });
 
     console.log(`🛑 Matando Micro-Scalper (PID: ${pidToKill})...`);
-    try { execSync(`taskkill /F /PID ${pidToKill} /T 2>nul`); } catch {}
+    try { process.kill(pidToKill, 'SIGTERM'); } catch {}
     if (microProcess) { try { microProcess.kill('SIGTERM'); } catch {} microProcess = null; }
     if (existsSync(MICRO_PID)) { try { unlinkSync(MICRO_PID); } catch {} }
     res.json({ success: true, killed: pidToKill });
