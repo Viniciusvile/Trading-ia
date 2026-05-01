@@ -1,4 +1,3 @@
-import { execSync } from "child_process";
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
 
 // --- TRAVA DE SEGURANÇA: IMPEDIR MÚLTIPLAS INSTÂNCIAS ---
@@ -7,12 +6,10 @@ if (existsSync(PID_FILE)) {
   const oldPid = parseInt(readFileSync(PID_FILE, "utf8"));
   if (oldPid && oldPid !== process.pid) {
     try {
-      const stdout = execSync(`tasklist /FI "PID eq ${oldPid}" /NH`).toString();
-      if (stdout.includes(oldPid.toString())) {
-        console.error(`❌ [ERRO] O robô já está rodando (PID: ${oldPid}). Encerrando esta nova instância.`);
-        process.exit(1);
-      }
-    } catch (e) {}
+      process.kill(oldPid, 0); // lança exceção se o processo não existe
+      console.error(`❌ [ERRO] O robô já está rodando (PID: ${oldPid}). Encerrando esta nova instância.`);
+      process.exit(1);
+    } catch (e) {} // processo morto, pode continuar
   }
 }
 writeFileSync(PID_FILE, process.pid.toString());
