@@ -933,6 +933,17 @@ app.get('/api/bot/log', (_req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
+// Diagnóstico: retorna últimas linhas do masterbot.log (texto cru)
+app.get('/api/bot/master/raw-log', (_req, res) => {
+  try {
+    const logFile = join(BOT_DIR, 'masterbot.log');
+    if (!existsSync(logFile)) return res.json({ success: true, lines: [], message: 'Log ainda não existe — bot nunca rodou' });
+    const text = readFileSync(logFile, 'utf8');
+    const lines = text.split('\n').slice(-200);
+    res.json({ success: true, lines, totalBytes: text.length });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
 app.post('/api/bot/run', (_req, res) => {
   if (!existsSync(BOT_DIR)) return res.status(404).json({ success: false, error: 'Pasta do bot não encontrada' });
   const proc = spawn('node', ['bot.js'], { cwd: BOT_DIR, shell: false });
@@ -1087,11 +1098,21 @@ app.post('/api/bot/master/start', (req, res) => {
       env: { ...process.env, MASTERBOT_LOOP_INTERVAL: safeInterval }
     });
 
+    masterProcess.on('error', (e) => console.error(`❌ MasterBot spawn error: ${e.message}`));
+    masterProcess.on('exit', (code, signal) => console.log(`⚠️ MasterBot exited code=${code} signal=${signal}`));
+
     if (masterProcess.pid) {
       writeFileSync(BOT_MASTER_PID, masterProcess.pid.toString());
     }
 
     masterProcess.unref();
+
+    // Aguarda 500ms e verifica se ainda está vivo (detecta crash imediato)
+    setTimeout(() => {
+      try { process.kill(masterProcess.pid, 0); }
+      catch { console.error(`❌ MasterBot morreu logo após start. Veja /api/bot/master/raw-log`); }
+    }, 500);
+
     res.json({ success: true, pid: masterProcess.pid });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
