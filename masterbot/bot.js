@@ -14,7 +14,6 @@ import { readFileSync, writeFileSync, existsSync, appendFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import crypto from "crypto";
-import { execSync } from "child_process";
 import nodeFetch from "node-fetch";
 
 // Carrega .env do parent dir (raiz do projeto), independente do cwd.
@@ -39,17 +38,19 @@ function checkOnboarding() {
   const required = ["BINANCE_API_KEY", "BINANCE_SECRET_KEY"];
   const missing = required.filter((k) => !process.env[k] && !process.env[k.replace('BINANCE_','BITGET_')]);
 
-  if (!existsSync(".env")) {
-    console.log(
-      "\n⚠️  No .env file found — opening it for you to fill in...\n",
-    );
-    writeFileSync(
-      ".env",
-      [
-        "# BitGet credentials",
-        "BITGET_API_KEY=",
-        "BITGET_SECRET_KEY=",
-        "BITGET_PASSPHRASE=",
+  if (missing.length > 0) {
+    // Em ambiente cloud (Railway), as credenciais vêm de variáveis de ambiente, não do .env
+    if (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID) {
+      console.error(`\n❌ Credenciais ausentes nas variáveis do Railway: ${missing.join(", ")}`);
+      console.error("Configure as variáveis no painel Railway → Variables e faça redeploy.\n");
+      process.exit(1);
+    }
+    // Local: tenta criar/abrir .env para o usuário preencher
+    if (!existsSync(".env")) {
+      writeFileSync(".env", [
+        "# Binance credentials",
+        "BINANCE_API_KEY=",
+        "BINANCE_SECRET_KEY=",
         "",
         "# Trading config",
         "PORTFOLIO_VALUE_USD=1000",
@@ -58,26 +59,10 @@ function checkOnboarding() {
         "PAPER_TRADING=true",
         "SYMBOL=BTCUSDT",
         "TIMEFRAME=4H",
-      ].join("\n") + "\n",
-    );
-    try {
-      const cmd = process.platform === 'win32' ? 'start' : 'open';
-      execSync(`${cmd} .env`);
-    } catch {}
-    console.log(
-      "Fill in your BitGet credentials in .env then re-run: node bot.js\n",
-    );
-    process.exit(0);
-  }
-
-  if (missing.length > 0) {
-    console.log(`\n⚠️  Missing credentials in .env: ${missing.join(", ")}`);
-    console.log("Opening .env for you now...\n");
-    try {
-      const cmd = process.platform === 'win32' ? 'start' : 'open';
-      execSync(`${cmd} .env`);
-    } catch {}
-    console.log("Add the missing values then re-run: node bot.js\n");
+      ].join("\n") + "\n");
+    }
+    console.log(`\n⚠️  Credenciais ausentes no .env: ${missing.join(", ")}`);
+    console.log("Preencha o arquivo .env e rode novamente: node bot.js\n");
     process.exit(0);
   }
 
