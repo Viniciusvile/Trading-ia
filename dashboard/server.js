@@ -6,7 +6,7 @@ import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, openSync } from 'node:fs';
-import { spawn, execSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import * as health from '../src/core/health.js';
 import * as chart from '../src/core/chart.js';
@@ -783,7 +783,14 @@ app.patch('/api/bot/watchlist', (req, res) => {
 
 app.patch('/api/bot/config', (req, res) => {
   try {
-    if (!existsSync(BOT_ENV)) return res.status(404).json({ success: false, error: '.env não encontrado' });
+    // Se .env não existe (Railway), cria um a partir das variáveis de ambiente
+    if (!existsSync(BOT_ENV)) {
+      const envVars = ['BINANCE_API_KEY','BINANCE_SECRET_KEY','TELEGRAM_BOT_TOKEN','TELEGRAM_CHAT_ID',
+        'GEMINI_API_KEY','PAPER_TRADING','MAX_TRADE_SIZE_USD','MAX_TRADES_PER_DAY','SYMBOL','TIMEFRAME',
+        'BOT_STRATEGY','PORTFOLIO_VALUE_USD'];
+      const content = envVars.filter(k => process.env[k]).map(k => `${k}=${process.env[k]}`).join('\n') + '\n';
+      writeFileSync(BOT_ENV, content);
+    }
     const { symbol, timeframe, strategy, portfolio, maxTrade, trailingEnabled, trailingMult, paperTrading, activePlan } = req.body || {};
     
     // Validations
@@ -838,7 +845,7 @@ app.patch('/api/bot/config', (req, res) => {
       }
       if (pidToKill) {
         console.log(`♻️ Reiniciando MasterBot para aplicar novas configurações...`);
-        try { execSync(`taskkill /F /PID ${pidToKill} /T`); } catch(e){}
+        try { process.kill(pidToKill, 'SIGTERM'); } catch(e){}
         masterProcess = null;
         if (existsSync(BOT_MASTER_PID)) unlinkSync(BOT_MASTER_PID);
 
@@ -991,9 +998,7 @@ app.get('/api/bot/master/status', (req, res) => {
       try {
         const pid = parseInt(readFileSync(BOT_MASTER_PID, 'utf8'));
         if (pid) {
-          // No Windows, checa via tasklist
-          const stdout = execSync(`tasklist /FI "PID eq ${pid}" /NH`).toString();
-          isAlive = stdout.includes(pid.toString());
+          try { process.kill(pid, 0); isAlive = true; } catch { isAlive = false; }
         }
       } catch (e) { isAlive = false; }
     }
@@ -1052,7 +1057,7 @@ app.post('/api/bot/master/start', (req, res) => {
     if (existsSync(BOT_MASTER_PID)) {
       const oldPid = parseInt(readFileSync(BOT_MASTER_PID, 'utf8'));
       if (oldPid) {
-        try { execSync(`taskkill /F /PID ${oldPid} /T 2>nul`); } catch {}
+        try { process.kill(oldPid, 'SIGTERM'); } catch {}
       }
       unlinkSync(BOT_MASTER_PID);
     }
@@ -1101,9 +1106,7 @@ app.post('/api/bot/master/stop', (req, res) => {
 
     if (pidToKill) {
       console.log(`🛑 Matando MasterBot (PID: ${pidToKill})...`);
-      try {
-        execSync(`taskkill /F /PID ${pidToKill} /T`);
-      } catch (e) { console.log('Processo já estava morto ou erro no kill:', e.message); }
+      try { process.kill(pidToKill, 'SIGTERM'); } catch (e) { console.log('Processo já estava morto:', e.message); }
     }
 
     masterProcess = null;
@@ -1544,10 +1547,7 @@ function microIsAlive() {
   if (existsSync(MICRO_PID)) {
     const pid = parseInt(readFileSync(MICRO_PID, 'utf8'));
     if (pid) {
-      try {
-        const stdout = execSync(`tasklist /FI "PID eq ${pid}" /NH`).toString();
-        if (stdout.includes(pid.toString())) return { alive: true, pid };
-      } catch {}
+      try { process.kill(pid, 0); return { alive: true, pid }; } catch {}
     }
   }
   return { alive: false, pid: null };
