@@ -1258,8 +1258,58 @@ app.get('/api/bot/positions', async (_req, res) => {
 
 app.post('/api/bot/positions/sync', async (_req, res) => {
   try {
-    const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
-    const result = await syncPositionsWithBinance(env);
+    const apiKey = process.env.BINANCE_API_KEY;
+    const secretKey = process.env.BINANCE_SECRET_KEY;
+    if (!apiKey || !secretKey) return res.status(400).json({ success: false, error: 'Credenciais Binance não configuradas' });
+
+    // Se positions.json não existe, cria do zero a partir dos saldos reais da Binance
+    if (!existsSync(BOT_POSITIONS)) {
+      const ts = (await (await fetch('https://api.binance.com/api/v3/time')).json()).serverTime;
+      const qs = `timestamp=${ts}&recvWindow=10000`;
+      const sig = crypto.createHmac('sha256', secretKey).update(qs).digest('hex');
+      const acct = await (await fetch(`https://api.binance.com/api/v3/account?${qs}&signature=${sig}`, {
+        headers: { 'X-MBX-APIKEY': apiKey }
+      })).json();
+
+      if (acct.code) return res.status(400).json({ success: false, error: acct.msg });
+
+      const balances = (acct.balances || []).filter(b => {
+        const qty = parseFloat(b.free) + parseFloat(b.locked);
+        return qty > 0 && b.asset !== 'USDT' && b.asset !== 'BNB';
+      });
+
+      const newPositions = [];
+      for (const b of balances) {
+        const symbol = b.asset + 'USDT';
+        try {
+          const ticker = await (await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`)).json();
+          const price = parseFloat(ticker.price);
+          const qty = parseFloat(b.free) + parseFloat(b.locked);
+          if (!price || qty * price < 1) continue;
+
+          newPositions.push({
+            id: `POS-SYNC-${Date.now()}-${b.asset}`,
+            symbol, side: 'LONG',
+            entryPrice: price,
+            quantity: qty,
+            stopPrice: null, takeProfitPrice: null,
+            ocoPlaced: parseFloat(b.locked) > 0,
+            status: 'open',
+            strategy: 'sync',
+            openedAt: new Date().toISOString(),
+            indicators: {}, conditions: [],
+            note: 'Importado via Sincronizar Binance'
+          });
+        } catch {}
+      }
+
+      writeFileSync(BOT_POSITIONS, JSON.stringify(newPositions, null, 2));
+      return res.json({ success: true, synced: newPositions.length, created: newPositions.length, details: newPositions.map(p => p.symbol) });
+    }
+
+    // positions.json existe: atualiza status das posições abertas
+    const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : { BINANCE_API_KEY: apiKey, BINANCE_SECRET_KEY: secretKey };
+    const result = await syncPositionsWithBinance({ ...env, BINANCE_API_KEY: apiKey, BINANCE_SECRET_KEY: secretKey });
     res.json({ success: true, synced: result.synced, details: result.details });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
