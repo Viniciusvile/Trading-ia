@@ -46,26 +46,14 @@ function saveJournal(entries) {
 }
 
 let lastScreenshotPath = null;
-const MOCK_MODE = process.env.MOCK_MODE === 'true';
-
-const MOCK_DATA = {
-  quote: { success: true, symbol: 'BTCUSDT', last: 98450.25, open: 97100.00, high: 99200.50, low: 96800.20, close: 98450.25, volume: 12500, exchange: 'BINANCE' },
-  indicators: { success: true, studies: [{ name: 'Trend Master', values: { 'VWAP': '97850.10', 'EMA 9': '98100.45', 'EMA 20': '97900.20', 'EMA 200': '95000.00', 'LONG': '1' } }] },
-  strategy: { success: true, summary: { net_profit: 4520.15, win_rate: 68.5, total_trades: 142, max_drawdown: 4.2 } },
-  trades: { success: true, trades: [
-    { direction: 'long', entry_price: 97100, exit_price: 98450, profit: 1350, profit_pct: 1.39 },
-    { direction: 'short', entry_price: 99100, exit_price: 98500, profit: 600, profit_pct: 0.61 }
-  ]},
-  alerts: { success: true, alerts: [{ condition: 'crossing', price: 100000, message: 'Psychological level' }] }
-};
+// Resposta padrão quando TradingView Desktop não está disponível (ambiente cloud)
+const TV_NA = { success: false, tv_unavailable: true, message: 'TradingView Desktop não conectado (ambiente cloud)' };
+function noTv(res) { return res.json(TV_NA); }
 
 // ── HEALTH ───────────────────────────────────────────────────────
 app.get('/api/health', async (req, res) => {
   try { res.json(await health.healthCheck()); }
-  catch (e) { 
-    if (MOCK_MODE || process.env.VERCEL) res.json({ success: true, cdp_connected: true, chart_symbol: 'BTCUSDT', chart_resolution: '240', is_mock: true });
-    else res.status(500).json({ success: false, error: e.message }); 
-  }
+  catch (e) { res.json({ success: true, cdp_connected: false, tv_unavailable: true, is_cloud: true }); }
 });
 
 // ── MICRO-SCALPER LIVE SIGNAL ────────────────────────────────────
@@ -228,40 +216,31 @@ app.post('/api/micro-scalper/sync-symbol', async (req, res) => {
     console.log(`📺 Syncing TradingView to ${rules.tv_symbol}...`);
     await chart.setSymbol({ symbol: rules.tv_symbol });
     res.json({ success: true, symbol: rules.tv_symbol });
-  } catch (e) {
-    console.error('❌ [API] Sync Error:', e.message);
-    res.status(500).json({ success: false, error: e.message });
-  }
+  } catch (e) { return noTv(res); }
 });
 
 // ── CHART STATE ──────────────────────────────────────────────────
 app.get('/api/state', async (_req, res) => {
   try { res.json({ success: true, ...(await chart.getState()) }); }
-  catch (e) { res.status(500).json({ success: false, error: e.message }); }
+  catch (e) { return noTv(res); }
 });
 
 // ── QUOTE ────────────────────────────────────────────────────────
 app.get('/api/quote', async (req, res) => {
   try { res.json(await data.getQuote({})); }
-  catch (e) { 
-    if (MOCK_MODE || process.env.VERCEL) res.json(MOCK_DATA.quote);
-    else res.status(500).json({ success: false, error: e.message }); 
-  }
+  catch (e) { return noTv(res); }
 });
 
 // ── INDICATORS ───────────────────────────────────────────────────
 app.get('/api/indicators', async (req, res) => {
   try { res.json(await data.getStudyValues()); }
-  catch (e) { 
-    if (MOCK_MODE || process.env.VERCEL) res.json(MOCK_DATA.indicators);
-    else res.status(500).json({ success: false, error: e.message }); 
-  }
+  catch (e) { return noTv(res); }
 });
 
 // ── OHLCV ────────────────────────────────────────────────────────
 app.get('/api/ohlcv', async (_req, res) => {
   try { res.json(await data.getOhlcv({ summary: true, count: 20 })); }
-  catch (e) { res.status(500).json({ success: false, error: e.message }); }
+  catch (e) { return noTv(res); }
 });
 
 // ── SYMBOL ───────────────────────────────────────────────────────
@@ -270,7 +249,7 @@ app.post('/api/symbol', async (req, res) => {
     const { symbol } = req.body;
     if (!symbol) return res.status(400).json({ success: false, error: 'symbol required' });
     res.json(await chart.setSymbol({ symbol }));
-  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+  } catch (e) { return noTv(res); }
 });
 
 // ── TIMEFRAME ────────────────────────────────────────────────────
@@ -279,7 +258,7 @@ app.post('/api/timeframe', async (req, res) => {
     const { timeframe } = req.body;
     if (!timeframe) return res.status(400).json({ success: false, error: 'timeframe required' });
     res.json(await chart.setTimeframe({ timeframe }));
-  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+  } catch (e) { return noTv(res); }
 });
 
 // ── CHART GOTO TRADE ─────────────────────────────────────────────
@@ -296,7 +275,7 @@ app.post('/api/chart/goto', async (req, res) => {
     await new Promise(r => setTimeout(r, 1500));
     await chart.scrollToDate({ date });
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+  } catch (e) { return noTv(res); }
 });
 
 // ── SYMBOL SEARCH ────────────────────────────────────────────────
@@ -305,7 +284,7 @@ app.get('/api/symbol-search', async (req, res) => {
     const { q } = req.query;
     if (!q) return res.json({ success: true, results: [] });
     res.json(await chart.symbolSearch({ query: q }));
-  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+  } catch (e) { return noTv(res); }
 });
 
 // ── SCREENSHOT ───────────────────────────────────────────────────
@@ -315,7 +294,7 @@ app.post('/api/screenshot', async (req, res) => {
     const result = await capture.captureScreenshot({ region });
     if (result.success && result.file_path) lastScreenshotPath = result.file_path;
     res.json(result);
-  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+  } catch (e) { return noTv(res); }
 });
 
 app.get('/api/screenshot-image', (_req, res) => {
@@ -352,50 +331,41 @@ app.get('/api/brief', async (_req, res) => {
       rules: { bias_criteria: rules.bias_criteria || null, risk_rules: rules.risk_rules || null },
       symbols_scanned: [{ symbol: state.symbol, timeframe: state.resolution, state, indicators, quote }],
     });
-  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+  } catch (e) { return noTv(res); }
 });
 
 // ── ALERTS ───────────────────────────────────────────────────────
 app.get('/api/alerts', async (req, res) => {
   try { res.json(await alerts.list()); }
-  catch (e) { 
-    if (MOCK_MODE || process.env.VERCEL) res.json(MOCK_DATA.alerts);
-    else res.status(500).json({ success: false, error: e.message }); 
-  }
+  catch (e) { return noTv(res); }
 });
 
 app.post('/api/alerts', async (req, res) => {
   try {
     const { condition, price, message } = req.body;
     res.json(await alerts.create({ condition, price, message }));
-  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+  } catch (e) { return noTv(res); }
 });
 
 app.delete('/api/alerts', async (_req, res) => {
   try { res.json(await alerts.deleteAlerts({ delete_all: true })); }
-  catch (e) { res.status(500).json({ success: false, error: e.message }); }
+  catch (e) { return noTv(res); }
 });
 
 // ── STRATEGY TESTER ──────────────────────────────────────────────
 app.get('/api/strategy', async (req, res) => {
   try { res.json(await data.getStrategyResults()); }
-  catch (e) { 
-    if (MOCK_MODE || process.env.VERCEL) res.json(MOCK_DATA.strategy);
-    else res.status(500).json({ success: false, error: e.message }); 
-  }
+  catch (e) { return noTv(res); }
 });
 
 app.get('/api/strategy/trades', async (req, res) => {
   try { res.json(await data.getTrades({ max_trades: 50 })); }
-  catch (e) { 
-    if (MOCK_MODE || process.env.VERCEL) res.json(MOCK_DATA.trades);
-    else res.status(500).json({ success: false, error: e.message }); 
-  }
+  catch (e) { return noTv(res); }
 });
 
 app.get('/api/strategy/equity', async (_req, res) => {
   try { res.json(await data.getEquity()); }
-  catch (e) { res.status(500).json({ success: false, error: e.message }); }
+  catch (e) { return noTv(res); }
 });
 
 // ── SCANNER ──────────────────────────────────────────────────────
