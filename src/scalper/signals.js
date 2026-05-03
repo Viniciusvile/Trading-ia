@@ -1,3 +1,17 @@
+// True Range médio em % do preço — mede volatilidade da última vela
+export function calcATRPct(candles, period = 14) {
+  if (candles.length < period + 1) return 0;
+  const trs = [];
+  for (let i = candles.length - period; i < candles.length; i++) {
+    const c = candles[i], prev = candles[i - 1];
+    const tr = Math.max(c.high - c.low, Math.abs(c.high - prev.close), Math.abs(c.low - prev.close));
+    trs.push(tr);
+  }
+  const atr = trs.reduce((a, b) => a + b, 0) / trs.length;
+  const lastClose = candles[candles.length - 1].close;
+  return lastClose ? (atr / lastClose) * 100 : 0;
+}
+
 export function calcStandardDeviation(values) {
   const avg = values.reduce((a, b) => a + b, 0) / values.length;
   const squareDiffs = values.map((v) => Math.pow(v - avg, 2));
@@ -14,7 +28,9 @@ export function calcBB(closes, length = 20, mult = 1.8) {
 }
 
 export function turboReversionSignal(candles, opts = {}) {
-  const { bbLen = 20, bbMult = 1.8, rsiLen = 14, rsiLimit = 35, volMult = 1.3, trendEmaPeriod = 0, trendSlopeBars = 5, trendMaxDownPct = 0 } = opts;
+  const { bbLen = 20, bbMult = 1.8, rsiLen = 14, rsiLimit = 35, volMult = 1.3,
+          trendEmaPeriod = 0, trendSlopeBars = 5, trendMaxDownPct = 0,
+          minAtrPct = 0 } = opts;
   if (candles.length < Math.max(bbLen, rsiLen, trendEmaPeriod) + 2) return { signal: "flat", reason: "not enough bars" };
   const closes = candles.map((c) => c.close);
   const vols = candles.map((c) => c.vol || c.volume || 0);
@@ -35,21 +51,31 @@ export function turboReversionSignal(candles, opts = {}) {
     const slopePct = (emaNow - emaPrev) / emaPrev;
     const slopeOk = slopePct >= -trendMaxDownPct;
     const aboveEma = last >= emaNow;
-    // Para reversão, o slope positivo é mais importante que o preço estar acima da EMA no exato momento do dip
-    trendOk = slopeOk; 
+    trendOk = slopeOk;
     trendInfo = { ema: emaNow.toFixed(4), slopePct: (slopePct*100).toFixed(3)+"%", aboveEma, pass: trendOk };
+  }
+
+  // Filtro de volatilidade: ATR mínimo (% do preço) — evita operar em mercado morto
+  let atrOk = true;
+  let atrInfo = null;
+  if (minAtrPct > 0) {
+    const atrPct = calcATRPct(candles, 14);
+    atrOk = atrPct >= minAtrPct;
+    atrInfo = { atrPct: atrPct.toFixed(3), pass: atrOk };
   }
 
   const conditions = [
     { label: "RSI < " + rsiLimit, value: rsi.toFixed(1), pass: rsi < rsiLimit },
     { label: "Preço < Banda Inf.", value: last.toFixed(4) + " / " + bb.lower.toFixed(4), pass: last < bb.lower },
     { label: "Volume Spike", value: (lastVol/avgVol).toFixed(2) + "x", pass: isVolSpike },
-    ...(trendInfo ? [{ label: `Preço ≥ EMA${trendEmaPeriod} & slope ≥ -${(trendMaxDownPct*100).toFixed(2)}%`, value: `${trendInfo.aboveEma?'✓':'✗'} ${trendInfo.slopePct}`, pass: trendInfo.pass }] : [])
+    ...(trendInfo ? [{ label: `Slope EMA${trendEmaPeriod} ≥ -${(trendMaxDownPct*100).toFixed(2)}%`, value: `${trendInfo.aboveEma?'✓':'✗'} ${trendInfo.slopePct}`, pass: trendInfo.pass }] : []),
+    ...(atrInfo ? [{ label: `ATR ≥ ${minAtrPct.toFixed(2)}%`, value: atrInfo.atrPct + "%", pass: atrInfo.pass }] : [])
   ];
 
-  if (isOversold && isVolSpike && trendOk) return { signal: "buy", reason: "turbo-reversion-bottom", last, lower: bb.lower, rsi, volFactor: (lastVol/avgVol).toFixed(2), conditions };
+  if (isOversold && isVolSpike && trendOk && atrOk) return { signal: "buy", reason: "turbo-reversion-bottom", last, lower: bb.lower, rsi, volFactor: (lastVol/avgVol).toFixed(2), conditions };
   if (last > bb.upper) return { signal: "sell", reason: "turbo-reversion-top", last, upper: bb.upper, rsi, conditions };
-  return { signal: "flat", reason: trendOk ? "no turbo setup" : "downtrend filter", last, lower: bb.lower, rsi, volFactor: (lastVol/avgVol).toFixed(2), conditions };
+  const blockedBy = !trendOk ? "downtrend filter" : !atrOk ? "low volatility" : "no turbo setup";
+  return { signal: "flat", reason: blockedBy, last, lower: bb.lower, rsi, volFactor: (lastVol/avgVol).toFixed(2), conditions };
 }
 
 export function calcEMA(closes, period) {
@@ -104,8 +130,10 @@ export function calcMACD(closes, fast = 12, slow = 26, signal = 9) {
 }
 
 export function microScalpSignal(candles, opts = {}) {
-  const { emaPeriod = 8, rsiPeriod = 3, minDip = 0.0005, maxRsi = 75, minRsi = 25 } = opts;
-  if (candles.length < Math.max(emaPeriod, rsiPeriod) + 2) return { signal: "flat", reason: "not enough bars" };
+  const { emaPeriod = 8, rsiPeriod = 3, minDip = 0.0005, maxRsi = 75, minRsi = 25,
+          trendEmaPeriod = 0, trendSlopeBars = 5, trendMaxDownPct = 0,
+          minAtrPct = 0 } = opts;
+  if (candles.length < Math.max(emaPeriod, rsiPeriod, trendEmaPeriod) + 2) return { signal: "flat", reason: "not enough bars" };
   const closes = candles.map((c) => c.close);
   const last = closes[closes.length - 1];
   const prev = closes[closes.length - 2];
@@ -113,14 +141,43 @@ export function microScalpSignal(candles, opts = {}) {
   const rsi = calcRSI(closes, rsiPeriod);
   const dipPct = (prev - last) / prev;
   const bumpPct = (last - prev) / prev;
-  if (last > ema && dipPct >= minDip && rsi >= minRsi && rsi <= maxRsi) return { signal: "buy", reason: "bull-trend micro-dip", last, ema, rsi, dipPct, conditions: [{ label: "Acima da EMA", value: last.toFixed(4) + ">" + ema.toFixed(4), pass: last > ema }, { label: "Dip >= " + (minDip*100).toFixed(2) + "%", value: (dipPct*100).toFixed(2) + "%", pass: dipPct >= minDip }, { label: "RSI no Range", value: rsi.toFixed(1), pass: rsi >= minRsi && rsi <= maxRsi }] };
-  if (last < ema && bumpPct >= minDip && rsi >= minRsi && rsi <= maxRsi) return { signal: "sell", reason: "bear-trend micro-bounce", last, ema, rsi, bumpPct, conditions: [{ label: "Abaixo da EMA", value: last.toFixed(4) + "<" + ema.toFixed(4), pass: last < ema }, { label: "Bounce >= " + (minDip*100).toFixed(2) + "%", value: (bumpPct*100).toFixed(2) + "%", pass: bumpPct >= minDip }, { label: "RSI no Range", value: rsi.toFixed(1), pass: rsi >= minRsi && rsi <= maxRsi }] };
-  const conditions = [
+
+  // Filtro macro de tendência (EMA longa)
+  let trendOk = true;
+  let trendInfo = null;
+  if (trendEmaPeriod > 0) {
+    const trendEma = calcEMA(closes, trendEmaPeriod);
+    const trendEmaPrev = calcEMA(closes.slice(0, closes.length - trendSlopeBars), trendEmaPeriod);
+    const slopePct = (trendEma - trendEmaPrev) / trendEmaPrev;
+    trendOk = slopePct >= -trendMaxDownPct;
+    trendInfo = { trendEma: trendEma.toFixed(4), slopePct: (slopePct*100).toFixed(3)+"%", pass: trendOk };
+  }
+
+  // Filtro de volatilidade
+  let atrOk = true;
+  let atrInfo = null;
+  if (minAtrPct > 0) {
+    const atrPct = calcATRPct(candles, 14);
+    atrOk = atrPct >= minAtrPct;
+    atrInfo = { atrPct: atrPct.toFixed(3), pass: atrOk };
+  }
+
+  const baseConditions = [
     { label: "Preço > EMA", value: last.toFixed(4) + " > " + ema.toFixed(4), pass: last > ema },
     { label: "Dip >= " + (minDip*100).toFixed(2) + "%", value: (dipPct*100).toFixed(2) + "%", pass: dipPct >= minDip },
-    { label: "RSI " + minRsi + "-" + maxRsi, value: rsi.toFixed(1), pass: rsi >= minRsi && rsi <= maxRsi }
+    { label: "RSI " + minRsi + "-" + maxRsi, value: rsi.toFixed(1), pass: rsi >= minRsi && rsi <= maxRsi },
+    ...(trendInfo ? [{ label: `Slope EMA${trendEmaPeriod} ≥ -${(trendMaxDownPct*100).toFixed(2)}%`, value: trendInfo.slopePct, pass: trendOk }] : []),
+    ...(atrInfo ? [{ label: `ATR ≥ ${minAtrPct.toFixed(2)}%`, value: atrInfo.atrPct + "%", pass: atrOk }] : [])
   ];
-  return { signal: "flat", reason: "no micro setup", last, ema, rsi, conditions };
+
+  if (last > ema && dipPct >= minDip && rsi >= minRsi && rsi <= maxRsi && trendOk && atrOk) {
+    return { signal: "buy", reason: "bull-trend micro-dip", last, ema, rsi, dipPct, conditions: baseConditions };
+  }
+  if (last < ema && bumpPct >= minDip && rsi >= minRsi && rsi <= maxRsi && trendOk && atrOk) {
+    return { signal: "sell", reason: "bear-trend micro-bounce", last, ema, rsi, bumpPct, conditions: baseConditions };
+  }
+  const blockedBy = !trendOk ? "downtrend filter" : !atrOk ? "low volatility" : "no micro setup";
+  return { signal: "flat", reason: blockedBy, last, ema, rsi, conditions: baseConditions };
 }
 
 export function wv5gSignal(candles, opts = {}) {

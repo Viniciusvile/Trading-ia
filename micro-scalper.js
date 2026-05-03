@@ -280,7 +280,10 @@ async function main() {
             sendTelegram(`🔴 [SCALPER] VENDA ${symbol}\nMotivo: ${reason}\nPnL: ${(realizedPct * 100).toFixed(2)}%\nTotal ${symbol}: ${(s.cumPnlPct * 100).toFixed(2)}%`);
             
             s.pos = null;
-            s.cooldownUntil = now + mainConfig.cooldown_ms;
+            // Cooldown maior após loss para evitar revenge trade no mesmo movimento
+            const baseCooldown = mainConfig.cooldown_ms || 5000;
+            const lossCooldown = mainConfig.cooldown_after_loss_ms || baseCooldown;
+            s.cooldownUntil = now + (realizedPct < 0 ? lossCooldown : baseCooldown);
           }
         } else if (now >= s.cooldownUntil && s.trades < mainConfig.max_trades) {
           // --- BUSCA DE SINAL ---
@@ -288,9 +291,23 @@ async function main() {
           let sig;
           
           if (cfg.strategy_mode === "turbo-reversion") {
-            sig = turboReversionSignal(candles, { bbLen: cfg.bb_length, bbMult: cfg.bb_mult, rsiLen: cfg.rsi_period, rsiLimit: cfg.rsi_limit, volMult: cfg.vol_mult });
+            sig = turboReversionSignal(candles, {
+              bbLen: cfg.bb_length, bbMult: cfg.bb_mult,
+              rsiLen: cfg.rsi_period, rsiLimit: cfg.rsi_limit, volMult: cfg.vol_mult,
+              trendEmaPeriod: cfg.trend_ema_period || 0,
+              trendSlopeBars: cfg.trend_slope_bars || 5,
+              trendMaxDownPct: cfg.trend_max_down_pct || 0,
+              minAtrPct: cfg.min_atr_pct || 0,
+            });
           } else {
-            sig = microScalpSignal(candles, { emaPeriod: cfg.ema_period, rsiPeriod: cfg.rsi_period, minDip: cfg.min_dip_pct, minRsi: cfg.min_rsi, maxRsi: cfg.max_rsi });
+            sig = microScalpSignal(candles, {
+              emaPeriod: cfg.ema_period, rsiPeriod: cfg.rsi_period,
+              minDip: cfg.min_dip_pct, minRsi: cfg.min_rsi, maxRsi: cfg.max_rsi,
+              trendEmaPeriod: cfg.trend_ema_period || 0,
+              trendSlopeBars: cfg.trend_slope_bars || 5,
+              trendMaxDownPct: cfg.trend_max_down_pct || 0,
+              minAtrPct: cfg.min_atr_pct || 0,
+            });
           }
 
           if (sig.signal === "buy") {
