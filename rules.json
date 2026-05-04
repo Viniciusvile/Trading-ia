@@ -125,30 +125,20 @@
         "ema_period": 20,
         "rsi_period": 3,
         "min_dip_pct": 0.001,
-        "min_rsi": 25,
-        "max_rsi": 65,
-        "tp_pct": 0.008,
-        "sl_pct": 0.004,
-        "trend_ema_period": 50,
-        "trend_slope_bars": 5,
-        "trend_max_down_pct": 0.005,
-        "min_atr_pct": 0.4
+        "qty_decimals": 2,
+        "quote_decimals": 4
       },
       "XRPUSDT": {
         "symbol": "XRPUSDT",
         "tv_symbol": "BINANCE:XRPUSDT",
         "strategy_mode": "turbo-reversion",
         "rsi_period": 14,
-        "rsi_limit": 40,
+        "rsi_limit": 45,
         "bb_length": 20,
         "bb_mult": 2,
-        "vol_mult": 1.2,
-        "tp_pct": 0.015,
-        "sl_pct": 0.006,
-        "trend_ema_period": 50,
-        "trend_slope_bars": 5,
-        "trend_max_down_pct": 0.005,
-        "min_atr_pct": 0.4
+        "vol_mult": 1.1,
+        "qty_decimals": 0,
+        "quote_decimals": 4
       },
       "PEPEUSDT": {
         "symbol": "PEPEUSDT",

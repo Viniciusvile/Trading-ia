@@ -164,13 +164,19 @@ async function main() {
           // Tenta colocar OCO para posição sincronizada recém descoberta sem OCO
           try {
             const ocoQty = fmtQty(symbol, finalQty * 0.999, cfg);
-            console.log(`  🕒 [SYNC-OCO] Tentando colocar TP/SL para ${symbol}: TP=${pos.tpPrice.toFixed(4)}, SL=${pos.slPrice.toFixed(4)}`);
-            const oco = await client.placeOCO(symbol, "SELL", ocoQty, pos.tpPrice, pos.slPrice, pos.slPrice * 0.99, cfg.quote_decimals);
-            if (oco.ok) {
-              pos.ocoId = oco.data.orderListId;
-              console.log(`  ✅ [SYNC-OCO] Ativo: ID ${pos.ocoId}`);
+            if (parseFloat(ocoQty) <= 0) {
+              console.error(`  ❌ [SYNC-OCO] ${symbol}: qty_decimals=${cfg.qty_decimals ?? 0} arredondou ${finalQty} para ${ocoQty}. Ajuste rules.json.`);
+            } else {
+              console.log(`  🕒 [SYNC-OCO] Tentando colocar TP/SL para ${symbol}: qty=${ocoQty}, TP=${pos.tpPrice.toFixed(4)}, SL=${pos.slPrice.toFixed(4)}`);
+              const oco = await client.placeOCO(symbol, "SELL", ocoQty, pos.tpPrice, pos.slPrice, pos.slPrice * 0.99, cfg.quote_decimals);
+              if (oco.ok) {
+                pos.ocoId = oco.data.orderListId;
+                console.log(`  ✅ [SYNC-OCO] Ativo: ID ${pos.ocoId}`);
+              } else {
+                console.error(`  ❌ [SYNC-OCO] Falha: ${oco.data?.msg || JSON.stringify(oco.data)}`);
+              }
             }
-          } catch(e) {}
+          } catch(e) { console.error(`  ❌ [SYNC-OCO] Exception: ${e.message}`); }
         }
         
         sessionData[symbol].pos = pos;
@@ -327,17 +333,26 @@ async function main() {
                 
                 try {
                   const ocoQty = fmtQty(symbol, open.qty * 0.999, cfg);
-                  console.log(`  🕒 [OCO] Tentando colocar TP/SL para ${symbol}: TP=${s.pos.tpPrice.toFixed(4)}, SL=${s.pos.slPrice.toFixed(4)}`);
-                  const oco = await client.placeOCO(symbol, "SELL", ocoQty, s.pos.tpPrice, s.pos.slPrice, s.pos.slPrice * 0.99, cfg.quote_decimals);
-                  if (oco.ok) {
-                    s.pos.ocoId = oco.data.orderListId;
-                    console.log(`  ✅ [OCO] Ativo: ID ${s.pos.ocoId}`);
+                  // Validação: se a quantidade ficou zerada, qty_decimals está errado para esse ativo
+                  if (parseFloat(ocoQty) <= 0) {
+                    const msg = `qty_decimals=${cfg.qty_decimals ?? 0} arredondou ${open.qty} para ${ocoQty}. Ajuste rules.json.`;
+                    console.error(`  ❌ [OCO] ${symbol}: ${msg}`);
+                    sendTelegram(`🚨 [SCALPER] OCO BLOQUEADO ${symbol}\n${msg}`);
                   } else {
-                    console.error(`  ❌ [OCO] Falha da API Binance: ${JSON.stringify(oco.data)}`);
-                    sendTelegram(`⚠️ [SCALPER] Erro OCO ${symbol}: ${oco.data.msg || "Erro desconhecido"}`);
+                    console.log(`  🕒 [OCO] Tentando colocar TP/SL para ${symbol}: qty=${ocoQty}, TP=${s.pos.tpPrice.toFixed(4)}, SL=${s.pos.slPrice.toFixed(4)}`);
+                    const oco = await client.placeOCO(symbol, "SELL", ocoQty, s.pos.tpPrice, s.pos.slPrice, s.pos.slPrice * 0.99, cfg.quote_decimals);
+                    if (oco.ok) {
+                      s.pos.ocoId = oco.data.orderListId;
+                      console.log(`  ✅ [OCO] Ativo: ID ${s.pos.ocoId}`);
+                    } else {
+                      const errMsg = oco.data?.msg || JSON.stringify(oco.data);
+                      console.error(`  ❌ [OCO] Falha da API Binance: ${errMsg}`);
+                      sendTelegram(`⚠️ [SCALPER] Erro OCO ${symbol}: ${errMsg}`);
+                    }
                   }
                 } catch(e) {
                   console.error(`  ❌ [OCO] Erro de rede/sintaxe: ${e.message}`);
+                  sendTelegram(`⚠️ [SCALPER] Exception OCO ${symbol}: ${e.message}`);
                 }
 
                 s.log.push({ 
