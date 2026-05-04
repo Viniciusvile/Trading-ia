@@ -41,8 +41,8 @@
         "macd_positive": true,
         "macd_growing": true
       },
-      "sl_atr_mult": 1.5,
-      "tp_atr_mult": 1.8,
+      "sl_atr_mult": 1.2,
+      "tp_atr_mult": 2.5,
       "breakeven_pct": 0.8
     },
     {
@@ -68,20 +68,18 @@
         "rsi_min": 42,
         "rsi_max": 74
       },
-      "sl_atr_mult": 1.4,
-      "tp_atr_mult": 0.75,
+      "sl_atr_mult": 1.0,
+      "tp_atr_mult": 2.0,
       "breakeven_pct": 0.5
     },
     {
       "name": "PlanMeme",
       "description": "Meme Momentum (1H)",
       "symbols": [
-        "BONKUSDT",
         "PEPEUSDT",
         "DOGEUSDT"
       ],
       "tv_symbols": {
-        "BONKUSDT": "BINANCE:BONKUSDT",
         "PEPEUSDT": "BINANCE:PEPEUSDT",
         "DOGEUSDT": "BINANCE:DOGEUSDT"
       },
@@ -136,9 +134,7 @@
         "rsi_limit": 45,
         "bb_length": 20,
         "bb_mult": 2,
-        "vol_mult": 1.1,
-        "qty_decimals": 0,
-        "quote_decimals": 4
+        "vol_mult": 1.1
       },
       "PEPEUSDT": {
         "symbol": "PEPEUSDT",
@@ -196,7 +192,7 @@
       }
     }
   },
-  "master_interval": "10m",
+  "master_interval": "30m",
   "exit_rules_config": {
     "trailing_stop": {
       "enabled": false,
