@@ -1635,66 +1635,48 @@ app.get('/api/micro-scalper/config', (_req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.get('/api/micro-scalper/status', (_req, res) => {
+app.get('/api/micro-scalper/status', async (_req, res) => {
   try {
     const liveness = microIsAlive();
-    let lastSession = null;
-    if (existsSync(MICRO_LOG)) {
-      const all = JSON.parse(readFileSync(MICRO_LOG, 'utf8'));
-      if (Array.isArray(all) && all.length) lastSession = all[all.length - 1];
-    }
+    const sessions = await db.loadMicroSessions(5);
+    const lastSession = sessions.length ? sessions[sessions.length - 1] : null;
     res.json({ success: true, running: liveness.alive, pid: liveness.pid, lastSession });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.get('/api/micro-scalper/log', (req, res) => {
+app.get('/api/micro-scalper/log', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
-    if (!existsSync(MICRO_LOG)) return res.json({ success: true, sessions: [], trades: [], daily: { trades: 0, pnl: 0 } });
-    
-    const all = JSON.parse(readFileSync(MICRO_LOG, 'utf8'));
-    const flat = [];
-    
-    let todayTrades = 0;
-    let todayPnl = 0;
-    let todayProfit = 0;
-    const processedTs = new Set();
-    const debug = [];
+    const all = await db.loadMicroSessions(200);
+    if (!all.length) return res.json({ success: true, sessions: 0, trades: [], daily: { trades: 0, pnl: 0 } });
 
-    // Data de hoje no formato YYYY-MM-DD (Brasil UTC-3)
+    const flat = [];
+    let todayTrades = 0, todayPnl = 0, todayProfit = 0;
+    const processedTs = new Set();
     const todayStr = new Date(new Date().getTime() - (3 * 60 * 60 * 1000)).toISOString().split('T')[0];
 
     for (const sess of all) {
       const entries = (sess.trades || []).filter(t => t.event === 'entry');
-      
       for (const tr of (sess.trades || [])) {
         if (!tr.t) continue;
-        
         const trKey = `${tr.t}_${tr.event}`;
         if (processedTs.has(trKey)) continue;
         processedTs.add(trKey);
-
         flat.push({ session: sess.sessionStart, ...tr });
-        
         if (tr.t.includes(todayStr) && tr.event === 'exit') {
           todayTrades++;
           if (tr.pnlPct != null) {
             todayPnl += tr.pnlPct;
             const entry = entries.filter(e => e.t < tr.t).pop();
             const entryVal = entry ? (entry.entryPrice * entry.qty) : 10;
-            const pnlUsdt = tr.pnlUsdt !== undefined ? tr.pnlUsdt : (tr.pnlPct * entryVal);
-            todayProfit += pnlUsdt;
-            debug.push(`Trade: ${tr.t} | PnL%: ${tr.pnlPct} | EntryVal: ${entryVal} | PnL$: ${pnlUsdt}`);
+            todayProfit += tr.pnlUsdt !== undefined ? tr.pnlUsdt : (tr.pnlPct * entryVal);
           }
         }
       }
     }
-    if (debug.length > 0) {
-      try { writeFileSync(join(ROOT, 'debug-pnl.log'), `Today: ${todayStr}\n` + debug.join('\n') + `\nTotal PnL%: ${todayPnl} | Total PnL$: ${todayProfit}\n`); } catch(e) {}
-    }
-    res.json({ 
-      success: true, 
-      sessions: all.length, 
+    res.json({
+      success: true,
+      sessions: all.length,
       trades: flat.slice(-limit).reverse(),
       daily: { trades: todayTrades, pnl: todayPnl, profit: todayProfit }
     });

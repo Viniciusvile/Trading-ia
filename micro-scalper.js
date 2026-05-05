@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
+import * as db from "./masterbot/db.js";
 
 // --- TRAVA DE SEGURANÇA: IMPEDIR MÚLTIPLAS INSTÂNCIAS ---
 const PID_FILE = ".micro-scalper.pid";
@@ -84,6 +85,7 @@ async function closeLong(symbol, qty, ocoId, config) {
 }
 
 async function main() {
+  await db.initDb();
   const activeSymbols = mainConfig.active_symbols || [];
   console.log(`\n🤖 [MULTI-SCALPER] INICIADO — Símbolos: ${activeSymbols.join(", ")}`);
   
@@ -129,21 +131,14 @@ async function main() {
       let logOcoId = null;
 
       try {
-        const logPath = "micro-scalper-log.json";
-        if (existsSync(logPath)) {
-          const logs = JSON.parse(readFileSync(logPath, "utf8"));
-          const allTrades = [];
-          logs.forEach(s => { if(s.trades) allTrades.push(...s.trades); });
-          
-          const symbolTrades = allTrades.filter(t => t.symbol === symbol);
-          if (symbolTrades.length > 0) {
-            const last = symbolTrades[symbolTrades.length - 1];
-            if (last.event === "entry") {
-              isLogOpen = true;
-              logQty = parseFloat(last.qty);
-              logEntry = last;
-              logOcoId = last.ocoId;
-            }
+        const symbolTrades = await db.loadMicroSymbolTrades(symbol);
+        if (symbolTrades.length > 0) {
+          const last = symbolTrades[symbolTrades.length - 1];
+          if (last.event === "entry") {
+            isLogOpen = true;
+            logQty = parseFloat(last.qty);
+            logEntry = last;
+            logOcoId = last.ocoId;
           }
         }
       } catch (e) {}
@@ -349,7 +344,7 @@ async function main() {
               exitPrice: exitPx 
             });
             
-            saveGlobalLog(sessionStart, symbol, s.log);
+            await saveGlobalLog(sessionStart, symbol, s.log);
             console.log(`  🚀 [EXIT] ${symbol} | ${reason} @ ${exitPx.toFixed(4)} | PnL: ${(realizedPct * 100).toFixed(2)}%`);
             sendTelegram(`🔴 [SCALPER] VENDA ${symbol}\nMotivo: ${reason}\nPnL: ${(realizedPct * 100).toFixed(2)}%\nTotal ${symbol}: ${(s.cumPnlPct * 100).toFixed(2)}%`);
             
@@ -451,7 +446,7 @@ async function main() {
                   tpPrice: s.pos.tpPrice,
                   slPrice: s.pos.slPrice
                 });
-                saveGlobalLog(sessionStart, symbol, s.log);
+                await saveGlobalLog(sessionStart, symbol, s.log);
                 
                 console.log(`  🟢 [ENTRY] ${symbol} COMPRADO @ ${entryPrice.toFixed(4)}`);
                 sendTelegram(`🟢 [SCALPER] COMPRA ${symbol}\nPreço: $${entryPrice.toFixed(4)}\nSinal: ${sig.reason}`);
@@ -469,22 +464,10 @@ async function main() {
   }
 }
 
-function saveGlobalLog(sessionStart, symbol, trades) {
+async function saveGlobalLog(sessionStart, symbol, trades) {
   try {
-    const logPath = "micro-scalper-log.json";
-    const existing = existsSync(logPath) ? JSON.parse(readFileSync(logPath, "utf8")) : [];
-    const sessionKey = new Date(sessionStart).toISOString();
-    let session = existing.find(s => s.sessionStart === sessionKey);
-    if (!session) {
-      session = { sessionStart: sessionKey, trades: [] };
-      existing.push(session);
-    }
-    // Adiciona o símbolo no log para o dashboard filtrar
-    const formattedTrades = trades.map(t => ({ ...t, symbol }));
-    // Mescla mantendo apenas os mais recentes por evento/timestamp
-    session.trades = [...session.trades.filter(t => t.symbol !== symbol), ...formattedTrades];
-    writeFileSync(logPath, JSON.stringify(existing, null, 2));
-  } catch(e) {}
+    await db.saveMicroSession(new Date(sessionStart).toISOString(), symbol, trades);
+  } catch(e) { console.error(`  ⚠ [LOG] Falha ao salvar sessão no banco: ${e.message}`); }
 }
 
 main().catch(e => { console.error("Fatal:", e); process.exit(1); });

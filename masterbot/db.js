@@ -64,6 +64,15 @@ export async function initDb() {
       INSERT INTO master_status (id, data)
         VALUES (1, '{"status":"stopped","watchlist":[],"timeframes":[],"lastResults":[]}'::jsonb)
         ON CONFLICT (id) DO NOTHING;
+
+      CREATE TABLE IF NOT EXISTS micro_sessions (
+        id           BIGSERIAL PRIMARY KEY,
+        session_start TIMESTAMPTZ NOT NULL,
+        symbol       VARCHAR(20)  NOT NULL,
+        trades       JSONB        NOT NULL DEFAULT '[]'::jsonb,
+        UNIQUE (session_start, symbol)
+      );
+      CREATE INDEX IF NOT EXISTS idx_micro_sessions_ts ON micro_sessions(session_start DESC);
     `);
     console.log('✅ PostgreSQL conectado e tabelas verificadas.');
   } catch (e) {
@@ -225,4 +234,54 @@ export async function writeMasterStatus(state) {
 export async function loadMasterStatus() {
   const res = await getPool().query('SELECT data FROM master_status WHERE id = 1');
   return res.rows[0]?.data ?? { status: 'stopped', watchlist: [], timeframes: [], lastResults: [] };
+}
+
+// ─── Micro-Scalper Sessions ───────────────────────────────────────────────────
+
+/** Salva (upsert) uma sessão do Micro-Scalper. */
+export async function saveMicroSession(sessionStart, symbol, trades) {
+  const ts = new Date(sessionStart);
+  await getPool().query(
+    `INSERT INTO micro_sessions (session_start, symbol, trades)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (session_start, symbol) DO UPDATE SET trades = EXCLUDED.trades`,
+    [ts, symbol, JSON.stringify(trades)]
+  );
+}
+
+/** Retorna as últimas sessões agrupadas (formato compatível com o dashboard). */
+export async function loadMicroSessions(limit = 200) {
+  const res = await getPool().query(
+    `SELECT session_start, symbol, trades
+     FROM micro_sessions
+     ORDER BY session_start DESC
+     LIMIT $1`,
+    [limit]
+  );
+  // Reagrupa por session_start (igual ao formato do JSON antigo)
+  const map = new Map();
+  for (const row of res.rows.reverse()) {
+    const key = new Date(row.session_start).toISOString();
+    if (!map.has(key)) map.set(key, { sessionStart: key, trades: [] });
+    const sess = map.get(key);
+    const formatted = (row.trades || []).map(t => ({ ...t, symbol: row.symbol }));
+    sess.trades = [...sess.trades.filter(t => t.symbol !== row.symbol), ...formatted];
+  }
+  return [...map.values()];
+}
+
+/** Lê o log de um símbolo para verificar posição aberta (substitui leitura do JSON). */
+export async function loadMicroSymbolTrades(symbol) {
+  const res = await getPool().query(
+    `SELECT trades FROM micro_sessions
+     WHERE symbol = $1
+     ORDER BY session_start DESC
+     LIMIT 10`,
+    [symbol]
+  );
+  const all = [];
+  for (const row of res.rows.reverse()) {
+    all.push(...(row.trades || []));
+  }
+  return all;
 }
