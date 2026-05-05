@@ -86,6 +86,7 @@ async function closeLong(symbol, qty, ocoId, config) {
 
 async function main() {
   await db.initDb();
+  await db.writeMicroHeartbeat(process.pid).catch(() => {});
   const activeSymbols = mainConfig.active_symbols || [];
   console.log(`\n🤖 [MULTI-SCALPER] INICIADO — Símbolos: ${activeSymbols.join(", ")}`);
   
@@ -460,6 +461,7 @@ async function main() {
     }
     
     if (totalTrades >= mainConfig.max_trades * activeSymbols.length) break;
+    await db.writeMicroHeartbeat(process.pid).catch(() => {});
     await new Promise((r) => setTimeout(r, mainConfig.loop_interval_ms));
   }
 }

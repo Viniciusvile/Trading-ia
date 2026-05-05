@@ -1637,10 +1637,16 @@ app.get('/api/micro-scalper/config', (_req, res) => {
 
 app.get('/api/micro-scalper/status', async (_req, res) => {
   try {
-    const liveness = microIsAlive();
-    const sessions = await db.loadMicroSessions(5);
+    const [hb, sessions] = await Promise.all([
+      db.readMicroHeartbeat(120_000),
+      db.loadMicroSessions(5),
+    ]);
+    // Heartbeat é a fonte de verdade; PID local como fallback
+    const localLiveness = microIsAlive();
+    const running = hb.alive || localLiveness.alive;
+    const pid = hb.pid ?? localLiveness.pid;
     const lastSession = sessions.length ? sessions[sessions.length - 1] : null;
-    res.json({ success: true, running: liveness.alive, pid: liveness.pid, lastSession });
+    res.json({ success: true, running, pid, lastSeen: hb.lastSeen, lastSession });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 

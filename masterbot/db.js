@@ -73,6 +73,12 @@ export async function initDb() {
         UNIQUE (session_start, symbol)
       );
       CREATE INDEX IF NOT EXISTS idx_micro_sessions_ts ON micro_sessions(session_start DESC);
+
+      CREATE TABLE IF NOT EXISTS micro_heartbeat (
+        id        INTEGER PRIMARY KEY DEFAULT 1,
+        ts        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        pid       INTEGER
+      );
     `);
     console.log('✅ PostgreSQL conectado e tabelas verificadas.');
   } catch (e) {
@@ -284,4 +290,27 @@ export async function loadMicroSymbolTrades(symbol) {
     all.push(...(row.trades || []));
   }
   return all;
+}
+
+// ─── Micro-Scalper Heartbeat ──────────────────────────────────────────────────
+
+/** Atualiza o heartbeat do Micro-Scalper (chamar a cada ciclo). */
+export async function writeMicroHeartbeat(pid) {
+  await getPool().query(
+    `INSERT INTO micro_heartbeat (id, ts, pid) VALUES (1, NOW(), $1)
+     ON CONFLICT (id) DO UPDATE SET ts = NOW(), pid = EXCLUDED.pid`,
+    [pid ?? null]
+  );
+}
+
+/**
+ * Retorna { alive: boolean, pid, lastSeen }.
+ * Considera vivo se o heartbeat foi atualizado nos últimos `maxAgeMs` ms (padrão: 2 min).
+ */
+export async function readMicroHeartbeat(maxAgeMs = 120_000) {
+  const res = await getPool().query('SELECT ts, pid FROM micro_heartbeat WHERE id = 1');
+  if (!res.rows.length) return { alive: false, pid: null, lastSeen: null };
+  const { ts, pid } = res.rows[0];
+  const age = Date.now() - new Date(ts).getTime();
+  return { alive: age <= maxAgeMs, pid, lastSeen: ts };
 }
