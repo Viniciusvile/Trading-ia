@@ -132,6 +132,30 @@ async function migrateCsv() {
   return imported;
 }
 
+async function migrateMicroScalperLog() {
+  const file = join(ROOT, 'micro-scalper-log.json');
+  if (!existsSync(file)) { console.log('  ⏭  micro-scalper-log.json não encontrado — pulando.'); return 0; }
+
+  let sessions;
+  try { sessions = JSON.parse(readFileSync(file, 'utf8')); } catch { console.log('  ⚠  micro-scalper-log.json inválido — pulando.'); return 0; }
+  if (!Array.isArray(sessions) || !sessions.length) { console.log('  ⏭  micro-scalper-log.json vazio — pulando.'); return 0; }
+
+  console.log(`  📦 Importando ${sessions.length} sessões do Micro-Scalper...`);
+  let imported = 0;
+  for (const sess of sessions) {
+    if (!sess.sessionStart) continue;
+    // Formato legado não tem símbolo — usa 'LEGACY' para preservar histórico
+    const symbol = sess.symbol || 'LEGACY';
+    try {
+      await db.saveMicroSession(sess.sessionStart, symbol, sess.trades || []);
+      imported++;
+    } catch (e) {
+      console.warn(`  ⚠  Sessão ${sess.sessionStart} ignorada: ${e.message}`);
+    }
+  }
+  return imported;
+}
+
 async function main() {
   console.log('\n🚀 Iniciando migração para PostgreSQL...\n');
 
@@ -147,6 +171,9 @@ async function main() {
 
   const l = await migrateSafetyLog();
   console.log(`  ✅ Entradas do log importadas: ${l}\n`);
+
+  const m = await migrateMicroScalperLog();
+  console.log(`  ✅ Sessões do Micro-Scalper importadas: ${m}\n`);
 
   // CSV tem dados redundantes com o log — importe só se quiser histórico CSV separado
   // const c = await migrateCsv();
