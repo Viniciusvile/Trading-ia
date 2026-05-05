@@ -3010,7 +3010,7 @@ async function loadMasterStatus() {
       btnStart.style.display = 'none';
       btnStop.style.display = 'block';
       btnStop.disabled = false;
-      _stopCountdown();
+      _startCountdown(d.nextRun);
       const countEl = $('master-countdown');
       if (countEl) countEl.textContent = '⚡ Rodando agora...';
     } else if (d.status === 'waiting') {

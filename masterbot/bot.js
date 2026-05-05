@@ -1365,7 +1365,7 @@ async function writeMasterStatus(status = "running", results = []) {
   const state = {
     status,
     lastRun: new Date().toISOString(),
-    nextRun: status === "waiting" ? new Date(now + intervalMs).toISOString() : new Date().toISOString(),
+    nextRun: new Date(now + intervalMs).toISOString(),
     interval: intervalStr,
     watchlist: rules.watchlist || [],
     timeframes: rules.timeframes || [],
