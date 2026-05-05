@@ -10,11 +10,12 @@
  */
 
 import { config as dotenvConfig } from "dotenv";
-import { readFileSync, writeFileSync, existsSync, appendFileSync } from "fs";
+import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import crypto from "crypto";
 import nodeFetch from "node-fetch";
+import * as db from "./db.js";
 
 // Carrega .env do parent dir (raiz do projeto), independente do cwd.
 // O dashboard faz spawn com cwd=masterbot/, mas as credenciais Binance ficam em ../.env.
@@ -66,13 +67,11 @@ function checkOnboarding() {
     process.exit(0);
   }
 
-  // Always print the CSV location so users know where to find their trade log
-  const csvPath = new URL("trades.csv", import.meta.url).pathname;
-  console.log(`\n📄 Trade log: ${csvPath}`);
-  console.log(
-    `   Open in Google Sheets or Excel any time — or tell Claude to move it:\n` +
-      `   "Move my trades.csv to ~/Desktop" or "Move it to my Documents folder"\n`,
-  );
+  if (!process.env.DATABASE_URL) {
+    console.error('\n❌ DATABASE_URL não definida.');
+    console.error('   Adicione DATABASE_URL=postgres://... no arquivo .env ou nas variáveis do Railway.\n');
+    process.exit(1);
+  }
 }
 
 // ─── Config ────────────────────────────────────────────────────────────────
@@ -93,47 +92,11 @@ const CONFIG = {
   },
 };
 
-const LOG_FILE = join(__dirname, "safety-check-log.json");
-const CSV_FILE = join(__dirname, "trades.csv");
-const POSITIONS_FILE = join(__dirname, "positions.json");
 const RULES_FILE = join(__dirname, "..", "rules.json");
 
-// ─── Position Tracking ───────────────────────────────────────────────────────
+// ─── Position Tracking (delegado ao db.js) ───────────────────────────────────
 
-function loadPositions() {
-  if (!existsSync(POSITIONS_FILE)) return [];
-  return JSON.parse(readFileSync(POSITIONS_FILE, "utf8"));
-}
-
-function savePositions(positions) {
-  writeFileSync(POSITIONS_FILE, JSON.stringify(positions, null, 2));
-}
-
-function addPosition(symbol, timeframe, entryPrice, quantity, stopPrice, takeProfitPrice, orderId, ocoOrderListId = null, strategy = null, conditions = [], indicators = {}, planName = null) {
-  const positions = loadPositions();
-  if (positions.find(p => p.symbol === symbol && p.status === "open")) return;
-  positions.push({
-    id: `POS-${Date.now()}`,
-    symbol,
-    timeframe,
-    side: "LONG",
-    entryPrice,
-    quantity,
-    stopPrice,
-    takeProfitPrice,
-    orderId,
-    ocoOrderListId,
-    ocoPlaced: !!ocoOrderListId,
-    openedAt: new Date().toISOString(),
-    status: "open",
-    strategy,
-    plan: planName,
-    conditions,
-    indicators,
-  });
-  savePositions(positions);
-  console.log(`📌 [${symbol}] Posição registrada: entrada $${entryPrice}, stop $${stopPrice?.toFixed(6)}, TP $${takeProfitPrice?.toFixed(6)}${ocoOrderListId ? ` | OCO #${ocoOrderListId}` : ''}`);
-}
+// loadPositions, savePositions, addPosition → db.loadPositions / db.savePositions / db.addPosition
 
 // ─── Telegram Notifications ─────────────────────────────────────────────────
 // Configure TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID no .env.
@@ -158,32 +121,9 @@ async function sendWhatsApp(message) {
   }
 }
 
-// ─── Logging ────────────────────────────────────────────────────────────────
+// ─── Logging (delegado ao db.js) ────────────────────────────────────────────
 
-function loadLog() {
-  if (!existsSync(LOG_FILE)) return { trades: [] };
-  const content = readFileSync(LOG_FILE, "utf8");
-  try {
-    const data = JSON.parse(content);
-    if (Array.isArray(data)) return { trades: data };
-    return data;
-  } catch (e) {
-    return { trades: [] };
-  }
-}
-
-function saveLog(log) {
-  // Sempre salva no formato de objeto que o dashboard prefere
-  const data = Array.isArray(log) ? { trades: log } : log;
-  writeFileSync(LOG_FILE, JSON.stringify(data, null, 2));
-}
-
-function countTodaysTrades(log) {
-  const today = new Date().toISOString().slice(0, 10);
-  return log.trades.filter(
-    (t) => t.timestamp.startsWith(today) && t.orderPlaced,
-  ).length;
-}
+// loadLog, saveLog, countTodaysTrades → db.loadRecentLog / db.appendToLog / db.countTodaysTrades
 
 // ─── Market Data (Binance public API — free, no auth) ───────────────────────
 
@@ -835,7 +775,7 @@ async function placeBinanceSellOrder(symbol, quantity) {
 // ─── Position Monitor ─────────────────────────────────────────────────────────
 
 async function monitorPositions() {
-  const positions = loadPositions();
+  const positions = await db.loadPositions();
   const open = positions.filter(p => p.status === "open");
   if (open.length === 0) return;
 
@@ -901,7 +841,7 @@ async function monitorPositions() {
           pos.ocoPlaced = true;
           pos.ocoOrderListId = ocoResult.orderListId;
           console.log(`  ✅ [${pos.symbol}] OCO sincronizada com sucesso: ID #${pos.ocoOrderListId}`);
-          savePositions(positions);
+          await db.savePositions(positions);
           continue;
         } catch (syncErr) {
           console.log(`  ❌ [${pos.symbol}] Falha na sincronização OCO automática: ${syncErr.message}`);
@@ -952,130 +892,20 @@ async function monitorPositions() {
     }
   }
 
-  savePositions(positions);
+  await db.savePositions(positions);
 }
 
-// ─── Tax CSV Logging ─────────────────────────────────────────────────────────
+// ─── Tax Summary (delegado ao db.js) ─────────────────────────────────────────
 
-// trades.csv
-
-// Always ensure trades.csv exists with headers — open it in Excel/Sheets any time
-function initCsv() {
-  if (!existsSync(CSV_FILE)) {
-    const funnyNote = `,,,,,,,,,,,"NOTE","Hey, if you're at this stage of the video, you must be enjoying it... perhaps you could hit subscribe now? :)"`;
-    writeFileSync(CSV_FILE, CSV_HEADERS + "\n" + funnyNote + "\n");
-    console.log(
-      `📄 Created ${CSV_FILE} — open in Google Sheets or Excel to track trades.`,
-    );
-  }
-}
-const CSV_HEADERS = [
-  "Date",
-  "Time (UTC)",
-  "Exchange",
-  "Symbol",
-  "Side",
-  "Quantity",
-  "Price",
-  "Total USD",
-  "Fee (est.)",
-  "Net Amount",
-  "Order ID",
-  "Mode",
-  "Notes",
-].join(",");
-
-function writeTradeCsv(logEntry) {
-  const now = new Date(logEntry.timestamp);
-  const date = now.toISOString().slice(0, 10);
-  const time = now.toISOString().slice(11, 19);
-
-  let side = "";
-  let quantity = "";
-  let totalUSD = "";
-  let fee = "";
-  let netAmount = "";
-  let orderId = "";
-  let mode = "";
-  let notes = "";
-
-  if (!logEntry.allPass) {
-    const failed = logEntry.conditions
-      .filter((c) => !c.pass)
-      .map((c) => c.label)
-      .join("; ");
-    mode = "BLOCKED";
-    orderId = "BLOCKED";
-    notes = `Failed: ${failed}`;
-  } else if (logEntry.paperTrading) {
-    side = "BUY";
-    quantity = (logEntry.tradeSize / logEntry.price).toFixed(6);
-    totalUSD = logEntry.tradeSize.toFixed(2);
-    fee = (logEntry.tradeSize * 0.001).toFixed(4);
-    netAmount = (logEntry.tradeSize - parseFloat(fee)).toFixed(2);
-    orderId = logEntry.orderId || "";
-    mode = "PAPER";
-    notes = "All conditions met";
-  } else {
-    side = "BUY";
-    quantity = (logEntry.tradeSize / logEntry.price).toFixed(6);
-    totalUSD = logEntry.tradeSize.toFixed(2);
-    fee = (logEntry.tradeSize * 0.001).toFixed(4);
-    netAmount = (logEntry.tradeSize - parseFloat(fee)).toFixed(2);
-    orderId = logEntry.orderId || "";
-    mode = "LIVE";
-    notes = logEntry.error ? `Error: ${logEntry.error}` : "All conditions met";
-  }
-
-  const row = [
-    date,
-    time,
-    "BitGet",
-    logEntry.symbol,
-    side,
-    quantity,
-    logEntry.price.toFixed(2),
-    totalUSD,
-    fee,
-    netAmount,
-    orderId,
-    mode,
-    `"${notes}"`,
-  ].join(",");
-
-  if (!existsSync(CSV_FILE)) {
-    writeFileSync(CSV_FILE, CSV_HEADERS + "\n");
-  }
-
-  appendFileSync(CSV_FILE, row + "\n");
-  console.log(`Tax record saved → ${CSV_FILE}`);
-}
-
-// Tax summary command: node bot.js --tax-summary
-function generateTaxSummary() {
-  if (!existsSync(CSV_FILE)) {
-    console.log("No trades.csv found — no trades have been recorded yet.");
-    return;
-  }
-
-  const lines = readFileSync(CSV_FILE, "utf8").trim().split("\n");
-  const rows = lines.slice(1).map((l) => l.split(","));
-
-  const live = rows.filter((r) => r[11] === "LIVE");
-  const paper = rows.filter((r) => r[11] === "PAPER");
-  const blocked = rows.filter((r) => r[11] === "BLOCKED");
-
-  const totalVolume = live.reduce((sum, r) => sum + parseFloat(r[7] || 0), 0);
-  const totalFees = live.reduce((sum, r) => sum + parseFloat(r[8] || 0), 0);
-
+async function generateTaxSummary() {
+  await db.initDb();
+  const s = await db.generateTaxSummary();
   console.log("\n── Tax Summary ──────────────────────────────────────────\n");
-  console.log(`  Total decisions logged : ${rows.length}`);
-  console.log(`  Live trades executed   : ${live.length}`);
-  console.log(`  Paper trades           : ${paper.length}`);
-  console.log(`  Blocked by safety check: ${blocked.length}`);
-  console.log(`  Total volume (USD)     : $${totalVolume.toFixed(2)}`);
-  console.log(`  Total fees paid (est.) : $${totalFees.toFixed(4)}`);
-  console.log(`\n  Full record: ${CSV_FILE}`);
+  console.log(`  Total decisions logged : ${s.total}`);
+  console.log(`  Live trades executed   : ${s.live}`);
+  console.log(`  Paper trades           : ${s.paper}`);
+  console.log(`  Blocked by safety check: ${s.blocked}`);
+  console.log(`  Total volume (USD)     : $${parseFloat(s.total_volume).toFixed(2)}`);
   console.log("─────────────────────────────────────────────────────────\n");
 }
 
@@ -1200,8 +1030,10 @@ async function runSymbolCycle(symbol, timeframe, rules) {
   }
 
   // ── Bloqueio de duplicata: se já existe posição aberta deste símbolo, não compra de novo ──
+  let _currentPositions = null;
   if (allPass) {
-    const openSame = loadPositions().find(p => p.symbol === symbol && p.status === "open");
+    _currentPositions = await db.loadPositions();
+    const openSame = _currentPositions.find(p => p.symbol === symbol && p.status === "open");
     if (openSame) {
       const dupLabel = `Sem posição aberta de ${symbol}`;
       const dupCond = {
@@ -1220,7 +1052,7 @@ async function runSymbolCycle(symbol, timeframe, rules) {
   // ── Limite de posições simultâneas: evita entrada correlacionada em correção de mercado ──
   if (allPass) {
     const maxConcurrent = rules.max_concurrent_positions || 999;
-    const openCount = loadPositions().filter(p => p.status === "open").length;
+    const openCount = (_currentPositions ?? await db.loadPositions()).filter(p => p.status === "open").length;
     if (openCount >= maxConcurrent) {
       const concCond = {
         label: `Posições abertas < ${maxConcurrent}`,
@@ -1273,7 +1105,7 @@ async function runSymbolCycle(symbol, timeframe, rules) {
       logEntry.orderId = `PAPER-${Date.now()}`;
       console.log(`✅ [${symbol}] PASS — Paper Order: ${logEntry.orderId}`);
       const execQty = tradeSize / price;
-      addPosition(symbol, timeframe, price, execQty, stopPrice, takeProfitPrice, logEntry.orderId, null, usedStrategy, results, activeIndicators, plan?.name);
+      await db.addPosition(symbol, timeframe, price, execQty, stopPrice, takeProfitPrice, logEntry.orderId, null, usedStrategy, results, activeIndicators, plan?.name);
       sendWhatsApp(`🟢 [PAPER] COMPRA ${symbol} ${timeframe}\nPreço: $${price}\nQtd: ${execQty.toFixed(6)}\nSL: $${stopPrice?.toFixed(6) || '-'} | TP: $${takeProfitPrice?.toFixed(6) || '-'}\nEstratégia: ${usedStrategy}${plan?.name ? ' / ' + plan.name : ''}`);
     } else {
       try {
@@ -1305,7 +1137,7 @@ async function runSymbolCycle(symbol, timeframe, rules) {
           }
         }
 
-        addPosition(symbol, timeframe, price, execQtyNum, stopPrice, takeProfitPrice, order.orderId, ocoOrderListId, usedStrategy, results, activeIndicators, plan?.name);
+        await db.addPosition(symbol, timeframe, price, execQtyNum, stopPrice, takeProfitPrice, order.orderId, ocoOrderListId, usedStrategy, results, activeIndicators, plan?.name);
         sendWhatsApp(`🟢 [LIVE] COMPRA ${symbol} ${timeframe}\nPreço: $${price}\nQtd: ${execQtyNum.toFixed(6)}\nSL: $${stopPrice?.toFixed(6) || '-'} | TP: $${takeProfitPrice?.toFixed(6) || '-'}\nOrderId: ${order.orderId}${ocoOrderListId ? ' | OCO #' + ocoOrderListId : ' | SEM OCO'}\nEstratégia: ${usedStrategy}${plan?.name ? ' / ' + plan.name : ''}`);
       } catch (err) {
         console.log(`❌ [${symbol}] ORDER FAILED: ${err.message}`);
@@ -1353,14 +1185,13 @@ async function runSymbolCycle(symbol, timeframe, rules) {
 }
 
 async function run(isMaster = false) {
-  if (isMaster) writeMasterStatus("running", []);
-  
   checkOnboarding();
-  
+  await db.initDb();
+  if (isMaster) await writeMasterStatus("running", []);
+
   if (!CONFIG.paperTrading) {
     await checkBinancePermissions();
   }
-  initCsv();
   if (isMaster && typeof syncBrain === 'function') await syncBrain();
 
   console.log("\n" + "═".repeat(60));
@@ -1402,7 +1233,7 @@ async function run(isMaster = false) {
   const entries = isMaster ? ["DYNAMIC"] : (currentRules.watchlist || [CONFIG.symbol]);
   
   if (!balanceOk) {
-    if (isMaster) writeMasterStatus("waiting", summary);
+    if (isMaster) await writeMasterStatus("waiting", summary);
     return;
   }
 
@@ -1444,7 +1275,7 @@ async function run(isMaster = false) {
              const result = await runSymbolCycle(symbol, tf, currentRules);
              if (result) {
                summary.push(result);
-               const log = loadLog(); log.trades.push(result); saveLog(log); writeTradeCsv(result);
+               await db.appendToLog(result);
              }
            } catch (cycleErr) {
              console.error(`  ❌ Erro no ciclo para ${symbol} ${tf}:`, cycleErr.message);
@@ -1461,7 +1292,7 @@ async function run(isMaster = false) {
           const result = await runSymbolCycle(symbol, tf, currentRules);
           if (result) {
             summary.push(result);
-            const log = loadLog(); log.trades.push(result); saveLog(log); writeTradeCsv(result);
+            await db.appendToLog(result);
           }
        }
     }
@@ -1469,7 +1300,7 @@ async function run(isMaster = false) {
 
   if (isMaster) {
     // ... logic for obsidian ...
-    writeMasterStatus("waiting", summary);
+    await writeMasterStatus("waiting", summary);
     
     console.log("\n" + "═".repeat(60));
     console.log(`  🏁 CYCLE COMPLETE. Status: WAITING for next interval.`);
@@ -1511,10 +1342,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const forceTf  = process.env.FORCE_TF;
     const forceRules = JSON.parse(readFileSync(RULES_FILE, "utf8"));
     console.log(`\n⚡ FORCE TRADE MODE: ${forceSym} ${forceTf} ${process.env.FORCE_SIDE}`);
-    runSymbolCycle(forceSym, forceTf, forceRules).then(result => {
-      if (result) {
-        const log = loadLog(); log.trades.push(result); saveLog(log); writeTradeCsv(result);
-      }
+    db.initDb().then(() => runSymbolCycle(forceSym, forceTf, forceRules)).then(async result => {
+      if (result) await db.appendToLog(result);
       process.exit(0);
     }).catch(err => { console.error("Force trade error:", err); process.exit(1); });
   } else {
@@ -1526,24 +1355,22 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 }
 
 
-function writeMasterStatus(status = "running", results = []) {
-  const statusFile = join(__dirname, "master-status.json");
+async function writeMasterStatus(status = "running", results = []) {
   const now = Date.now();
   const rules = JSON.parse(readFileSync(RULES_FILE, "utf8"));
   const intervalStr = process.env.MASTERBOT_LOOP_INTERVAL || "4h";
   const intervalMs = parseIntervalMs(intervalStr);
 
+  const allPositions = await db.loadPositions();
   const state = {
-    status: status,
+    status,
     lastRun: new Date().toISOString(),
     nextRun: status === "waiting" ? new Date(now + intervalMs).toISOString() : new Date().toISOString(),
     interval: intervalStr,
     watchlist: rules.watchlist || [],
     timeframes: rules.timeframes || [],
     obsidianOnline: !!process.env.OBSIDIAN_PATH && existsSync(process.env.OBSIDIAN_PATH),
-    openPositions: existsSync(POSITIONS_FILE)
-      ? JSON.parse(readFileSync(POSITIONS_FILE, "utf8")).filter(p => p.status === "open").length
-      : 0,
+    openPositions: allPositions.filter(p => p.status === "open").length,
     lastResults: results.map(r => ({
       symbol: r.symbol,
       timeframe: r.timeframe,
@@ -1557,5 +1384,5 @@ function writeMasterStatus(status = "running", results = []) {
       strategy: r.strategy || null,
     }))
   };
-  writeFileSync(statusFile, JSON.stringify(state, null, 2));
+  await db.writeMasterStatus(state);
 }

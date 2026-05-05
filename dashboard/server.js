@@ -3,6 +3,7 @@
  */
 import express from 'express';
 import { createServer } from 'node:http';
+import * as db from '../masterbot/db.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, openSync } from 'node:fs';
@@ -712,10 +713,8 @@ app.post('/api/strategies/apply', async (req, res) => {
 
 // ── BOT (masterbot consolidado) ─────────────────────────
 const BOT_DIR = join(ROOT, 'masterbot');
-const BOT_LOG = join(BOT_DIR, 'safety-check-log.json');
 const BOT_ENV = join(ROOT, '.env');
 const BOT_RULES = join(ROOT, 'rules.json');
-const BOT_MASTER_STATUS = join(BOT_DIR, 'master-status.json');
 const BOT_MASTER_PID = join(BOT_DIR, 'master.pid');
 
 let masterProcess = null;
@@ -950,11 +949,9 @@ app.post('/api/bot/emergency-sell', async (req, res) => {
   }
 });
 
-app.get('/api/bot/log', (_req, res) => {
+app.get('/api/bot/log', async (_req, res) => {
   try {
-    if (!existsSync(BOT_LOG)) return res.json({ success: true, trades: [] });
-    const log = JSON.parse(readFileSync(BOT_LOG, 'utf8'));
-    const trades = (log.trades || []).slice(-20).reverse();
+    const { trades } = await db.loadRecentLog(20);
     res.json({ success: true, trades });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -977,15 +974,10 @@ app.post('/api/bot/run', (_req, res) => {
   const timer = setTimeout(() => proc.kill('SIGKILL'), 60000);
   proc.stdout.on('data', d => stdout += d.toString());
   proc.stderr.on('data', d => stderr += d.toString());
-  proc.on('close', code => {
+  proc.on('close', async code => {
     clearTimeout(timer);
     let last = null;
-    try {
-      if (existsSync(BOT_LOG)) {
-        const log = JSON.parse(readFileSync(BOT_LOG, 'utf8'));
-        last = log.trades?.[log.trades.length - 1] || null;
-      }
-    } catch { /* ignore */ }
+    try { ({ trades: [last] } = await db.loadRecentLog(1)); } catch { /* ignore */ }
     res.json({ success: code === 0, exitCode: code, stdout, stderr, last });
   });
   proc.on('error', err => {
@@ -1005,15 +997,10 @@ app.post('/api/bot/force-trade', (req, res) => {
   const timer = setTimeout(() => proc.kill('SIGKILL'), 60000);
   proc.stdout.on('data', d => stdout += d.toString());
   proc.stderr.on('data', d => stderr += d.toString());
-  proc.on('close', code => {
+  proc.on('close', async code => {
     clearTimeout(timer);
     let last = null;
-    try {
-      if (existsSync(BOT_LOG)) {
-        const log = JSON.parse(readFileSync(BOT_LOG, 'utf8'));
-        last = log.trades?.[log.trades.length - 1] || null;
-      }
-    } catch {}
+    try { ({ trades: [last] } = await db.loadRecentLog(1)); } catch {}
     res.json({ success: code === 0, exitCode: code, stdout, stderr, last });
   });
   proc.on('error', err => { clearTimeout(timer); res.status(500).json({ success: false, error: err.message }); });
@@ -1021,12 +1008,9 @@ app.post('/api/bot/force-trade', (req, res) => {
 
 // ── MasterBot Loop Management ────────────────────────────────────
 
-app.get('/api/bot/master/status', (req, res) => {
+app.get('/api/bot/master/status', async (req, res) => {
   try {
-    let loopState = { status: 'stopped', watchlist: [], lastResults: [] };
-    if (existsSync(BOT_MASTER_STATUS)) {
-      loopState = JSON.parse(readFileSync(BOT_MASTER_STATUS, 'utf8'));
-    }
+    let loopState = await db.loadMasterStatus();
     
     // Check if process is actually alive via PID file or memory
     let isAlive = !!(masterProcess && !masterProcess.killed);
@@ -1048,7 +1032,7 @@ app.get('/api/bot/master/status', (req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post('/api/bot/master/config', (req, res) => {
+app.post('/api/bot/master/config', async (req, res) => {
   try {
     const { interval } = req.body || {};
     const allowedIntervals = ['10m', '30m', '1h', '4h'];
@@ -1070,13 +1054,11 @@ app.post('/api/bot/master/config', (req, res) => {
     }
 
     // 3. Atualiza master-status.json para refletir na UI imediatamente
-    if (existsSync(BOT_MASTER_STATUS)) {
-      try {
-        const status = JSON.parse(readFileSync(BOT_MASTER_STATUS, 'utf8'));
-        status.interval = safeInterval;
-        writeFileSync(BOT_MASTER_STATUS, JSON.stringify(status, null, 2));
-      } catch (e) {}
-    }
+    try {
+      const status = await db.loadMasterStatus();
+      status.interval = safeInterval;
+      await db.writeMasterStatus(status);
+    } catch (e) {}
 
     res.json({ success: true, interval: safeInterval });
   } catch (e) {
@@ -1143,7 +1125,7 @@ app.post('/api/bot/master/start', (req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post('/api/bot/master/stop', (req, res) => {
+app.post('/api/bot/master/stop', async (req, res) => {
   try {
     let pidToKill = masterProcess?.pid;
     
@@ -1159,14 +1141,12 @@ app.post('/api/bot/master/stop', (req, res) => {
     masterProcess = null;
     if (existsSync(BOT_MASTER_PID)) unlinkSync(BOT_MASTER_PID);
 
-    // Atualiza o arquivo de status para que a UI saiba que parou
+    // Atualiza o status no banco para que a UI saiba que parou
     try {
-      if (existsSync(BOT_MASTER_STATUS)) {
-        const state = JSON.parse(readFileSync(BOT_MASTER_STATUS, 'utf8'));
-        state.status = 'stopped';
-        state.nextRun = null;
-        writeFileSync(BOT_MASTER_STATUS, JSON.stringify(state, null, 2));
-      }
+      const state = await db.loadMasterStatus();
+      state.status = 'stopped';
+      state.nextRun = null;
+      await db.writeMasterStatus(state);
     } catch (e) { console.error('Erro ao limpar status:', e); }
 
     res.json({ success: true });
@@ -1174,15 +1154,14 @@ app.post('/api/bot/master/stop', (req, res) => {
 });
 
 // ── POSITIONS ────────────────────────────────────────────────────
-const BOT_POSITIONS = join(BOT_DIR, 'positions.json');
 
 async function syncPositionsWithBinance(env) {
   const apiKey = env.BINANCE_API_KEY || env.BITGET_API_KEY;
   const secretKey = env.BINANCE_SECRET_KEY || env.BITGET_SECRET_KEY;
   if (!apiKey || !secretKey || env.PAPER_TRADING === 'true') return { synced: 0, details: [] };
-  if (!existsSync(BOT_POSITIONS)) return { synced: 0, details: [] };
 
-  const positions = JSON.parse(readFileSync(BOT_POSITIONS, 'utf8'));
+  const positions = await db.loadPositions();
+  if (positions.length === 0) return { synced: 0, details: [] };
   let synced = 0;
   const details = [];
 
@@ -1290,7 +1269,7 @@ async function syncPositionsWithBinance(env) {
     }
   }
 
-  if (synced > 0) writeFileSync(BOT_POSITIONS, JSON.stringify(positions, null, 2));
+  if (synced > 0) await db.savePositions(positions);
   return { synced, details };
 }
 
@@ -1298,7 +1277,7 @@ app.get('/api/bot/positions', async (_req, res) => {
   try {
     const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
     await syncPositionsWithBinance(env);
-    const positions = existsSync(BOT_POSITIONS) ? JSON.parse(readFileSync(BOT_POSITIONS, 'utf8')) : [];
+    const positions = await db.loadPositions();
     res.json({ success: true, positions });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -1309,8 +1288,9 @@ app.post('/api/bot/positions/sync', async (_req, res) => {
     const secretKey = process.env.BINANCE_SECRET_KEY;
     if (!apiKey || !secretKey) return res.status(400).json({ success: false, error: 'Credenciais Binance não configuradas' });
 
-    // Se positions.json não existe, cria do zero a partir dos saldos reais da Binance
-    if (!existsSync(BOT_POSITIONS)) {
+    // Se não há posições no banco, cria do zero a partir dos saldos reais da Binance
+    const existingPositions = await db.loadPositions();
+    if (existingPositions.length === 0) {
       const ts = (await (await fetch('https://api.binance.com/api/v3/time')).json()).serverTime;
       const qs = `timestamp=${ts}&recvWindow=10000`;
       const sig = crypto.createHmac('sha256', secretKey).update(qs).digest('hex');
@@ -1350,11 +1330,11 @@ app.post('/api/bot/positions/sync', async (_req, res) => {
         } catch {}
       }
 
-      writeFileSync(BOT_POSITIONS, JSON.stringify(newPositions, null, 2));
+      await db.savePositions(newPositions);
       return res.json({ success: true, synced: newPositions.length, created: newPositions.length, details: newPositions.map(p => p.symbol) });
     }
 
-    // positions.json existe: atualiza status das posições abertas
+    // Posições existem: atualiza status
     const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : { BINANCE_API_KEY: apiKey, BINANCE_SECRET_KEY: secretKey };
     const result = await syncPositionsWithBinance({ ...env, BINANCE_API_KEY: apiKey, BINANCE_SECRET_KEY: secretKey });
     res.json({ success: true, synced: result.synced, details: result.details });
@@ -1379,8 +1359,7 @@ function floorToStep(qty, stepSize) {
 
 app.post('/api/bot/positions/:id/close', async (req, res) => {
   try {
-    if (!existsSync(BOT_POSITIONS)) return res.status(404).json({ success: false, error: 'positions.json não encontrado' });
-    const positions = JSON.parse(readFileSync(BOT_POSITIONS, 'utf8'));
+    const positions = await db.loadPositions();
     const pos = positions.find(p => p.id === req.params.id && p.status === 'open');
     if (!pos) return res.status(404).json({ success: false, error: 'Posição não encontrada ou já fechada' });
 
@@ -1465,7 +1444,7 @@ app.post('/api/bot/positions/:id/close', async (req, res) => {
     pos.exitOrderId = exitOrderId;
     pos.pnl = exitPrice ? parseFloat(((exitPrice - pos.entryPrice) * pos.quantity).toFixed(4)) : null;
 
-    writeFileSync(BOT_POSITIONS, JSON.stringify(positions, null, 2));
+    await db.savePositions(positions);
     res.json({ success: true, position: pos });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -1473,8 +1452,7 @@ app.post('/api/bot/positions/:id/close', async (req, res) => {
 // ── PLACE OCO FOR EXISTING POSITION ─────────────────────────────
 app.post('/api/bot/positions/:id/oco', async (req, res) => {
   try {
-    if (!existsSync(BOT_POSITIONS)) return res.status(404).json({ success: false, error: 'positions.json não encontrado' });
-    const positions = JSON.parse(readFileSync(BOT_POSITIONS, 'utf8'));
+    const positions = await db.loadPositions();
     const pos = positions.find(p => p.id === req.params.id && p.status === 'open');
     if (!pos) return res.status(404).json({ success: false, error: 'Posição não encontrada' });
 
@@ -1552,7 +1530,7 @@ app.post('/api/bot/positions/:id/oco', async (req, res) => {
     pos.ocoPlaced = true;
     pos.ocoOrderListId = ocoData.orderListId;
     pos.ocoManual = false;
-    writeFileSync(BOT_POSITIONS, JSON.stringify(positions, null, 2));
+    await db.savePositions(positions);
     res.json({ success: true, orderListId: ocoData.orderListId });
   } catch(e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -1780,6 +1758,7 @@ app.get('/*splat', (_req, res) => res.sendFile(join(__dirname, 'index.html')));
 // ── START ─────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3333;
 const server = createServer(app);
+db.initDb().catch(e => console.error('⚠️  PostgreSQL indisponível:', e.message));
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n✅ Dashboard Server running on port ${PORT}\n`);
 });
