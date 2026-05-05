@@ -4,7 +4,6 @@
     "ETHUSDT",
     "SOLUSDT",
     "XRPUSDT",
-    "BONKUSDT",
     "PEPEUSDT",
     "RENDERUSDT",
     "ENAUSDT"
@@ -33,21 +32,21 @@
       ],
       "filters": {
         "ema_triple": true,
-        "adx_min": 20,
+        "adx_min": 22,
         "di_direction": true,
-        "rsi_min": 48,
-        "rsi_max": 72,
-        "volume_mult": 1.2,
+        "rsi_min": 50,
+        "rsi_max": 70,
+        "volume_mult": 1.3,
         "macd_positive": true,
         "macd_growing": true
       },
       "sl_atr_mult": 1.2,
-      "tp_atr_mult": 2.5,
-      "breakeven_pct": 0.8
+      "tp_atr_mult": 3,
+      "breakeven_pct": 1
     },
     {
       "name": "PlanTrend",
-      "description": "Trend Following (1H)",
+      "description": "Trend Following High Conviction (1H)",
       "symbols": [
         "RENDERUSDT",
         "XRPUSDT",
@@ -64,30 +63,38 @@
         "1h"
       ],
       "filters": {
-        "adx_min": 20,
-        "rsi_min": 42,
-        "rsi_max": 74
+        "ema_triple": true,
+        "adx_min": 25,
+        "di_direction": true,
+        "rsi_min": 48,
+        "rsi_max": 70,
+        "volume_mult": 1.2,
+        "macd_positive": true
       },
-      "sl_atr_mult": 1.0,
-      "tp_atr_mult": 2.0,
-      "breakeven_pct": 0.5
+      "sl_atr_mult": 1,
+      "tp_atr_mult": 2.5,
+      "breakeven_pct": 0.8
     },
     {
       "name": "PlanMeme",
-      "description": "Meme Momentum (1H)",
+      "description": "Meme Alta Convicção (1H) — somente momentum forte",
       "symbols": [
-        "PEPEUSDT",
-        "DOGEUSDT"
+        "PEPEUSDT"
       ],
       "tv_symbols": {
-        "PEPEUSDT": "BINANCE:PEPEUSDT",
-        "DOGEUSDT": "BINANCE:DOGEUSDT"
+        "PEPEUSDT": "BINANCE:PEPEUSDT"
       },
       "timeframes": [
         "1h"
       ],
       "filters": {
-        "adx_min": 15
+        "ema_triple": true,
+        "adx_min": 28,
+        "di_direction": true,
+        "rsi_min": 50,
+        "rsi_max": 68,
+        "volume_mult": 1.5,
+        "macd_positive": true
       },
       "sl": {
         "type": "pct",
@@ -95,9 +102,9 @@
       },
       "tp": {
         "type": "pct",
-        "value": 3
+        "value": 4.5
       },
-      "breakeven_pct": 0.5
+      "breakeven_pct": 1
     }
   ],
   "micro_scalper": {
@@ -108,12 +115,22 @@
     "loop_interval_ms": 2000,
     "max_trades": 100,
     "max_session_ms": 43200000,
-    "max_hold_ms": 7200000,
+    "max_hold_ms": 3600000,
     "cooldown_ms": 30000,
-    "cooldown_after_loss_ms": 300000,
+    "cooldown_after_loss_ms": 600000,
     "daily_loss_stop_pct": 0.05,
-    "max_trade_usdt": 10,
-    "min_trade_usdt": 6,
+    "daily_profit_target_usdt": 0.16,
+    "blocked_hours_utc": [
+      0,
+      1,
+      2
+    ],
+    "max_consecutive_losses": 2,
+    "cooldown_consecutive_loss_ms": 1800000,
+    "btc_drop_block_pct": 0.015,
+    "btc_ref_age_ms": 900000,
+    "max_trade_usdt": 30,
+    "min_trade_usdt": 18,
     "trade_size_pct": 0.2,
     "plans": {
       "SOLUSDT": {
@@ -122,9 +139,7 @@
         "strategy_mode": "micro-dip",
         "ema_period": 20,
         "rsi_period": 3,
-        "min_dip_pct": 0.001,
-        "qty_decimals": 2,
-        "quote_decimals": 4
+        "min_dip_pct": 0.001
       },
       "XRPUSDT": {
         "symbol": "XRPUSDT",
@@ -192,12 +207,13 @@
       }
     }
   },
-  "master_interval": "30m",
+  "master_interval": "10m",
+  "max_concurrent_positions": 3,
   "exit_rules_config": {
     "trailing_stop": {
-      "enabled": false,
+      "enabled": true,
       "type": "atr",
-      "multiplier": 2
+      "multiplier": 1.5
     }
   }
 }

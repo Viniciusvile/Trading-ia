@@ -100,10 +100,19 @@ async function main() {
       wins: 0,
       cumPnlPct: 0,
       cooldownUntil: 0,
+      consecutiveLosses: 0,
       log: [],
       config: mainConfig.plans[sym] || mainConfig.plans["DEFAULT"] || {}
     };
   });
+
+  // PnL diário acumulado (zera à meia-noite UTC)
+  let dailyPnlUsdt = 0;
+  let dailyDate = new Date().toISOString().slice(0, 10);
+
+  // Referência de preço do BTC para filtro de queda brusca
+  let btcPriceRef = null;
+  let btcPriceRefTime = 0;
 
   // --- SYNC POSITIONS AT STARTUP ---
   console.log(`\n🔄 [SYNC] Verificando posições abertas na Binance...`);
@@ -190,7 +199,51 @@ async function main() {
   while (Date.now() - sessionStart < mainConfig.max_session_ms) {
     const now = Date.now();
     let totalTrades = 0;
-    
+
+    // --- RESET DIÁRIO (meia-noite UTC) ---
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    if (todayUtc !== dailyDate) {
+      console.log(`🌅 [DIÁRIO] Novo dia UTC — PnL ontem: ${dailyPnlUsdt >= 0 ? '+' : ''}${dailyPnlUsdt.toFixed(4)} USDT. Resetando contadores.`);
+      dailyPnlUsdt = 0;
+      dailyDate = todayUtc;
+      activeSymbols.forEach(sym => { sessionData[sym].consecutiveLosses = 0; });
+    }
+
+    // --- FILTRO DE HORÁRIO UTC (evitar horas ruins) ---
+    const utcHour = new Date().getUTCHours();
+    const blockedHours = mainConfig.blocked_hours_utc || [];
+    const inBlockedHour = blockedHours.includes(utcHour);
+    if (inBlockedHour) {
+      console.log(`🌙 [HORA] ${utcHour}h UTC bloqueado — mercado fraco nesse horário. Aguardando...`);
+      await new Promise(r => setTimeout(r, 60000));
+      continue;
+    }
+
+    // --- FILTRO BTC: evitar entrar durante queda brusca ---
+    let btcDroppingFast = false;
+    try {
+      const btcNow = await client.getPrice("BTCUSDT");
+      const btcDropThreshold = mainConfig.btc_drop_block_pct || 0.015;
+      const btcRefAgeMs = mainConfig.btc_ref_age_ms || 900000; // 15 min
+      if (!btcPriceRef || (now - btcPriceRefTime) > btcRefAgeMs) {
+        btcPriceRef = btcNow;
+        btcPriceRefTime = now;
+      }
+      const btcChange = (btcNow - btcPriceRef) / btcPriceRef;
+      if (btcChange < -btcDropThreshold) {
+        btcDroppingFast = true;
+        console.log(`⚠️ [BTC] Queda de ${(btcChange*100).toFixed(2)}% em 15min — bloqueando novas entradas`);
+      }
+    } catch (e) {}
+
+    // --- META DIÁRIA DE LUCRO ---
+    const dailyProfitTarget = mainConfig.daily_profit_target_usdt || 0;
+    if (dailyProfitTarget > 0 && dailyPnlUsdt >= dailyProfitTarget) {
+      console.log(`🎯 [META] Meta diária atingida (+${dailyPnlUsdt.toFixed(4)} USDT) — sem novas entradas hoje!`);
+      await new Promise(r => setTimeout(r, 300000));
+      continue;
+    }
+
     for (const symbol of activeSymbols) {
       const s = sessionData[symbol];
       const cfg = s.config;
@@ -200,6 +253,19 @@ async function main() {
         const lastPrice = await client.getPrice(symbol);
 
         if (s.pos) {
+          // --- BREAKEVEN TRAILING STOP ---
+          // Quando o preço sobe X% (breakeven_pct), move o SL para a entrada + 0.05%
+          // Evita que trade vencedor vire perdedor por timeout ou reversão
+          if (!s.pos.breakevenTriggered && cfg.breakeven_pct) {
+            const breakevenThreshold = s.pos.entryPrice * (1 + cfg.breakeven_pct);
+            if (lastPrice >= breakevenThreshold) {
+              const newSl = s.pos.entryPrice * 1.0005;
+              s.pos.slPrice = newSl;
+              s.pos.breakevenTriggered = true;
+              console.log(`  🔒 [BREAKEVEN] ${symbol} @ $${lastPrice.toFixed(4)} — SL travado em $${newSl.toFixed(4)} (+0.05%)`);
+            }
+          }
+
           // --- GESTÃO DE SAÍDA ---
           const exitStatus = evaluateExit(s.pos, { price: lastPrice, now });
           let shouldExit = exitStatus.shouldExit;
@@ -265,10 +331,12 @@ async function main() {
             // Calculamos o PnL sempre que houver preço de saída, mesmo se r.ok for false (fallback)
             const realizedPct = pnlPct(s.pos, exitPx);
             s.cumPnlPct += realizedPct;
-            if (realizedPct > 0) s.wins++;
+            if (realizedPct > 0) { s.wins++; s.consecutiveLosses = 0; }
+            else if (realizedPct < -0.0001) { s.consecutiveLosses++; }
             s.trades++;
-            
+
             const pnlUsdt = (exitPx - s.pos.entryPrice) * s.pos.qty;
+            dailyPnlUsdt += pnlUsdt;
             s.log.push({ 
               t: new Date(now).toISOString(), 
               event: "exit", 
@@ -317,9 +385,26 @@ async function main() {
           }
 
           if (sig.signal === "buy") {
+            // --- CIRCUIT BREAKER: perdas consecutivas ---
+            const maxConsec = mainConfig.max_consecutive_losses || 3;
+            const consecCooldownMs = mainConfig.cooldown_consecutive_loss_ms || 1800000; // 30 min
+            if (s.consecutiveLosses >= maxConsec) {
+              const elapsed = now - s.cooldownUntil + consecCooldownMs;
+              console.log(`  🛑 [CIRCUIT] ${symbol}: ${s.consecutiveLosses} perdas seguidas — pausado por ${(consecCooldownMs/60000).toFixed(0)} min`);
+              s.cooldownUntil = now + consecCooldownMs;
+              s.consecutiveLosses = 0;
+              continue;
+            }
+
+            // --- FILTRO BTC: não entrar se BTC caindo rápido ---
+            if (btcDroppingFast) {
+              console.log(`  🚫 [BTC] ${symbol}: entrada bloqueada por queda do BTC`);
+              continue;
+            }
+
             const bals = await client.getBalances([symbol.replace("USDT",""), "USDT"]);
             const tradeUsdt = Math.min(bals.usdt * 0.95, mainConfig.max_trade_usdt);
-            
+
             if (bals.usdt >= mainConfig.min_trade_usdt) {
               console.log(`  🎯 [SIGNAL] ${symbol} | ${sig.reason} detectado!`);
               const open = await openLong(symbol, tradeUsdt, cfg);

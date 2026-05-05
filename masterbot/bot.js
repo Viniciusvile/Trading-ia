@@ -1217,6 +1217,24 @@ async function runSymbolCycle(symbol, timeframe, rules) {
     }
   }
 
+  // ── Limite de posições simultâneas: evita entrada correlacionada em correção de mercado ──
+  if (allPass) {
+    const maxConcurrent = rules.max_concurrent_positions || 999;
+    const openCount = loadPositions().filter(p => p.status === "open").length;
+    if (openCount >= maxConcurrent) {
+      const concCond = {
+        label: `Posições abertas < ${maxConcurrent}`,
+        pass: false,
+        required: `máx ${maxConcurrent}`,
+        actual: `${openCount} abertas`,
+      };
+      results = [...results, concCond];
+      originalResults = [...originalResults, concCond];
+      allPass = false;
+      console.log(`🚫 [${symbol}] BLOQUEADO: limite de ${maxConcurrent} posições simultâneas atingido (${openCount} abertas).`);
+    }
+  }
+
   // Trailing Stop
   let trailingRate = null;
   if (allPass && rules.exit_rules_config?.trailing_stop?.enabled) {

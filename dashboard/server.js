@@ -815,8 +815,8 @@ app.patch('/api/bot/config', (req, res) => {
     if (paperTrading !== undefined) upsert('PAPER_TRADING', paperTrading ? 'true' : 'false');
     writeFileSync(BOT_ENV, txt);
 
-    // Update rules.json if trailing params, strategy or activePlan changed
-    if (trailingEnabled !== undefined || trailingMult !== undefined || strategy || activePlan !== undefined) {
+    // Update rules.json if trailing params, strategy, activePlan or maxTrade changed
+    if (trailingEnabled !== undefined || trailingMult !== undefined || strategy || activePlan !== undefined || maxTrade !== undefined) {
       if (existsSync(BOT_RULES)) {
         const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
         if (trailingEnabled !== undefined || trailingMult !== undefined) {
@@ -830,6 +830,12 @@ app.patch('/api/bot/config', (req, res) => {
           rules.strategy.key = strategy;
         }
         if (activePlan !== undefined) rules.active_plan = activePlan || null;
+        if (maxTrade !== undefined) {
+          if (!rules.micro_scalper) rules.micro_scalper = {};
+          rules.micro_scalper.max_trade_usdt = parseFloat(maxTrade);
+          // min_trade_usdt = 60% of max to keep proportion
+          rules.micro_scalper.min_trade_usdt = parseFloat((parseFloat(maxTrade) * 0.6).toFixed(2));
+        }
         writeFileSync(BOT_RULES, JSON.stringify(rules, null, 2));
       }
     }
@@ -858,6 +864,26 @@ app.patch('/api/bot/config', (req, res) => {
         }, 2000);
       }
     }, 500);
+
+    // RESTART MICRO-SCALPER SE maxTrade MUDOU (ele lê rules.json só no startup)
+    if (maxTrade !== undefined) {
+      setTimeout(() => {
+        const liveness = microIsAlive();
+        if (liveness.alive) {
+          console.log(`♻️ Reiniciando Micro-Scalper para aplicar novo max_trade_usdt=${maxTrade}...`);
+          try { process.kill(liveness.pid, 'SIGTERM'); } catch {}
+          if (microProcess) { try { microProcess.kill('SIGTERM'); } catch {} microProcess = null; }
+          if (existsSync(MICRO_PID)) { try { unlinkSync(MICRO_PID); } catch {} }
+
+          setTimeout(() => {
+            microProcess = spawn('node', [MICRO_SCRIPT], { cwd: ROOT, detached: true, stdio: 'ignore', env: { ...process.env } });
+            if (microProcess.pid) writeFileSync(MICRO_PID, microProcess.pid.toString());
+            microProcess.unref();
+            console.log(`✅ Micro-Scalper reiniciado com max_trade_usdt=${maxTrade}.`);
+          }, 2000);
+        }
+      }, 1000);
+    }
 
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
