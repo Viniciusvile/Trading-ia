@@ -997,8 +997,16 @@ app.post('/api/bot/force-trade', (req, res) => {
   if (!existsSync(BOT_DIR)) return res.status(404).json({ success: false, error: 'Pasta do bot não encontrada' });
   const { symbol, timeframe, side } = req.body || {};
   if (!symbol || !timeframe || !side) return res.status(400).json({ success: false, error: 'symbol, timeframe e side são obrigatórios' });
-  const env = { ...process.env, FORCE_SYMBOL: symbol, FORCE_TF: timeframe, FORCE_SIDE: side.toUpperCase(), FORCE_ONCE: '1' };
-  const proc = spawn('node', ['bot.js'], { cwd: BOT_DIR, shell: false, env });
+  const env = { 
+    ...process.env, 
+    FORCE_SYMBOL: symbol, 
+    FORCE_TF: timeframe, 
+    FORCE_SIDE: side.toUpperCase(), 
+    FORCE_ONCE: '1',
+    BINANCE_API_KEY: (process.env.BINANCE_API_KEY || '').trim(),
+    BINANCE_SECRET_KEY: (process.env.BINANCE_SECRET_KEY || '').trim()
+  };
+  const proc = spawn(process.execPath, ['bot.js'], { cwd: BOT_DIR, shell: false, env });
   let stdout = '', stderr = '';
   const timer = setTimeout(() => proc.kill('SIGKILL'), 60000);
   proc.stdout.on('data', d => stdout += d.toString());
