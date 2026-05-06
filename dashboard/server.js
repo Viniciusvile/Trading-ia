@@ -738,7 +738,13 @@ function parseEnv(txt) {
 // Retorna env mesclado: process.env (Railway vars) + .env local quando existir.
 function getBotEnv() {
   const fileEnv = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
-  return { ...process.env, ...fileEnv };
+  const merged = { ...process.env, ...fileEnv };
+  // Garantir trim nas chaves críticas de API
+  if (merged.BINANCE_API_KEY) merged.BINANCE_API_KEY = merged.BINANCE_API_KEY.trim();
+  if (merged.BINANCE_SECRET_KEY) merged.BINANCE_SECRET_KEY = merged.BINANCE_SECRET_KEY.trim();
+  if (merged.BITGET_API_KEY) merged.BITGET_API_KEY = merged.BITGET_API_KEY.trim();
+  if (merged.BITGET_SECRET_KEY) merged.BITGET_SECRET_KEY = merged.BITGET_SECRET_KEY.trim();
+  return merged;
 }
 
 app.get('/api/bot/config', (_req, res) => {

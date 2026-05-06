@@ -553,33 +553,54 @@ function signBinance(queryString) {
 }
 
 async function placeBinanceOrder(symbol, side, sizeUSD, price) {
-  let timestamp = Date.now();
-  try {
-    const timeRes = await fetch("https://api.binance.com/api/v3/time");
-    const timeData = await timeRes.json();
-    timestamp = timeData.serverTime;
-  } catch (e) {
-    timestamp = Date.now() - 100000; // approximation if fetch fails
+  const MAX_ATTEMPTS = 3;
+  const RETRY_DELAYS = [2000, 4000]; // ms entre tentativas
+  let lastError;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    // Timestamp fresco a cada tentativa — evita -1021 (recvWindow) nas retentativas
+    let timestamp = Date.now();
+    try {
+      const timeRes = await fetch("https://api.binance.com/api/v3/time");
+      timestamp = (await timeRes.json()).serverTime;
+    } catch (_) {
+      timestamp = Date.now() - 100000;
+    }
+
+    const queryString = `symbol=${symbol}&side=${side.toUpperCase()}&type=MARKET&quoteOrderQty=${sizeUSD.toFixed(2)}&recvWindow=10000&timestamp=${timestamp}`;
+    const signature = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(queryString).digest("hex");
+    const url = `${CONFIG.binance.baseUrl}/api/v3/order?${queryString}&signature=${signature}`;
+
+    let data;
+    try {
+      const res = await fetch(url, { method: "POST", headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey } });
+      data = await res.json();
+    } catch (netErr) {
+      lastError = netErr;
+      if (attempt < MAX_ATTEMPTS) {
+        console.log(`  ⚠ [${symbol}] Tentativa ${attempt}/${MAX_ATTEMPTS} falhou (rede): ${netErr.message.slice(0, 80)} — retry em ${RETRY_DELAYS[attempt-1]/1000}s`);
+        await sleep(RETRY_DELAYS[attempt - 1]);
+        continue;
+      }
+      throw netErr;
+    }
+
+    if (data.code && data.code < 0) {
+      lastError = new Error(`Binance order failed: [${data.code}] ${data.msg}`);
+      // -2015 = API key/IP/permissions (transitório), -1021 = timestamp fora da janela (transitório)
+      const isTransient = data.code === -2015 || data.code === -1021;
+      if (isTransient && attempt < MAX_ATTEMPTS) {
+        console.log(`  ⚠ [${symbol}] Tentativa ${attempt}/${MAX_ATTEMPTS} — [${data.code}] ${data.msg} — retry em ${RETRY_DELAYS[attempt-1]/1000}s`);
+        await sleep(RETRY_DELAYS[attempt - 1]);
+        continue;
+      }
+      throw lastError;
+    }
+
+    if (attempt > 1) console.log(`  ✅ [${symbol}] Ordem executada na tentativa ${attempt}/${MAX_ATTEMPTS}`);
+    return { orderId: String(data.orderId), executedQty: data.executedQty, status: data.status };
   }
-
-  // Construction of the signed request
-  const queryString = `symbol=${symbol}&side=${side.toUpperCase()}&type=MARKET&quoteOrderQty=${sizeUSD.toFixed(2)}&recvWindow=10000&timestamp=${timestamp}`;
-  const signature = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(queryString).digest("hex");
-  const url = `${CONFIG.binance.baseUrl}/api/v3/order?${queryString}&signature=${signature}`;
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "X-MBX-APIKEY": CONFIG.binance.apiKey,
-    },
-  });
-
-  const data = await res.json();
-  if (data.code && data.code < 0) {
-    throw new Error(`Binance order failed: [${data.code}] ${data.msg}`);
-  }
-
-  return { orderId: String(data.orderId), executedQty: data.executedQty, status: data.status };
+  throw lastError;
 }
 
 let _symbolPrecisionCache = {};

@@ -3201,9 +3201,9 @@ async function loadBotLog(){
         const fails=(t.conditions||[]).filter(c=>!c.pass).length;
         const total=(t.conditions||[]).length;
         let statusHtml = t.forced
-          ? '<span style="color:#f59e0b;font-weight:700">⚡ Forçado</span>'
+          ? (t.orderPlaced ? '<span style="color:#f59e0b;font-weight:700">⚡ Forçado ✓</span>' : '<span style="color:#f59e0b;font-weight:700">⚡ Forçado</span>')
           : t.allPass ? '<span class="up">✓ OK</span>' : '<span class="down">✗ Bloqueado</span>';
-        if (t.allPass && t.error && !t.forced) statusHtml = `<span class="down" title="${t.error}">⚠ Erro Exec.</span>`;
+        if ((t.allPass || t.forced) && t.error && !t.orderPlaced) statusHtml = `<span class="down" title="${t.error}">⚠ Erro Exec.</span>`;
         const planTag = t.plan ? `<span style="display:inline-block;margin-left:4px;font-size:9px;padding:1px 4px;border-radius:4px;background:var(--accent-bg,rgba(99,102,241,.15));color:var(--accent,#6366f1);border:1px solid var(--accent-border,rgba(99,102,241,.3))">${t.plan}</span>` : '';
         rows += `<tr style="cursor:pointer;transition:background .15s"
           onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''"
@@ -3278,9 +3278,24 @@ async function forceTrade() {
       body: JSON.stringify({ symbol: t.symbol, timeframe: t.timeframe, side })
     }).then(r => r.json());
     if (r.success) {
-      log.innerHTML = `<span class="up">✅ Ordem enviada com sucesso! (${t.symbol} ${side})</span>`;
-      btn.textContent = '✓ Executado';
-      setTimeout(() => { loadBotLog(); closeTradeDetail(); }, 2000);
+      const last = r.last;
+      const ordered = last?.orderPlaced;
+      const execErr = last?.error;
+      if (ordered) {
+        log.innerHTML = `<span class="up">✅ Ordem executada na Binance! (${t.symbol} ${side}) — ID: ${last.orderId||'?'}</span>`;
+        btn.textContent = '✓ Executado';
+        setTimeout(() => { loadBotLog(); closeTradeDetail(); }, 2000);
+      } else if (execErr) {
+        log.innerHTML = `<span class="down">⚠ Força ativada mas ordem FALHOU na Binance: ${execErr}</span>`;
+        btn.disabled = false;
+        btn.textContent = '⚡ Tentar Novamente';
+        loadBotLog();
+      } else {
+        log.innerHTML = `<span class="down">⚠ Força ativada mas ordem não foi colocada (verifique condições ou saldo).<br><small>${r.stdout?.slice(-300)||''}</small></span>`;
+        btn.disabled = false;
+        btn.textContent = '⚡ Tentar Novamente';
+        loadBotLog();
+      }
     } else {
       log.innerHTML = `<span class="down">Erro: ${r.stderr || r.error || 'falha desconhecida'}</span>`;
       btn.disabled = false;
