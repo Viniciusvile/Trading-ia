@@ -1447,7 +1447,7 @@ app.post('/api/bot/positions/:id/close', async (req, res) => {
     pos.exitOrderId = exitOrderId;
     pos.pnl = exitPrice ? parseFloat(((exitPrice - pos.entryPrice) * pos.quantity).toFixed(4)) : null;
 
-    await db.savePositions(positions);
+    await db.savePosition(pos);
     res.json({ success: true, position: pos });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });

@@ -49,6 +49,7 @@ export async function initDb() {
       );
       CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
       CREATE INDEX IF NOT EXISTS idx_positions_symbol ON positions(symbol);
+      CREATE INDEX IF NOT EXISTS idx_positions_opened_at ON positions (((data->>'openedAt')::timestamptz));
 
       CREATE TABLE IF NOT EXISTS trades (
         id   BIGSERIAL PRIMARY KEY,
@@ -56,6 +57,7 @@ export async function initDb() {
         data JSONB NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_trades_ts ON trades(ts DESC);
+      CREATE INDEX IF NOT EXISTS idx_trades_order_placed ON trades (((data->>'orderPlaced')::boolean));
 
       CREATE TABLE IF NOT EXISTS master_status (
         id   INTEGER PRIMARY KEY DEFAULT 1,
@@ -80,6 +82,15 @@ export async function initDb() {
         pid       INTEGER
       );
     `);
+
+    // Rotina de limpeza (Retention Policy)
+    // Exclui logs de scanner mais antigos que 15 dias, mantendo o que foi execução real
+    await client.query(`
+      DELETE FROM trades 
+      WHERE ts < NOW() - INTERVAL '15 days' 
+        AND COALESCE((data->>'orderPlaced')::boolean, false) = false;
+    `);
+
     console.log('✅ PostgreSQL conectado e tabelas verificadas.');
   } catch (e) {
     console.error('❌ Erro ao inicializar banco de dados:', e.message);
@@ -97,6 +108,19 @@ export async function loadPositions() {
     `SELECT data FROM positions ORDER BY (data->>'openedAt')::timestamptz ASC NULLS FIRST`
   );
   return res.rows.map(r => r.data);
+}
+
+/** Salva (upsert) uma única posição — mais eficiente que savePositions para atualizações pontuais. */
+export async function savePosition(pos) {
+  await getPool().query(
+    `INSERT INTO positions (id, symbol, status, data)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (id) DO UPDATE
+       SET symbol = EXCLUDED.symbol,
+           status = EXCLUDED.status,
+           data   = EXCLUDED.data`,
+    [pos.id, pos.symbol, pos.status, JSON.stringify(pos)]
+  );
 }
 
 /**
@@ -202,7 +226,8 @@ export async function countTodaysTrades() {
   const today = new Date().toISOString().slice(0, 10);
   const res = await getPool().query(
     `SELECT COUNT(*) FROM trades
-     WHERE ts::date = $1 AND (data->>'orderPlaced')::boolean = true`,
+     WHERE ts >= $1::date AND ts < ($1::date + INTERVAL '1 day')
+       AND (data->>'orderPlaced')::boolean = true`,
     [today]
   );
   return parseInt(res.rows[0].count, 10);
