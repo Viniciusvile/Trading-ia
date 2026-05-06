@@ -49,7 +49,7 @@ export async function initDb() {
       );
       CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
       CREATE INDEX IF NOT EXISTS idx_positions_symbol ON positions(symbol);
-      CREATE INDEX IF NOT EXISTS idx_positions_opened_at ON positions (((data->>'openedAt')::timestamptz));
+      CREATE INDEX IF NOT EXISTS idx_positions_opened_at ON positions ( (data->>'openedAt') );
 
       CREATE TABLE IF NOT EXISTS trades (
         id   BIGSERIAL PRIMARY KEY,
@@ -105,7 +105,7 @@ export async function initDb() {
 /** Retorna todas as posições ordenadas por data de abertura (mais antigas primeiro). */
 export async function loadPositions() {
   const res = await getPool().query(
-    `SELECT data FROM positions ORDER BY (data->>'openedAt')::timestamptz ASC NULLS FIRST`
+    `SELECT data FROM positions ORDER BY (data->>'openedAt') ASC NULLS FIRST`
   );
   return res.rows.map(r => r.data);
 }
