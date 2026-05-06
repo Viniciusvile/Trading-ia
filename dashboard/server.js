@@ -1664,6 +1664,7 @@ app.get('/api/micro-scalper/log', async (req, res) => {
     const todayStr = new Date(new Date().getTime() - (3 * 60 * 60 * 1000)).toISOString().split('T')[0];
 
     for (const sess of all) {
+      if (sess.trades && sess.trades[0]?.symbol === 'LEGACY') continue; // dados migrados sem símbolo
       const entries = (sess.trades || []).filter(t => t.event === 'entry');
       for (const tr of (sess.trades || [])) {
         if (!tr.t) continue;

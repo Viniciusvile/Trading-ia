@@ -2723,7 +2723,7 @@ async function loadMicroScalper() {
                     onmouseenter="this.style.background='rgba(255,255,255,.03)'"
                     onmouseleave="this.style.background='transparent'">
           <td style="padding:10px 8px">${time}</td>
-          <td style="padding:10px 8px;font-weight:800;color:var(--primary)">${t.symbol || '—'}</td>
+          <td style="padding:10px 8px;font-weight:800;color:var(--primary)">${(t.symbol||'—').replace(/USDT$/,'')}</td>
           <td style="padding:10px 8px;color:${evColor};font-weight:600">${(t.event||'—').toUpperCase()}</td>
           <td style="padding:10px 8px;color:var(--text-dim);font-size:11px">${t.reason || t.signal || ''}</td>
           <td style="padding:10px 8px;font-family:monospace">${t.entryPrice ? Number(t.entryPrice).toFixed(4) : '—'}</td>
