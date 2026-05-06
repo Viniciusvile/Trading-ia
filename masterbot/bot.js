@@ -86,8 +86,8 @@ const CONFIG = {
   tradeMode: process.env.TRADE_MODE || "spot",
   tradePercent: 0.5, // 50% for small accounts to meet $5 min
   binance: {
-    apiKey: process.env.BINANCE_API_KEY || process.env.BITGET_API_KEY,
-    secretKey: process.env.BINANCE_SECRET_KEY || process.env.BITGET_SECRET_KEY,
+    apiKey: (process.env.BINANCE_API_KEY || process.env.BITGET_API_KEY || "").trim(),
+    secretKey: (process.env.BINANCE_SECRET_KEY || process.env.BITGET_SECRET_KEY || "").trim(),
     baseUrl: "https://api.binance.com",
   },
 };
