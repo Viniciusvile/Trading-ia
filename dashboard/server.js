@@ -735,10 +735,16 @@ function parseEnv(txt) {
   return out;
 }
 
+// Retorna env mesclado: process.env (Railway vars) + .env local quando existir.
+function getBotEnv() {
+  const fileEnv = getBotEnv();
+  return { ...process.env, ...fileEnv };
+}
+
 app.get('/api/bot/config', (_req, res) => {
   try {
     if (!existsSync(BOT_DIR)) return res.status(404).json({ success: false, error: 'Pasta do bot não encontrada', dir: BOT_DIR });
-    const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
+    const env = getBotEnv();
     const rules = existsSync(BOT_RULES) ? JSON.parse(readFileSync(BOT_RULES, 'utf8')) : null;
     const hasRealKeys = (env.BINANCE_API_KEY && !/your_api_key_here|^$/.test(env.BINANCE_API_KEY)) ||
                         (env.BITGET_API_KEY && !/your_api_key_here|^$/.test(env.BITGET_API_KEY));
@@ -1043,8 +1049,7 @@ app.post('/api/bot/master/config', async (req, res) => {
     rules.master_interval = safeInterval;
     writeFileSync(join(ROOT, 'rules.json'), JSON.stringify(rules, null, 2));
 
-    // 2. Atualiza .env
-    const BOT_ENV = join(ROOT, '.env');
+    // 2. Atualiza .env (só existe localmente; no Railway o var vem de process.env)
     if (existsSync(BOT_ENV)) {
       let txt = readFileSync(BOT_ENV, 'utf8');
       const re = /^MASTERBOT_LOOP_INTERVAL=.*$/m;
@@ -1275,7 +1280,7 @@ async function syncPositionsWithBinance(env) {
 
 app.get('/api/bot/positions', async (_req, res) => {
   try {
-    const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
+    const env = getBotEnv();
     await syncPositionsWithBinance(env);
     const positions = await db.loadPositions();
     res.json({ success: true, positions });
@@ -1363,7 +1368,7 @@ app.post('/api/bot/positions/:id/close', async (req, res) => {
     const pos = positions.find(p => p.id === req.params.id && p.status === 'open');
     if (!pos) return res.status(404).json({ success: false, error: 'Posição não encontrada ou já fechada' });
 
-    const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
+    const env = getBotEnv();
     const apiKey = env.BINANCE_API_KEY || env.BITGET_API_KEY;
     const secretKey = env.BINANCE_SECRET_KEY || env.BITGET_SECRET_KEY;
     const paperTrading = env.PAPER_TRADING !== 'false';
@@ -1456,7 +1461,7 @@ app.post('/api/bot/positions/:id/oco', async (req, res) => {
     const pos = positions.find(p => p.id === req.params.id && p.status === 'open');
     if (!pos) return res.status(404).json({ success: false, error: 'Posição não encontrada' });
 
-    const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
+    const env = getBotEnv();
     const apiKey = env.BINANCE_API_KEY || env.BITGET_API_KEY;
     const secretKey = env.BINANCE_SECRET_KEY || env.BITGET_SECRET_KEY;
     if (!apiKey || !secretKey) return res.status(400).json({ success: false, error: 'Sem credenciais da Binance' });
@@ -1538,7 +1543,7 @@ app.post('/api/bot/positions/:id/oco', async (req, res) => {
 // ── BALANCE ───────────────────────────────────────────────────────
 app.get('/api/bot/balance', async (_req, res) => {
   try {
-    const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
+    const env = getBotEnv();
     const apiKey = env.BINANCE_API_KEY || env.BITGET_API_KEY;
     const secretKey = env.BINANCE_SECRET_KEY || env.BITGET_SECRET_KEY;
     if (!apiKey || !secretKey) return res.json({ success: false, error: 'Sem credenciais' });
@@ -1560,7 +1565,7 @@ app.get('/api/bot/balance', async (_req, res) => {
 // ── PORTFOLIO ─────────────────────────────────────────────────────
 app.get('/api/bot/portfolio', async (_req, res) => {
   try {
-    const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
+    const env = getBotEnv();
     const apiKey = env.BINANCE_API_KEY || env.BITGET_API_KEY;
     const secretKey = env.BINANCE_SECRET_KEY || env.BITGET_SECRET_KEY;
     if (!apiKey || !secretKey) return res.json({ success: false, error: 'Sem credenciais' });
@@ -1613,7 +1618,6 @@ app.get('/api/price/:symbol', async (req, res) => {
 
 // ── MICRO-SCALPER ────────────────────────────────────────────────
 const MICRO_SCRIPT = join(ROOT, 'micro-scalper.js');
-const MICRO_LOG = join(ROOT, 'micro-scalper-log.json');
 const MICRO_PID = join(ROOT, '.micro-scalper.pid');
 let microProcess = null;
 
