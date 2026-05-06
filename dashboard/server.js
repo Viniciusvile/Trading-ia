@@ -1655,9 +1655,7 @@ app.get('/api/micro-scalper/status', async (_req, res) => {
 app.get('/api/micro-scalper/log', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
-    console.log(`[API] /api/micro-scalper/log called, limit=${limit}`);
     const all = await db.loadMicroSessions(200);
-    console.log(`[API] Found ${all.length} sessions in DB`);
     if (!all.length) return res.json({ success: true, sessions: 0, trades: [], daily: { trades: 0, pnl: 0 } });
 
     const flat = [];
