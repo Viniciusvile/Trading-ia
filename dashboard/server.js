@@ -1655,7 +1655,9 @@ app.get('/api/micro-scalper/status', async (_req, res) => {
 app.get('/api/micro-scalper/log', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
+    console.log(`[API] /api/micro-scalper/log called, limit=${limit}`);
     const all = await db.loadMicroSessions(200);
+    console.log(`[API] Found ${all.length} sessions in DB`);
     if (!all.length) return res.json({ success: true, sessions: 0, trades: [], daily: { trades: 0, pnl: 0 } });
 
     const flat = [];
@@ -1664,7 +1666,7 @@ app.get('/api/micro-scalper/log', async (req, res) => {
     const todayStr = new Date(new Date().getTime() - (3 * 60 * 60 * 1000)).toISOString().split('T')[0];
 
     for (const sess of all) {
-      if (sess.trades && sess.trades[0]?.symbol === 'LEGACY') continue; // dados migrados sem símbolo
+      // if (sess.trades && sess.trades[0]?.symbol === 'LEGACY') continue; // Comentado para permitir ver histórico legado
       const entries = (sess.trades || []).filter(t => t.event === 'entry');
       for (const tr of (sess.trades || [])) {
         if (!tr.t) continue;
