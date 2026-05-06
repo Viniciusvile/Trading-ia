@@ -737,7 +737,7 @@ function parseEnv(txt) {
 
 // Retorna env mesclado: process.env (Railway vars) + .env local quando existir.
 function getBotEnv() {
-  const fileEnv = getBotEnv();
+  const fileEnv = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
   return { ...process.env, ...fileEnv };
 }
 
