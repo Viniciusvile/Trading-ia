@@ -3174,28 +3174,51 @@ async function loadBotLog(){
   try{
     const r=await fetch(B+'/api/bot/log').then(r=>r.json());
     _botLogTrades = (r.trades||[]);
-    const rows=_botLogTrades.map((t,i)=>{
-      const fails=(t.conditions||[]).filter(c=>!c.pass).length;
-      const total=(t.conditions||[]).length;
-      let statusHtml = t.forced
-        ? '<span style="color:#f59e0b;font-weight:700">⚡ Forçado</span>'
-        : t.allPass ? '<span class="up">✓ OK</span>' : '<span class="down">✗ Bloqueado</span>';
-      if (t.allPass && t.error && !t.forced) {
-        statusHtml = `<span class="down" title="${t.error}">⚠ Erro Exec.</span>`;
+
+    // Agrupar por ciclo (gap > 5 min = novo ciclo) e deduplicar símbolo por ciclo
+    const CYCLE_GAP_MS = 5 * 60 * 1000;
+    const cycles = [];
+    let cur = null;
+    for (const t of _botLogTrades) {
+      const ts = new Date(t.timestamp).getTime();
+      if (!cur || ts - cur.lastTs > CYCLE_GAP_MS) {
+        cur = { ts, lastTs: ts, trades: [] };
+        cycles.push(cur);
       }
-      const planTag = t.plan ? `<span style="display:inline-block;margin-left:4px;font-size:9px;padding:1px 4px;border-radius:4px;background:var(--accent-bg,rgba(99,102,241,.15));color:var(--accent,#6366f1);border:1px solid var(--accent-border,rgba(99,102,241,.3))">${t.plan}</span>` : '';
-      return `<tr style="cursor:pointer;transition:background .15s"
-        onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''"
-        ondblclick="openTradeDetail(${i})" title="Duplo clique para ver detalhes">
-        <td style="font-size:11px;color:var(--muted)">${new Date(t.timestamp).toLocaleString('pt-BR')}</td>
-        <td><b>${t.symbol||'—'}</b>${planTag}</td>
-        <td style="color:var(--muted)">${t.timeframe||'—'}</td>
-        <td style="font-family:monospace">$${Number(t.price||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}</td>
-        <td style="color:var(--muted)">${t.side||'—'}</td>
-        <td>${statusHtml}</td>
-        <td style="font-size:11px;color:var(--muted);user-select:none" title="Duplo clique para detalhes">🔍 ${total-fails}/${total}</td>
-      </tr>`;
-    }).join('');
+      cur.lastTs = ts;
+      // deduplicar: mantém só o mais recente por símbolo dentro do ciclo
+      const existing = cur.trades.findIndex(x => x.symbol === t.symbol && x.timeframe === t.timeframe);
+      if (existing >= 0) cur.trades[existing] = t;
+      else cur.trades.push(t);
+    }
+
+    let rows = '';
+    cycles.slice().reverse().forEach(cycle => {
+      const cycleLabel = new Date(cycle.ts).toLocaleString('pt-BR');
+      rows += `<tr><td colspan="7" style="background:var(--surface2);color:var(--muted);font-size:10px;font-weight:700;padding:4px 8px;letter-spacing:.05em;text-transform:uppercase">⏱ Ciclo ${cycleLabel}</td></tr>`;
+      cycle.trades.slice().reverse().forEach(t => {
+        const i = _botLogTrades.indexOf(t);
+        const fails=(t.conditions||[]).filter(c=>!c.pass).length;
+        const total=(t.conditions||[]).length;
+        let statusHtml = t.forced
+          ? '<span style="color:#f59e0b;font-weight:700">⚡ Forçado</span>'
+          : t.allPass ? '<span class="up">✓ OK</span>' : '<span class="down">✗ Bloqueado</span>';
+        if (t.allPass && t.error && !t.forced) statusHtml = `<span class="down" title="${t.error}">⚠ Erro Exec.</span>`;
+        const planTag = t.plan ? `<span style="display:inline-block;margin-left:4px;font-size:9px;padding:1px 4px;border-radius:4px;background:var(--accent-bg,rgba(99,102,241,.15));color:var(--accent,#6366f1);border:1px solid var(--accent-border,rgba(99,102,241,.3))">${t.plan}</span>` : '';
+        rows += `<tr style="cursor:pointer;transition:background .15s"
+          onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''"
+          ondblclick="openTradeDetail(${i < 0 ? 0 : i})" title="Duplo clique para ver detalhes">
+          <td style="font-size:11px;color:var(--muted)">${new Date(t.timestamp).toLocaleString('pt-BR')}</td>
+          <td><b>${t.symbol||'—'}</b>${planTag}</td>
+          <td style="color:var(--muted)">${t.timeframe||'—'}</td>
+          <td style="font-family:monospace">$${Number(t.price||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}</td>
+          <td style="color:var(--muted)">${t.side||'—'}</td>
+          <td>${statusHtml}</td>
+          <td style="font-size:11px;color:var(--muted);user-select:none" title="Duplo clique para detalhes">🔍 ${total-fails}/${total}</td>
+        </tr>`;
+      });
+    });
+
     $('bot-log-tbody-standard').innerHTML=rows||'<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:14px">Nenhuma execução ainda.</td></tr>';
   }catch(e){}
 }
