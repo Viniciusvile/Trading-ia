@@ -1280,8 +1280,6 @@ async function syncPositionsWithBinance(env) {
 
 app.get('/api/bot/positions', async (_req, res) => {
   try {
-    const env = getBotEnv();
-    await syncPositionsWithBinance(env);
     const positions = await db.loadPositions();
     res.json({ success: true, positions });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
