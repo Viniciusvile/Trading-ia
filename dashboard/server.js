@@ -1743,6 +1743,9 @@ app.get('/api/micro-scalper/log', async (req, res) => {
         }
       }
     }
+    // Sort strictly by timestamp to ensure chronological order across different symbols/sessions
+    flat.sort((a, b) => new Date(a.t) - new Date(b.t));
+
     res.json({
       success: true,
       sessions: all.length,
