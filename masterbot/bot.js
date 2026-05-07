@@ -825,10 +825,23 @@ async function monitorPositions() {
             const isTP = price >= (pos.takeProfitPrice || price) * 0.999;
             const exitReason = isTP ? `TAKE PROFIT via OCO @ $${price.toFixed(8)}` : `STOP LOSS via OCO @ $${price.toFixed(8)}`;
             const pnl = parseFloat(((price - pos.entryPrice) * pos.quantity).toFixed(8));
+            const pnlPct = (((price - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2);
+            const usdBrl = 5.7;
+            const pnlBrl = (pnl * usdBrl).toFixed(2);
+            const resultado = pnl >= 0 ? '✅ LUCRO' : '❌ PREJUÍZO';
+            const duracao = pos.openedAt ? Math.round((Date.now() - new Date(pos.openedAt).getTime()) / 60000) : '?';
             
             Object.assign(pos, { status: "closed", closedAt: new Date().toISOString(), exitPrice: price, exitReason, pnl });
             console.log(`✅ [${pos.symbol}] OCO EXECUTADA: ${exitReason} | PnL: $${pnl}`);
-            sendWhatsApp(`🔴 VENDA ${pos.symbol} ${pos.timeframe}\nMotivo: ${exitReason}\nEntrada: $${pos.entryPrice} → Saída: $${price.toFixed(8)}\nPnL: $${pnl}`);
+            sendWhatsApp(`${resultado} — ${pos.symbol} (${pos.timeframe})\n\n📋 Resumo do Trade\n` +
+              `Plano: ${pos.plan || 'Auto'}\n` +
+              `Entrada: $${pos.entryPrice}\n` +
+              `Saída:   $${price.toFixed(6)}\n` +
+              `Motivo:  ${isTP ? 'Take Profit ✅' : 'Stop Loss 🛑'}\n\n` +
+              `💰 PnL: $${pnl > 0 ? '+' : ''}${pnl} USD\n` +
+              `💵 Em BRL: R$ ${pnl >= 0 ? '+' : ''}${pnlBrl}\n` +
+              `📊 Variação: ${pnlPct > 0 ? '+' : ''}${pnlPct}%\n` +
+              `⏱ Duração: ${duracao} minutos`);
           } else {
             const candles = await fetchCandles(pos.symbol, pos.timeframe, 5);
             const price = candles[candles.length - 1].close;
@@ -891,17 +904,43 @@ async function monitorPositions() {
           try {
             const sellOrder = await placeBinanceSellOrder(pos.symbol, pos.quantity);
             const pnl = ((price - pos.entryPrice) * pos.quantity).toFixed(4);
+            const pnlPct = (((price - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2);
+            const usdBrl = 5.7;
+            const pnlBrl = (parseFloat(pnl) * usdBrl).toFixed(2);
+            const resultado = parseFloat(pnl) >= 0 ? '✅ LUCRO' : '❌ PREJUÍZO';
+            const duracao = pos.openedAt ? Math.round((Date.now() - new Date(pos.openedAt).getTime()) / 60000) : '?';
             Object.assign(pos, { status: "closed", closedAt: new Date().toISOString(), exitPrice: price, exitReason, exitOrderId: sellOrder.orderId, pnl: parseFloat(pnl) });
             console.log(`✅ [${pos.symbol}] VENDIDO @ $${price} | PnL: $${pnl}`);
-            sendWhatsApp(`🔴 [LIVE] VENDA ${pos.symbol} ${pos.timeframe}\nMotivo: ${exitReason}\nEntrada: $${pos.entryPrice} → Saída: $${price}\nPnL: $${pnl}\nOrderId: ${sellOrder.orderId}`);
+            sendWhatsApp(`${resultado} — ${pos.symbol} (${pos.timeframe})\n\n📋 Resumo do Trade\n` +
+              `Plano: ${pos.plan || 'Auto'}\n` +
+              `Entrada: $${pos.entryPrice}\n` +
+              `Saída:   $${price}\n` +
+              `Motivo:  ${exitReason.includes('TAKE') ? 'Take Profit ✅' : 'Stop Loss 🛑'}\n\n` +
+              `💰 PnL: ${parseFloat(pnl) >= 0 ? '+' : ''}${pnl} USD\n` +
+              `💵 Em BRL: R$ ${parseFloat(pnl) >= 0 ? '+' : ''}${pnlBrl}\n` +
+              `📊 Variação: ${parseFloat(pnlPct) >= 0 ? '+' : ''}${pnlPct}%\n` +
+              `⏱ Duração: ${duracao} minutos`);
           } catch (err) {
             console.log(`❌ [${pos.symbol}] VENDA FALHOU: ${err.message}`);
           }
         } else {
           const pnl = ((price - pos.entryPrice) * pos.quantity).toFixed(4);
+          const pnlPct = (((price - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2);
+          const usdBrl = 5.7;
+          const pnlBrl = (parseFloat(pnl) * usdBrl).toFixed(2);
+          const resultado = parseFloat(pnl) >= 0 ? '✅ LUCRO' : '❌ PREJUÍZO';
+          const duracao = pos.openedAt ? Math.round((Date.now() - new Date(pos.openedAt).getTime()) / 60000) : '?';
           Object.assign(pos, { status: "closed", closedAt: new Date().toISOString(), exitPrice: price, exitReason, exitOrderId: `PAPER-SELL-${Date.now()}`, pnl: parseFloat(pnl) });
           console.log(`📋 [${pos.symbol}] PAPER SELL @ $${price} | PnL: $${pnl}`);
-          sendWhatsApp(`🔴 [PAPER] VENDA ${pos.symbol} ${pos.timeframe}\nMotivo: ${exitReason}\nEntrada: $${pos.entryPrice} → Saída: $${price}\nPnL: $${pnl}`);
+          sendWhatsApp(`${resultado} [PAPER] — ${pos.symbol} (${pos.timeframe})\n\n📋 Resumo do Trade\n` +
+            `Plano: ${pos.plan || 'Auto'}\n` +
+            `Entrada: $${pos.entryPrice}\n` +
+            `Saída:   $${price}\n` +
+            `Motivo:  ${exitReason.includes('TAKE') ? 'Take Profit ✅' : 'Stop Loss 🛑'}\n\n` +
+            `💰 PnL: ${parseFloat(pnl) >= 0 ? '+' : ''}${pnl} USD\n` +
+            `💵 Em BRL: R$ ${parseFloat(pnl) >= 0 ? '+' : ''}${pnlBrl}\n` +
+            `📊 Variação: ${parseFloat(pnlPct) >= 0 ? '+' : ''}${pnlPct}%\n` +
+            `⏱ Duração: ${duracao} minutos`);
         }
       } else {
         const pnlUnrealized = ((price - pos.entryPrice) * pos.quantity).toFixed(4);
@@ -1127,7 +1166,7 @@ async function runSymbolCycle(symbol, timeframe, rules) {
       console.log(`✅ [${symbol}] PASS — Paper Order: ${logEntry.orderId}`);
       const execQty = tradeSize / price;
       await db.addPosition(symbol, timeframe, price, execQty, stopPrice, takeProfitPrice, logEntry.orderId, null, usedStrategy, results, activeIndicators, plan?.name);
-      sendWhatsApp(`🟢 [PAPER] COMPRA ${symbol} ${timeframe}\nPreço: $${price}\nQtd: ${execQty.toFixed(6)}\nSL: $${stopPrice?.toFixed(6) || '-'} | TP: $${takeProfitPrice?.toFixed(6) || '-'}\nEstratégia: ${usedStrategy}${plan?.name ? ' / ' + plan.name : ''}`);
+      // Sem notificação de abertura — apenas resumo no fechamento
     } else {
       try {
         const order = await placeBinanceOrder(symbol, orderSide, tradeSize, price);
@@ -1159,7 +1198,7 @@ async function runSymbolCycle(symbol, timeframe, rules) {
         }
 
         await db.addPosition(symbol, timeframe, price, execQtyNum, stopPrice, takeProfitPrice, order.orderId, ocoOrderListId, usedStrategy, results, activeIndicators, plan?.name);
-        sendWhatsApp(`🟢 [LIVE] COMPRA ${symbol} ${timeframe}\nPreço: $${price}\nQtd: ${execQtyNum.toFixed(6)}\nSL: $${stopPrice?.toFixed(6) || '-'} | TP: $${takeProfitPrice?.toFixed(6) || '-'}\nOrderId: ${order.orderId}${ocoOrderListId ? ' | OCO #' + ocoOrderListId : ' | SEM OCO'}\nEstratégia: ${usedStrategy}${plan?.name ? ' / ' + plan.name : ''}`);
+        // Sem notificação de abertura — apenas resumo no fechamento
       } catch (err) {
         console.log(`❌ [${symbol}] ORDER FAILED: ${err.message}`);
         logEntry.error = err.message;
