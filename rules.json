@@ -1,219 +1,181 @@
 {
   "watchlist": [
-    "BTCUSDT",
     "ETHUSDT",
-    "SOLUSDT",
+    "BONKUSDT",
+    "ENAUSDT",
     "XRPUSDT",
     "PEPEUSDT",
     "RENDERUSDT",
-    "ENAUSDT"
+    "BTCUSDT",
+    "SOLUSDT"
   ],
-  "default_timeframe": "1h",
+  "timeframes": [
+    "15m",
+    "30m",
+    "1H",
+    "4H",
+    "1D"
+  ],
   "strategy": {
     "key": "auto",
-    "name": "MASTERBOT AUTOMÁTICO"
+    "name": "Ross Cameron — Warrior Trading",
+    "sources": [
+      "Ross Cameron (Warrior Trading)"
+    ],
+    "description": "Estratégia de momentum baseada em VWAP, EMAs (9, 20, 200), RSI e Volume Relativo. Focada em trades de alta probabilidade a favor da tendência macro."
   },
-  "active_plan": null,
-  "group_plans": [
-    {
-      "name": "PlanV5e",
-      "description": "Majors High Precision (V5E)",
-      "symbols": [
-        "BTCUSDT",
-        "ETHUSDT"
-      ],
-      "tv_symbols": {
-        "BTCUSDT": "BINANCE:BTCUSDT",
-        "ETHUSDT": "BINANCE:ETHUSDT"
-      },
-      "timeframes": [
-        "1h",
-        "4h"
-      ],
-      "filters": {
-        "ema_triple": true,
-        "adx_min": 22,
-        "di_direction": true,
-        "rsi_min": 50,
-        "rsi_max": 70,
-        "volume_mult": 1.3,
-        "macd_positive": true,
-        "macd_growing": true
-      },
-      "sl_atr_mult": 1.2,
-      "tp_atr_mult": 3,
-      "breakeven_pct": 1
-    },
-    {
-      "name": "PlanTrend",
-      "description": "Trend Following High Conviction (1H)",
-      "symbols": [
-        "RENDERUSDT",
-        "XRPUSDT",
-        "ENAUSDT",
-        "SOLUSDT"
-      ],
-      "tv_symbols": {
-        "RENDERUSDT": "BINANCE:RENDERUSDT",
-        "XRPUSDT": "BINANCE:XRPUSDT",
-        "ENAUSDT": "BINANCE:ENAUSDT",
-        "SOLUSDT": "BINANCE:SOLUSDT"
-      },
-      "timeframes": [
-        "1h"
-      ],
-      "filters": {
-        "ema_triple": true,
-        "adx_min": 25,
-        "di_direction": true,
-        "rsi_min": 48,
-        "rsi_max": 70,
-        "volume_mult": 1.2,
-        "macd_positive": true
-      },
-      "sl_atr_mult": 1,
-      "tp_atr_mult": 2.5,
-      "breakeven_pct": 0.8
-    },
-    {
-      "name": "PlanMeme",
-      "description": "Meme Alta Convicção (1H) — somente momentum forte",
-      "symbols": [
-        "PEPEUSDT"
-      ],
-      "tv_symbols": {
-        "PEPEUSDT": "BINANCE:PEPEUSDT"
-      },
-      "timeframes": [
-        "1h"
-      ],
-      "filters": {
-        "ema_triple": true,
-        "adx_min": 28,
-        "di_direction": true,
-        "rsi_min": 50,
-        "rsi_max": 68,
-        "volume_mult": 1.5,
-        "macd_positive": true
-      },
-      "sl": {
-        "type": "pct",
-        "value": 1.5
-      },
-      "tp": {
-        "type": "pct",
-        "value": 4.5
-      },
-      "breakeven_pct": 1
-    }
+  "indicators": {
+    "ema_8": "EMA rápida. Define direção de curto prazo.",
+    "ema_80": "EMA lenta. Define tendência macro. Cruzamento EMA8>EMA80 valida bias bullish; EMA8<EMA80 valida bearish."
+  },
+  "bias_criteria": {
+    "bullish": [
+      "EMA(8) está acima da EMA(80) — tendência de alta confirmada"
+    ],
+    "bearish": [
+      "EMA(8) está abaixo da EMA(80) — tendência de baixa confirmada"
+    ]
+  },
+  "entry_rules": {
+    "long": [
+      "EMA(8) > EMA(80) — tendência de alta confirmada",
+      "Padrão 123 de fundo nos últimos 3 candles fechados: low[2] > low[1] E low[0] > low[1] (candle central é o pivot de baixa)",
+      "Candle atual rompe para cima a máxima do candle 1 (close > high do candle pivot anterior)"
+    ],
+    "short": [
+      "EMA(8) < EMA(80) — tendência de baixa confirmada",
+      "Padrão 123 de topo nos últimos 3 candles fechados: high[2] < high[1] E high[0] < high[1] (candle central é o pivot de alta)",
+      "Candle atual rompe para baixo a mínima do candle 1 (close < low do candle pivot anterior)"
+    ]
+  },
+  "exit_rules": [
+    "Stop loss LONG: no low do candle pivot (low[2] do momento da entrada)",
+    "Stop loss SHORT: no high do candle pivot (high[2] do momento da entrada)",
+    "Take profit: relação risco/retorno 2:1 — distância stop × 2 a favor",
+    "Se EMA(8) cruzar em sentido contrário antes do alvo, encerrar a operação",
+    "TRAILING STOP: Ativado via ATR (14 períodos) com multiplicador 2.0x para arraste automático na Exchange"
   ],
-  "micro_scalper": {
-    "active_symbols": [
-      "XRPUSDT",
-      "SOLUSDT"
-    ],
-    "loop_interval_ms": 2000,
-    "max_trades": 100,
-    "max_session_ms": 43200000,
-    "max_hold_ms": 3600000,
-    "cooldown_ms": 30000,
-    "cooldown_after_loss_ms": 600000,
-    "daily_loss_stop_pct": 0.05,
-    "daily_profit_target_usdt": 0.16,
-    "blocked_hours_utc": [
-      0,
-      1,
-      2
-    ],
-    "max_consecutive_losses": 2,
-    "cooldown_consecutive_loss_ms": 1800000,
-    "btc_drop_block_pct": 0.015,
-    "btc_ref_age_ms": 900000,
-    "max_trade_usdt": 30,
-    "min_trade_usdt": 18,
-    "trade_size_pct": 0.2,
-    "plans": {
-      "SOLUSDT": {
-        "symbol": "SOLUSDT",
-        "tv_symbol": "BINANCE:SOLUSDT",
-        "strategy_mode": "micro-dip",
-        "ema_period": 20,
-        "rsi_period": 3,
-        "min_dip_pct": 0.001
-      },
-      "XRPUSDT": {
-        "symbol": "XRPUSDT",
-        "tv_symbol": "BINANCE:XRPUSDT",
-        "strategy_mode": "turbo-reversion",
-        "rsi_period": 14,
-        "rsi_limit": 45,
-        "bb_length": 20,
-        "bb_mult": 2,
-        "vol_mult": 1.1
-      },
-      "PEPEUSDT": {
-        "symbol": "PEPEUSDT",
-        "tv_symbol": "BINANCE:PEPEUSDT",
-        "strategy_mode": "turbo-reversion",
-        "rsi_period": 14,
-        "rsi_limit": 38,
-        "bb_length": 20,
-        "bb_mult": 2,
-        "vol_mult": 1.3,
-        "tp_pct": 0.025,
-        "sl_pct": 0.01,
-        "trend_ema_period": 50,
-        "trend_slope_bars": 5,
-        "trend_max_down_pct": 0.005,
-        "min_atr_pct": 0.6,
-        "qty_decimals": 0,
-        "quote_decimals": 8
-      },
-      "BONKUSDT": {
-        "symbol": "BONKUSDT",
-        "tv_symbol": "BINANCE:BONKUSDT",
-        "strategy_mode": "turbo-reversion",
-        "rsi_period": 14,
-        "rsi_limit": 38,
-        "bb_length": 20,
-        "bb_mult": 2,
-        "vol_mult": 1.3,
-        "tp_pct": 0.025,
-        "sl_pct": 0.01,
-        "trend_ema_period": 50,
-        "trend_slope_bars": 5,
-        "trend_max_down_pct": 0.005,
-        "min_atr_pct": 0.6,
-        "qty_decimals": 0,
-        "quote_decimals": 8
-      },
-      "ENAUSDT": {
-        "symbol": "ENAUSDT",
-        "tv_symbol": "BINANCE:ENAUSDT",
-        "strategy_mode": "turbo-reversion",
-        "rsi_period": 14,
-        "rsi_limit": 40,
-        "bb_length": 20,
-        "bb_mult": 2,
-        "vol_mult": 1.2,
-        "tp_pct": 0.022,
-        "sl_pct": 0.009,
-        "trend_ema_period": 50,
-        "trend_slope_bars": 5,
-        "trend_max_down_pct": 0.005,
-        "min_atr_pct": 0.5,
-        "qty_decimals": 2,
-        "quote_decimals": 4
-      }
-    }
-  },
-  "master_interval": "10m",
-  "max_concurrent_positions": 3,
   "exit_rules_config": {
     "trailing_stop": {
       "enabled": true,
       "type": "atr",
-      "multiplier": 1.5
+      "multiplier": 3.3
     }
-  }
+  },
+  "risk_rules": [
+    "Risco máximo de 1% do portfólio por trade",
+    "Tamanho máximo de trade limitado por MAX_TRADE_SIZE_USD no .env ($20)",
+    "Máximo de MAX_TRADES_PER_DAY trades por dia (5)",
+    "Não operar se a distância entre EMA(8) e preço for > 3% — mercado esticado demais",
+    "Não operar contra tendência: LONG apenas com EMA8 > EMA80; SHORT apenas com EMA8 < EMA80",
+    "PAPER_TRADING=true até validar a estratégia em BTCUSDT 4H por pelo menos 2 semanas"
+  ],
+  "notes": "Estratégia swing — desenhada para 4H e timeframes maiores. NÃO aplicar em scalping (1m/5m). O padrão 123 exige 3 candles fechados consecutivos antes da confirmação; em 4H isso significa esperar ~12h entre padrões. Fonte original: Pine Script em tradingview-mcp-jackson/dashboard/server.js (STORMER_SOURCE).",
+  "group_plans": [
+    {
+      "name": "Alpha_Apex_BTC",
+      "description": "Bitcoin Alpha · 4H · Trend Master",
+      "symbols": [
+        "BTCUSDT"
+      ],
+      "timeframes": [
+        "4H"
+      ],
+      "strategy": "warrior",
+      "breakeven_pct": 59.7,
+      "sl": {
+        "type": "atr",
+        "multiplier": 1.5
+      },
+      "tp": {
+        "type": "atr",
+        "multiplier": 1.0
+      },
+      "filters": {
+        "ema_triple": true,
+        "rsi_min": 45,
+        "rsi_max": 75,
+        "macd_growing": true
+      }
+    },
+    {
+      "name": "Alpha_TrendFlow",
+      "description": "Tendência Forte · RENDER · XRP · ENA · 1H",
+      "symbols": [
+        "RENDERUSDT",
+        "XRPUSDT",
+        "ENAUSDT"
+      ],
+      "timeframes": [
+        "1H"
+      ],
+      "strategy": "warrior",
+      "breakeven_pct": 55.55,
+      "sl": {
+        "type": "atr",
+        "multiplier": 1.5
+      },
+      "tp": {
+        "type": "atr",
+        "multiplier": 1.2
+      },
+      "filters": {
+        "adx_min": 20,
+        "rsi_min": 42,
+        "rsi_max": 74,
+        "volume_mult": 1.2
+      }
+    },
+    {
+      "name": "Alpha_HyperDrive",
+      "description": "BONK · PEPE · 1H · Vol 2× · Supertrend(7)",
+      "symbols": [
+        "BONKUSDT",
+        "PEPEUSDT"
+      ],
+      "timeframes": [
+        "1H"
+      ],
+      "strategy": "warrior",
+      "breakeven_pct": 33.33,
+      "sl": {
+        "type": "atr",
+        "multiplier": 1.0
+      },
+      "tp": {
+        "type": "atr",
+        "multiplier": 2.0
+      },
+      "filters": {
+        "volume_mult": 2,
+        "supertrend_period": 7,
+        "supertrend_mult": 3
+      }
+    },
+    {
+      "name": "Alpha_BlueChips",
+      "description": "Altcoins Liderança · ETH · SOL · 4H",
+      "symbols": [
+        "ETHUSDT",
+        "SOLUSDT"
+      ],
+      "timeframes": [
+        "4H"
+      ],
+      "strategy": "warrior",
+      "breakeven_pct": 33.33,
+      "sl": {
+        "type": "atr",
+        "multiplier": 1.0
+      },
+      "tp": {
+        "type": "atr",
+        "multiplier": 2.0
+      },
+      "filters": {
+        "rsi_min": 40
+      }
+    }
+  ],
+  "active_plan": null
 }
