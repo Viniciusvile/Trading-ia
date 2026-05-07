@@ -1161,18 +1161,32 @@ button.sm{padding:5px 10px;font-size:11px;}
     <div class="card" style="padding:16px">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px">Modo de Execução</div>
       <div style="display:flex;flex-direction:column;gap:10px">
+        <label class="radio-card" id="plan-btc-label" style="display:flex;align-items:center;gap:10px;padding:15px;border:2px solid var(--border);border-radius:12px;cursor:pointer;transition:all .3s;background:var(--surface2)">
+          <input type="checkbox" name="active-plan" value="btc" onchange="switchPlan('btc', this)">
+          <div>
+            <div id="plan-btc-title" style="font-size:15px;font-weight:800;color:var(--text)">🟠 SCALPER — BTC</div>
+            <div style="font-size:11px;color:var(--text);margin-top:2px">Foco: BTC Turbo-Reversion (BB + RSI) | TP 0.6% / SL 0.3%</div>
+          </div>
+        </label>
+        <label class="radio-card" id="plan-eth-label" style="display:flex;align-items:center;gap:10px;padding:15px;border:2px solid var(--border);border-radius:12px;cursor:pointer;transition:all .3s;background:var(--surface2)">
+          <input type="checkbox" name="active-plan" value="eth" onchange="switchPlan('eth', this)">
+          <div>
+            <div id="plan-eth-title" style="font-size:15px;font-weight:800;color:var(--text)">🔵 SCALPER — ETH</div>
+            <div style="font-size:11px;color:var(--text);margin-top:2px">Foco: ETH Micro-Dip (EMA 20 + RSI 3) | TP 0.8% / SL 0.4%</div>
+          </div>
+        </label>
         <label class="radio-card" id="plan-xrp-label" style="display:flex;align-items:center;gap:10px;padding:15px;border:2px solid var(--border);border-radius:12px;cursor:pointer;transition:all .3s;background:var(--surface2)">
           <input type="checkbox" name="active-plan" value="xrp" onchange="switchPlan('xrp', this)">
           <div>
-            <div id="plan-xrp-title" style="font-size:15px;font-weight:800;color:var(--text)">🤖 MASTERBOT — XRP</div>
-            <div style="font-size:11px;color:var(--text);margin-top:2px">Foco: XRP Scalping Turbo (Bollinger + RSI + Vol)</div>
+            <div id="plan-xrp-title" style="font-size:15px;font-weight:800;color:var(--text)">🤖 SCALPER — XRP</div>
+            <div style="font-size:11px;color:var(--text);margin-top:2px">Foco: XRP Scalping Turbo (Bollinger + RSI + Vol) | TP 1.2% / SL 0.6%</div>
           </div>
         </label>
         <label class="radio-card" id="plan-sol-label" style="display:flex;align-items:center;gap:10px;padding:15px;border:2px solid var(--border);border-radius:12px;cursor:pointer;transition:all .3s;background:var(--surface2)">
           <input type="checkbox" name="active-plan" value="sol" onchange="switchPlan('sol', this)">
           <div>
-            <div id="plan-sol-title" style="font-size:15px;font-weight:800;color:var(--text)">🟣 MASTERBOT — SOL</div>
-            <div style="font-size:11px;color:var(--text);margin-top:2px">Foco: SOL Micro-Dip (EMA 20 + RSI 3)</div>
+            <div id="plan-sol-title" style="font-size:15px;font-weight:800;color:var(--text)">🟣 SCALPER — SOL</div>
+            <div style="font-size:11px;color:var(--text);margin-top:2px">Foco: SOL Micro-Dip (EMA 20 + RSI 3) | TP 1.0% / SL 0.5%</div>
           </div>
         </label>
       </div>
