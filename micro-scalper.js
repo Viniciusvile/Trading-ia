@@ -347,7 +347,22 @@ async function main() {
             
             await saveGlobalLog(sessionStart, symbol, s.log);
             console.log(`  🚀 [EXIT] ${symbol} | ${reason} @ ${exitPx.toFixed(4)} | PnL: ${(realizedPct * 100).toFixed(2)}%`);
-            sendTelegram(`🔴 [SCALPER] VENDA ${symbol}\nMotivo: ${reason}\nPnL: ${(realizedPct * 100).toFixed(2)}%\nTotal ${symbol}: ${(s.cumPnlPct * 100).toFixed(2)}%`);
+            const usdBrl = 5.7;
+            const pnlBrl = (pnlUsdt * usdBrl).toFixed(2);
+            const resultado = pnlUsdt >= 0 ? '✅ LUCRO' : '❌ PREJUÍZO';
+            const duracao = s.pos.openedAt ? Math.round((now - s.pos.openedAt) / 60000) : '?';
+            const exitLabel = reason === 'tp' || reason === 'binance_oco_filled' && exitPx >= s.pos.tpPrice * 0.999 ? 'Take Profit ✅' : reason === 'sl' ? 'Stop Loss 🛑' : reason === 'timeout' ? 'Timeout ⏰' : reason;
+            sendTelegram(
+              `${resultado} — ${symbol} [SCALPER]\n\n📋 Resumo do Trade\n` +
+              `Entrada: $${s.pos.entryPrice.toFixed(6)}\n` +
+              `Saída:   $${exitPx.toFixed(6)}\n` +
+              `Motivo:  ${exitLabel}\n\n` +
+              `💰 PnL: ${pnlUsdt >= 0 ? '+' : ''}${pnlUsdt.toFixed(4)} USD\n` +
+              `💵 Em BRL: R$ ${pnlUsdt >= 0 ? '+' : ''}${pnlBrl}\n` +
+              `📊 Variação: ${(realizedPct * 100) >= 0 ? '+' : ''}${(realizedPct * 100).toFixed(2)}%\n` +
+              `⏱ Duração: ${duracao} minutos\n` +
+              `📊 Sessão ${symbol}: ${(s.cumPnlPct * 100) >= 0 ? '+' : ''}${(s.cumPnlPct * 100).toFixed(2)}%`
+            );
             
             s.pos = null;
             // Cooldown maior após loss para evitar revenge trade no mesmo movimento
@@ -450,7 +465,7 @@ async function main() {
                 await saveGlobalLog(sessionStart, symbol, s.log);
                 
                 console.log(`  🟢 [ENTRY] ${symbol} COMPRADO @ ${entryPrice.toFixed(4)}`);
-                sendTelegram(`🟢 [SCALPER] COMPRA ${symbol}\nPreço: $${entryPrice.toFixed(4)}\nSinal: ${sig.reason}`);
+                // Sem notificação de abertura — apenas resumo ao fechar
               }
             }
           }

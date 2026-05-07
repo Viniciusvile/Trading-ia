@@ -102,6 +102,38 @@ async function getSymbolSignal(symbol, rules) {
 }
 
 const PLAN_PRESETS = {
+  btc: {
+    symbol: 'BTCUSDT',
+    tv_symbol: 'BINANCE:BTCUSDT',
+    strategy_mode: 'turbo-reversion',
+    rsi_period: 14,
+    rsi_limit: 42,
+    bb_length: 20,
+    bb_mult: 2.0,
+    vol_mult: 1.2,
+    tp_pct: 0.006,       // 0.6% TP — BTC tem movimentos pequenos no 5m
+    sl_pct: 0.003,       // 0.3% SL — apertado, BTC é mais previsível
+    qty_decimals: 5,
+    quote_decimals: 2,
+    breakeven_pct: 0.003,
+    max_hold_ms: 1800000  // 30 min max
+  },
+  eth: {
+    symbol: 'ETHUSDT',
+    tv_symbol: 'BINANCE:ETHUSDT',
+    strategy_mode: 'micro-dip',
+    ema_period: 20,
+    rsi_period: 3,
+    min_dip_pct: 0.001,
+    min_rsi: 20,
+    max_rsi: 65,
+    tp_pct: 0.008,       // 0.8% TP — ETH mais volátil que BTC
+    sl_pct: 0.004,       // 0.4% SL
+    qty_decimals: 4,
+    quote_decimals: 2,
+    breakeven_pct: 0.004,
+    max_hold_ms: 2400000  // 40 min max
+  },
   xrp: {
     symbol: 'XRPUSDT',
     tv_symbol: 'BINANCE:XRPUSDT',
@@ -110,7 +142,13 @@ const PLAN_PRESETS = {
     rsi_limit: 45,
     bb_length: 20,
     bb_mult: 2.0,
-    vol_mult: 1.1
+    vol_mult: 1.1,
+    tp_pct: 0.012,       // 1.2% TP — XRP faz movimentos maiores
+    sl_pct: 0.006,       // 0.6% SL
+    qty_decimals: 0,
+    quote_decimals: 2,
+    breakeven_pct: 0.006,
+    max_hold_ms: 3600000  // 60 min max
   },
   sol: {
     symbol: 'SOLUSDT',
@@ -118,7 +156,15 @@ const PLAN_PRESETS = {
     strategy_mode: 'micro-dip',
     ema_period: 20,
     rsi_period: 3,
-    min_dip_pct: 0.001
+    min_dip_pct: 0.001,
+    min_rsi: 20,
+    max_rsi: 65,
+    tp_pct: 0.010,       // 1.0% TP — SOL tem boa amplitude
+    sl_pct: 0.005,       // 0.5% SL
+    qty_decimals: 2,
+    quote_decimals: 2,
+    breakeven_pct: 0.005,
+    max_hold_ms: 3600000  // 60 min max
   }
 };
 
