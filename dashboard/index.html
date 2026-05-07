@@ -2389,7 +2389,11 @@ async function loadPositions() {
       $('pos-closed-pagination').style.display = totalPages > 1 ? 'flex' : 'none';
       $('pos-closed-page-info').textContent = `Página ${_closedPosPage} de ${totalPages}`;
 
-      const sortedClosed = [...closed].sort((a, b) => new Date(b.closedAt || 0) - new Date(a.closedAt || 0));
+      const sortedClosed = [...closed].sort((a, b) => {
+        const da = a.closedAt ? new Date(a.closedAt).getTime() : 0;
+        const db = b.closedAt ? new Date(b.closedAt).getTime() : 0;
+        return db - da;
+      });
       const start = (_closedPosPage - 1) * _closedPosPerPage;
       const end = start + _closedPosPerPage;
       const pageData = sortedClosed.slice(start, end);
@@ -2727,8 +2731,10 @@ async function loadMicroScalper() {
       empty.style.display = 'block';
     } else {
       empty.style.display = 'none';
-      tbody.innerHTML = trades.map((t, idx) => {
-        const time = t.t ? new Date(t.t).toLocaleTimeString('pt-BR') : '—';
+      // Sorted in backend, but keeping robust here too
+      const sortedTrades = [...trades].sort((a, b) => new Date(b.t || 0) - new Date(a.t || 0));
+      tbody.innerHTML = sortedTrades.map((t, idx) => {
+        const time = t.t ? new Date(t.t).toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit', day: '2-digit', month: '2-digit' }) : '—';
         const pnl = (t.pnlPct != null) ? (t.pnlPct*100).toFixed(2)+'%' : '';
         const pnlColor = (t.pnlPct||0) > 0 ? '#10b981' : (t.pnlPct||0) < 0 ? '#ef4444' : 'var(--muted)';
         const evColor = t.event === 'entry' ? '#3b82f6' : '#94a3b8';
