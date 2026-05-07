@@ -64,7 +64,7 @@
   },
   "risk_rules": [
     "Risco máximo de 1% do portfólio por trade",
-    "Tamanho máximo de trade limitado por MAX_TRADE_SIZE_USD no .env ($20)",
+    "Tamanho máximo de trade limitado por MAX_TRADE_SIZE_USD no .env ($200 - aprox R$ 1.000)",
     "Máximo de MAX_TRADES_PER_DAY trades por dia (5)",
     "Não operar se a distância entre EMA(8) e preço for > 3% — mercado esticado demais",
     "Não operar contra tendência: LONG apenas com EMA8 > EMA80; SHORT apenas com EMA8 < EMA80",
