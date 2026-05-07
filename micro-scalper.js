@@ -268,44 +268,59 @@ async function main() {
           let reason = exitStatus.reason;
 
           // --- DETECÇÃO DE SAÍDA MANUAL OU OCO EXTERNA ---
-          // Só verifica saldo livre se não houver OCO ativa (pois a OCO trava o saldo e zera o free)
-          if (!s.pos.ocoId && now % 10000 < 2000) { 
-            const bals = await client.getBalances([symbol.replace("USDT","")]);
-            const currentQty = bals[symbol.replace("USDT","").toLowerCase()] || 0;
-            // Se o saldo atual for muito menor que o esperado na posição (menos de 10%)
+          // Se não houver OCO, verifica se o saldo sumiu (manual)
+          if (!s.pos.ocoId && now % 5000 < 1000) { 
+            const asset = symbol.replace("USDT","");
+            const bals = await client.getBalances([asset]);
+            const currentQty = bals[asset.toLowerCase()] || 0;
             if (currentQty < s.pos.qty * 0.1) {
               shouldExit = true;
               reason = "external_exit_or_manual";
             }
           }
 
+          // Se houver OCO, verifica se foi preenchida ou cancelada
           if (s.pos.ocoId && !shouldExit) {
             try {
               const ocoRes = await client.getOCO(s.pos.ocoId);
-              if (ocoRes.ok && (ocoRes.data.listOrderStatus === 'ALL_DONE' || ocoRes.data.listStatusType === 'ALL_DONE')) {
+              if (ocoRes.ok) {
                 const data = ocoRes.data;
-                let filledOrder = (data.orderReports || []).find(o => o.status === 'FILLED');
-                
-                // Se não veio no report, busca cada ordem individualmente
-                if (!filledOrder && data.orders) {
-                  for (const ord of data.orders) {
-                    const oRes = await client.getOrder(symbol, ord.orderId);
-                    if (oRes.ok && oRes.data.status === 'FILLED') {
-                      filledOrder = oRes.data;
-                      break;
+                const isAllDone = (data.listOrderStatus === 'ALL_DONE' || data.listStatusType === 'ALL_DONE');
+                const isRejected = (data.listOrderStatus === 'REJECTED');
+
+                if (isAllDone) {
+                  let filledOrder = (data.orderReports || []).find(o => o.status === 'FILLED');
+                  if (!filledOrder && data.orders) {
+                    for (const ord of data.orders) {
+                      const oRes = await client.getOrder(symbol, ord.orderId);
+                      if (oRes.ok && oRes.data.status === 'FILLED') { filledOrder = oRes.data; break; }
                     }
                   }
+                  if (filledOrder) {
+                    const execQty = parseFloat(filledOrder.executedQty || 0);
+                    const quoteQty = parseFloat(filledOrder.cummulativeQuoteQty || 0);
+                    s.pos.exitPrice = execQty > 0 ? quoteQty / execQty : parseFloat(filledOrder.price || filledOrder.stopPrice);
+                  }
+                  shouldExit = true;
+                  reason = "binance_oco_filled";
+                } else if (isRejected) {
+                  // OCO cancelada — verifica se o saldo ainda existe
+                  const asset = symbol.replace("USDT","");
+                  const bals = await client.getBalances([asset]);
+                  if ((bals[asset.toLowerCase()] || 0) < s.pos.qty * 0.1) {
+                    shouldExit = true;
+                    reason = "external_exit_or_manual";
+                  }
                 }
-
-                if (filledOrder) {
-                  const execQty = parseFloat(filledOrder.executedQty || 0);
-                  const quoteQty = parseFloat(filledOrder.cummulativeQuoteQty || 0);
-                  s.pos.exitPrice = execQty > 0 ? quoteQty / execQty : parseFloat(filledOrder.price || filledOrder.stopPrice);
-                  s.pos.updateTime = filledOrder.updateTime;
+              } else {
+                // Erro ao buscar OCO (ex: ID inválido ou ordem removida da Binance)
+                // Se a OCO sumiu e o saldo é zero, então fechou por fora.
+                const asset = symbol.replace("USDT","");
+                const bals = await client.getBalances([asset]);
+                if ((bals[asset.toLowerCase()] || 0) < s.pos.qty * 0.1) {
+                  shouldExit = true;
+                  reason = "external_exit_or_manual";
                 }
-                
-                shouldExit = true;
-                reason = "binance_oco_filled";
               }
             } catch (e) {
               console.warn(`  ⚠ Erro ao verificar OCO ${symbol}: ${e.message}`);
