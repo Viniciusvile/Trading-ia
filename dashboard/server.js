@@ -1724,18 +1724,29 @@ app.get('/api/micro-scalper/log', async (req, res) => {
     const todayStr = new Date(new Date().getTime() - (3 * 60 * 60 * 1000)).toISOString().split('T')[0];
 
     for (const sess of all) {
-      // if (sess.trades && sess.trades[0]?.symbol === 'LEGACY') continue; // Comentado para permitir ver histórico legado
-      const entries = (sess.trades || []).filter(t => t.event === 'entry');
-      for (const tr of (sess.trades || [])) {
+      const trades = sess.trades || [];
+      const exits = trades.filter(t => t.event === 'exit');
+      
+      for (const tr of trades) {
         if (!tr.t) continue;
         const trKey = `${tr.t}_${tr.event}`;
         if (processedTs.has(trKey)) continue;
         processedTs.add(trKey);
-        flat.push({ session: sess.sessionStart, ...tr });
+
+        let isOpen = false;
+        if (tr.event === 'entry') {
+          // Se não houver nenhum exit posterior nesta sessão, marcamos como aberta
+          const hasExit = exits.some(ex => new Date(ex.t) > new Date(tr.t));
+          if (!hasExit) isOpen = true;
+        }
+
+        flat.push({ session: sess.sessionStart, isOpen, ...tr });
+        
         if (tr.t.includes(todayStr) && tr.event === 'exit') {
           todayTrades++;
           if (tr.pnlPct != null) {
             todayPnl += tr.pnlPct;
+            const entries = trades.filter(t => t.event === 'entry');
             const entry = entries.filter(e => e.t < tr.t).pop();
             const entryVal = entry ? (entry.entryPrice * entry.qty) : 10;
             todayProfit += tr.pnlUsdt !== undefined ? tr.pnlUsdt : (tr.pnlPct * entryVal);
