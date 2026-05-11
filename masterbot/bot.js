@@ -1085,6 +1085,7 @@ async function runSymbolCycle(symbol, timeframe, rules) {
   }
 
   const isFutures = plan?.mode === 'futures';
+  const leverage = isFutures ? (plan.leverage || 1) : 1;
   const candles = await fetchCandles(localConfig.symbol, localConfig.timeframe, 500, isFutures);
   const closes = candles.map((c) => c.close);
   const price = closes[closes.length - 1];
@@ -1241,6 +1242,8 @@ async function runSymbolCycle(symbol, timeframe, rules) {
     paperTrading: localConfig.paperTrading,
     strategy: usedStrategy,
     plan: plan?.name || null,
+    leverage: leverage,
+    conditions: [],
   };
 
   if (allPass) {
@@ -1260,11 +1263,9 @@ async function runSymbolCycle(symbol, timeframe, rules) {
 
         if (isFutures) {
           // --- EXECUÇÃO FUTUROS ---
-          const leverage = plan.leverage || 1;
           order = await placeBinanceFuturesOrder(symbol, orderSide, tradeSize, leverage, price);
           logEntry.orderPlaced = true;
           logEntry.orderId = order.orderId;
-          logEntry.leverage = leverage;
           execQtyNum = (tradeSize * leverage) / price;
           
           if (stopPrice && takeProfitPrice) {
