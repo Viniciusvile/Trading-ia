@@ -1086,6 +1086,8 @@ async function runSymbolCycle(symbol, timeframe, rules) {
 
   const isFutures = plan?.mode === 'futures';
   const leverage = isFutures ? (plan.leverage || 1) : 1;
+  
+  console.log(`[SCAN DEBUG] Symbol: ${symbol} | Plan: ${plan?.name || 'NONE'} | Mode: ${plan?.mode || 'spot'} | Leverage: ${leverage}x`);
   const candles = await fetchCandles(localConfig.symbol, localConfig.timeframe, 500, isFutures);
   const closes = candles.map((c) => c.close);
   const price = closes[closes.length - 1];
