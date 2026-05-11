@@ -1247,6 +1247,8 @@ async function runSymbolCycle(symbol, timeframe, rules) {
     tradeSize,
     orderPlaced: false,
     orderId: null,
+    leverage,
+    mode: isFutures ? 'futures' : 'spot',
     paperTrading: localConfig.paperTrading,
     strategy: usedStrategy,
     plan: plan?.name || null,
