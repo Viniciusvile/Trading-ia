@@ -127,7 +127,7 @@ async function sendWhatsApp(message) {
 
 // ─── Market Data (Binance public API — free, no auth) ───────────────────────
 
-export async function fetchCandles(symbol, interval, limit = 100) {
+export async function fetchCandles(symbol, interval, limit = 100, isFutures = false) {
   // Map our timeframe format to Binance interval format
   const intervalMap = {
     "1m": "1m",
@@ -142,7 +142,10 @@ export async function fetchCandles(symbol, interval, limit = 100) {
   };
   const binanceInterval = intervalMap[interval] || "1m";
 
-  const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${binanceInterval}&limit=${limit}`;
+  const baseUrl = isFutures ? "https://fapi.binance.com" : "https://api.binance.com";
+  const endpoint = isFutures ? "/fapi/v1/klines" : "/api/v3/klines";
+  
+  const url = `${baseUrl}${endpoint}?symbol=${symbol}&interval=${binanceInterval}&limit=${limit}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Binance API error: ${res.status}`);
   const data = await res.json();
@@ -603,6 +606,60 @@ async function placeBinanceOrder(symbol, side, sizeUSD, price) {
   throw lastError;
 }
 
+// ─── Binance Futures Execution ───────────────────────────────────────────────
+
+async function setFuturesLeverage(symbol, leverage) {
+  const timestamp = Date.now();
+  const queryString = `symbol=${symbol}&leverage=${leverage}&timestamp=${timestamp}`;
+  const signature = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(queryString).digest("hex");
+  const url = `https://fapi.binance.com/fapi/v1/leverage?${queryString}&signature=${signature}`;
+  try {
+    const res = await fetch(url, { method: "POST", headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey } });
+    const data = await res.json();
+    if (data.code && data.code < 0) console.log(`  ⚠ [${symbol}] Falha ao ajustar alavancagem: ${data.msg}`);
+    else console.log(`  ⚙️ [${symbol}] Alavancagem ajustada para ${leverage}x`);
+  } catch (e) {
+    console.log(`  ⚠ [${symbol}] Erro ao ajustar alavancagem: ${e.message}`);
+  }
+}
+
+async function placeBinanceFuturesOrder(symbol, side, sizeUSD, leverage, price) {
+  await setFuturesLeverage(symbol, leverage);
+  
+  // No futuros, precisamos da quantidade no ativo base (ex: 0.001 BTC)
+  // Cálculo: (USD * leverage) / preço_atual
+  const rawQty = (sizeUSD * leverage) / price;
+  const qty = await roundQty(symbol, rawQty);
+
+  const timestamp = Date.now();
+  const queryString = `symbol=${symbol}&side=${side.toUpperCase()}&type=MARKET&quantity=${qty}&timestamp=${timestamp}`;
+  const signature = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(queryString).digest("hex");
+  const url = `https://fapi.binance.com/fapi/v1/order?${queryString}&signature=${signature}`;
+
+  const res = await fetch(url, { method: "POST", headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey } });
+  const data = await res.json();
+  if (data.code && data.code < 0) throw new Error(`Futures order failed: [${data.code}] ${data.msg}`);
+  
+  return { orderId: String(data.orderId), executedQty: data.executedQty, avgPrice: data.avgPrice };
+}
+
+async function placeFuturesStopOrders(symbol, side, quantity, stopPrice, tpPrice) {
+  const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
+  const timestamp = Date.now();
+  
+  // 1. Stop Loss (MARKET)
+  const slQuery = `symbol=${symbol}&side=${closeSide}&type=STOP_MARKET&stopPrice=${await roundPrice(symbol, stopPrice)}&closePosition=true&timestamp=${timestamp}`;
+  const slSig = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(slQuery).digest("hex");
+  await fetch(`https://fapi.binance.com/fapi/v1/order?${slQuery}&signature=${slSig}`, { method: "POST", headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey } });
+
+  // 2. Take Profit (MARKET)
+  const tpQuery = `symbol=${symbol}&side=${closeSide}&type=TAKE_PROFIT_MARKET&stopPrice=${await roundPrice(symbol, tpPrice)}&closePosition=true&timestamp=${timestamp}`;
+  const tpSig = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(tpQuery).digest("hex");
+  await fetch(`https://fapi.binance.com/fapi/v1/order?${tpQuery}&signature=${tpSig}`, { method: "POST", headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey } });
+  
+  console.log(`  🛡️ [${symbol}] Stop Loss e Take Profit (Futures) ativados.`);
+}
+
 let _symbolPrecisionCache = {};
 
 async function getPrecision(symbol) {
@@ -1006,7 +1063,8 @@ async function runSymbolCycle(symbol, timeframe, rules) {
   // Update CONFIG for this specific symbol
   const localConfig = { ...CONFIG, symbol, timeframe };
 
-  const candles = await fetchCandles(localConfig.symbol, localConfig.timeframe, 500);
+  const isFutures = plan?.mode === 'futures';
+  const candles = await fetchCandles(localConfig.symbol, localConfig.timeframe, 500, isFutures);
   const closes = candles.map((c) => c.close);
   const price = closes[closes.length - 1];
 
@@ -1175,36 +1233,51 @@ async function runSymbolCycle(symbol, timeframe, rules) {
       // Sem notificação de abertura — apenas resumo no fechamento
     } else {
       try {
-        const order = await placeBinanceOrder(symbol, orderSide, tradeSize, price);
-        logEntry.orderPlaced = true;
-        logEntry.orderId = order.orderId;
-        console.log(`🚀 [${symbol}] LIVE ORDER EXECUTED on Binance: ${order.orderId}`);
-        const execQtyRaw = parseFloat(order.executedQty) || (tradeSize / price);
-        const execQtyNum = execQtyRaw * 0.999; // Deduz 0.1% para evitar erro de saldo na OCO (taxas)
-        const execQtyStr = String(execQtyNum);
-
-        // ── OCO: coloca Take Profit + Stop Loss na Binance automaticamente (com 3 retries) ──
+        let order;
+        let execQtyNum;
         let ocoOrderListId = null;
-        if (stopPrice && takeProfitPrice && execQtyNum > 0) {
-          const delays = [500, 2000, 5000];
-          for (let attempt = 0; attempt < delays.length; attempt++) {
-            try {
-              await sleep(delays[attempt]);
-              const ocoResult = await placeOCOOrder(symbol, execQtyStr, takeProfitPrice, stopPrice);
-              ocoOrderListId = ocoResult.orderListId;
-              logEntry.ocoOrderListId = ocoOrderListId;
-              console.log(`🎯 [${symbol}] OCO COLOCADA (tentativa ${attempt+1}): TP $${takeProfitPrice.toFixed(8)} | Stop $${stopPrice.toFixed(8)} | ListId: ${ocoOrderListId}`);
-              break;
-            } catch (ocoErr) {
-              const last = attempt === delays.length - 1;
-              console.log(`${last ? '❌' : '⚠'} [${symbol}] OCO tentativa ${attempt+1}/${delays.length} falhou: ${ocoErr.message}${last ? ' — POSIÇÃO SEM PROTEÇÃO AUTOMÁTICA' : ' — retry em ' + (delays[attempt+1]/1000) + 's'}`);
-              if (last) logEntry.ocoError = ocoErr.message;
+
+        if (isFutures) {
+          // --- EXECUÇÃO FUTUROS ---
+          const leverage = plan.leverage || 1;
+          order = await placeBinanceFuturesOrder(symbol, orderSide, tradeSize, leverage, price);
+          logEntry.orderPlaced = true;
+          logEntry.orderId = order.orderId;
+          execQtyNum = (tradeSize * leverage) / price;
+          
+          if (stopPrice && takeProfitPrice) {
+            await placeFuturesStopOrders(symbol, side, execQtyNum, stopPrice, takeProfitPrice);
+          }
+        } else {
+          // --- EXECUÇÃO SPOT ---
+          order = await placeBinanceOrder(symbol, orderSide, tradeSize, price);
+          logEntry.orderPlaced = true;
+          logEntry.orderId = order.orderId;
+          const execQtyRaw = parseFloat(order.executedQty) || (tradeSize / price);
+          execQtyNum = execQtyRaw * 0.999; // Deduz 0.1% para taxas
+          const execQtyStr = String(execQtyNum);
+
+          if (stopPrice && takeProfitPrice && execQtyNum > 0) {
+            const delays = [500, 2000, 5000];
+            for (let attempt = 0; attempt < delays.length; attempt++) {
+              try {
+                await sleep(delays[attempt]);
+                const ocoResult = await placeOCOOrder(symbol, execQtyStr, takeProfitPrice, stopPrice);
+                ocoOrderListId = ocoResult.orderListId;
+                logEntry.ocoOrderListId = ocoOrderListId;
+                console.log(`🎯 [${symbol}] OCO COLOCADA (tentativa ${attempt+1}): TP $${takeProfitPrice.toFixed(8)} | Stop $${stopPrice.toFixed(8)}`);
+                break;
+              } catch (ocoErr) {
+                const last = attempt === delays.length - 1;
+                console.log(`${last ? '❌' : '⚠'} [${symbol}] OCO tentativa ${attempt+1}/${delays.length} falhou: ${ocoErr.message}`);
+                if (last) logEntry.ocoError = ocoErr.message;
+              }
             }
           }
         }
 
+        console.log(`🚀 [${symbol}] LIVE ORDER EXECUTED on Binance: ${order.orderId}`);
         await db.addPosition(symbol, timeframe, price, execQtyNum, stopPrice, takeProfitPrice, order.orderId, ocoOrderListId, usedStrategy, results, activeIndicators, plan?.name);
-        // Sem notificação de abertura — apenas resumo no fechamento
       } catch (err) {
         console.log(`❌ [${symbol}] ORDER FAILED: ${err.message}`);
         logEntry.error = err.message;
