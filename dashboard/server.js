@@ -793,6 +793,28 @@ function getBotEnv() {
   return merged;
 }
 
+app.post('/api/bot/futures/config', (req, res) => {
+  try {
+    const { portfolioValue, maxTradeUsd, leverage, symbols } = req.body;
+    const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
+    if (!rules.group_plans) rules.group_plans = [];
+    
+    let plan = rules.group_plans.find(p => p.name === 'Alpha_Futures_Trend');
+    if (!plan) {
+      plan = { name: 'Alpha_Futures_Trend', mode: 'futures', strategy: 'warrior' };
+      rules.group_plans.push(plan);
+    }
+    
+    if (portfolioValue !== undefined) plan.portfolioValue = parseFloat(portfolioValue);
+    if (maxTradeUsd !== undefined) plan.maxTradeUsd = parseFloat(maxTradeUsd);
+    if (leverage !== undefined) plan.leverage = parseInt(leverage);
+    if (symbols !== undefined && Array.isArray(symbols)) plan.symbols = symbols;
+    
+    writeFileSync(BOT_RULES, JSON.stringify(rules, null, 2));
+    res.json({ success: true, plan });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
 app.get('/api/bot/config', (_req, res) => {
   try {
     if (!existsSync(BOT_DIR)) return res.status(404).json({ success: false, error: 'Pasta do bot não encontrada', dir: BOT_DIR });

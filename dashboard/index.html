@@ -958,7 +958,7 @@ button.sm{padding:5px 10px;font-size:11px;}
   <div class="grid g2">
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
-        <h2 style="margin-bottom:0">📊 Histórico de Operações (Futuros)</h2>
+        <h2 style="margin-bottom:0">📊 Histórico de Operações</h2>
         <button class="sm" onclick="loadBotLog()">↻</button>
       </div>
       <div style="max-height:300px; overflow-y:auto">
@@ -973,21 +973,39 @@ button.sm{padding:5px 10px;font-size:11px;}
       </div>
     </div>
 
-    <div class="card">
+    <!-- Novo: Seletor de Ativos (Watchlist) -->
+    <div class="card" style="display:flex; flex-direction:column">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
-        <h2 style="margin-bottom:0">🔍 Decisões Recentes</h2>
-        <button class="sm" onclick="loadBotLog()">↻</button>
+        <h2 style="margin-bottom:0">⭐ Ativos Selecionados</h2>
+        <span class="badge neutral" id="futures-watchlist-count">0</span>
       </div>
-      <div style="max-height:300px; overflow-y:auto">
-        <table style="font-size:11px">
-          <thead>
-            <tr><th>Horário</th><th>Símbolo</th><th>Preço</th><th>Status</th></tr>
-          </thead>
-          <tbody id="futures-log-tbody">
-            <tr><td colspan="4" class="muted" style="text-align:center; padding:14px">Monitorando...</td></tr>
-          </tbody>
-        </table>
+      <div id="futures-watchlist-chips" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:15px; min-height:40px">
+        <!-- Chips aqui -->
       </div>
+      <div style="display:flex; gap:8px; margin-top:auto">
+        <input type="text" id="futures-new-symbol" placeholder="Ex: DOGEUSDT" style="flex:1; font-size:12px; padding:8px; text-transform:uppercase">
+        <button class="btn btn-primary sm" onclick="addFuturesSymbol()" style="padding:0 15px">ADICIONAR</button>
+      </div>
+      <div style="font-size:10px; color:var(--muted); margin-top:10px">
+        💡 O bot monitora todos esses ativos simultaneamente em busca de sinais.
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
+      <h2 style="margin-bottom:0">🔍 Decisões Recentes</h2>
+      <button class="sm" onclick="loadBotLog()">↻</button>
+    </div>
+    <div style="max-height:300px; overflow-y:auto">
+      <table style="font-size:11px">
+        <thead>
+          <tr><th>Horário</th><th>Símbolo</th><th>Preço</th><th>Status</th></tr>
+        </thead>
+        <tbody id="futures-log-tbody">
+          <tr><td colspan="4" class="muted" style="text-align:center; padding:14px">Monitorando...</td></tr>
+        </tbody>
+      </table>
     </div>
   </div>
 </div>
@@ -2735,6 +2753,51 @@ async function closePosition(posId, symbol, markOnly = false) {
 let _lastMasterRun = null;
 
 // ── MICRO-SCALPER ────────────────────────────────────────────────
+let _futuresWatchlist = [];
+
+function renderFuturesWatchlist() {
+  const container = $('futures-watchlist-chips');
+  const count = $('futures-watchlist-count');
+  if (!container) return;
+  
+  container.innerHTML = '';
+  _futuresWatchlist.forEach(s => {
+    const chip = document.createElement('div');
+    chip.style = `display:flex; align-items:center; gap:6px; padding:4px 10px; border-radius:6px; background:var(--surface2); border:1px solid var(--border); font-size:11px; font-weight:700`;
+    chip.innerHTML = `<span>${s}</span><span onclick="removeFuturesSymbol('${s}')" style="cursor:pointer; color:var(--red); font-size:14px; line-height:1">&times;</span>`;
+    container.appendChild(chip);
+  });
+  if (count) count.textContent = _futuresWatchlist.length;
+}
+
+async function addFuturesSymbol() {
+  const input = $('futures-new-symbol');
+  const s = input.value.toUpperCase().trim();
+  if (!s || !/^[A-Z0-9]{3,20}$/.test(s)) return toast('Símbolo inválido', 'danger');
+  if (_futuresWatchlist.includes(s)) return toast('Já está na lista', 'warning');
+  
+  _futuresWatchlist.push(s);
+  input.value = '';
+  renderFuturesWatchlist();
+  saveFuturesWatchlist();
+}
+
+async function removeFuturesSymbol(s) {
+  _futuresWatchlist = _futuresWatchlist.filter(x => x !== s);
+  renderFuturesWatchlist();
+  saveFuturesWatchlist();
+}
+
+async function saveFuturesWatchlist() {
+  try {
+    await fetch(B+'/api/bot/futures/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbols: _futuresWatchlist })
+    });
+  } catch(e) {}
+}
+
 async function loadMicroScalper() {
   const tbody = $('micro-trades-tbody');
   const empty = $('micro-trades-empty');
@@ -3386,6 +3449,8 @@ async function loadBotLog(){
          $('futures-portfolio').value = plan.portfolioValue || r.portfolio;
          $('futures-maxtrade').value = plan.maxTradeUsd || r.maxTrade;
          $('futures-leverage').value = plan.leverage || 5;
+         _futuresWatchlist = plan.symbols || [];
+         renderFuturesWatchlist();
        }
     }
 
