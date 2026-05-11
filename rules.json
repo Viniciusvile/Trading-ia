@@ -90,17 +90,17 @@
       "breakeven_pct": 35.0,
       "sl": {
         "type": "atr",
-        "multiplier": 1.5
+        "multiplier": 2.0
       },
       "tp": {
         "type": "atr",
-        "multiplier": 2.5
+        "multiplier": 3.0
       },
       "filters": {
         "ema_triple": true,
-        "adx_min": 25,
+        "adx_min": 20,
         "rsi_min": 40,
-        "rsi_max": 70,
+        "rsi_max": 72,
         "macd_growing": true,
         "volume_mult": 2.0
       }
