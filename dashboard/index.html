@@ -286,6 +286,9 @@ button.sm{padding:5px 10px;font-size:11px;}
     <div class="nav-item" data-tab="bot" onclick="switchTab('bot')">
       <span class="nav-icon">🤖</span><span class="nav-label">Master Bot</span>
     </div>
+    <div class="nav-item" data-tab="futures" onclick="switchTab('futures')">
+      <span class="nav-icon">🚀</span><span class="nav-label">Binance Futuros</span>
+    </div>
     <div class="nav-item" data-tab="positions" onclick="switchTab('positions')">
       <span class="nav-icon">📂</span><span class="nav-label">Posições</span>
     </div>
@@ -890,6 +893,61 @@ button.sm{padding:5px 10px;font-size:11px;}
     <pre id="bot-stdout-wrap" style="display:none;background:var(--surface2);padding:10px;border-radius:5px;border:1px solid var(--border);font-size:11px;color:var(--muted);line-height:1.5;max-height:300px;overflow:auto;white-space:pre-wrap"><code id="bot-stdout">—</code></pre>
   </div>
 
+</div>
+
+<!-- ═══════════════ BINANCE FUTUROS ═══════════════ -->
+<div class="tab-panel" id="tab-futures">
+  <div class="grid g2">
+    <div class="card" style="border-left:4px solid var(--accent)">
+      <h2>🚀 Status do Mercado Futuros</h2>
+      <div style="display:flex; flex-direction:column; gap:12px; margin-top:10px">
+        <div style="display:flex; justify-content:space-between">
+          <span class="muted">Alavancagem Máxima</span>
+          <span style="font-weight:700">5x (Configurada no Plano)</span>
+        </div>
+        <div style="display:flex; justify-content:space-between">
+          <span class="muted">Plano Ativo</span>
+          <span style="color:var(--accent); font-weight:700">Alpha_Futures_Trend</span>
+        </div>
+        <div style="display:flex; justify-content:space-between">
+          <span class="muted">Modo de Margem</span>
+          <span style="font-weight:700">Cruzada (Padrão)</span>
+        </div>
+      </div>
+      <div style="margin-top:16px; padding:12px; background:var(--surface2); border-radius:var(--radius); font-size:11px; color:var(--muted)">
+        ℹ️ O bot de Futuros utiliza o motor <b>MasterBot</b> para identificar tendências fortes (ADX > 25) e abrir posições LONG/SHORT automaticamente com proteção de Stop Loss.
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Próximo Alvo de Futuros</h2>
+      <div style="text-align:center; padding:10px 0">
+        <div style="font-size:10px; color:var(--muted); text-transform:uppercase">Par Monitorado</div>
+        <div style="font-size:24px; font-weight:700">BTC / ETH / SOL</div>
+        <div style="margin-top:8px">
+          <span class="badge long">LONG</span>
+          <span class="badge short">SHORT</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
+      <h2 style="margin-bottom:0">Histórico de Decisões - Futuros</h2>
+      <button class="sm" onclick="loadBotLog()">↻ Atualizar</button>
+    </div>
+    <div style="max-height:400px; overflow-y:auto">
+      <table>
+        <thead>
+          <tr><th>Horário</th><th>Símbolo</th><th>Lado</th><th>Preço</th><th>Alavancagem</th><th>Status</th></tr>
+        </thead>
+        <tbody id="futures-log-tbody">
+          <tr><td colspan="6" class="muted" style="text-align:center; padding:20px">Monitorando mercado de futuros... As decisões aparecerão aqui conforme o MasterBot processar os sinais.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <!-- ═══════════════ MODAL DETALHE DE POSIÇÃO ═══════════════ -->
@@ -3237,6 +3295,25 @@ async function loadBotLog(){
     });
 
     $('bot-log-tbody-standard').innerHTML=rows||'<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:14px">Nenhuma execução ainda.</td></tr>';
+    
+    // Popular tabela de Futuros
+    const futuresTrades = _botLogTrades.filter(t => t.plan === 'Alpha_Futures_Trend');
+    let fRows = '';
+    futuresTrades.slice().reverse().forEach(t => {
+      const fails=(t.conditions||[]).filter(c=>!c.pass).length;
+      const total=(t.conditions||[]).length;
+      let statusHtml = t.allPass ? '<span class="up">✓ OK</span>' : '<span class="down">✗ Bloqueado</span>';
+      fRows += `<tr>
+        <td style="font-size:11px;color:var(--muted)">${new Date(t.timestamp).toLocaleString('pt-BR')}</td>
+        <td><b>${t.symbol||'—'}</b></td>
+        <td style="color:var(--muted)">${t.side||'—'}</td>
+        <td style="font-family:monospace">$${Number(t.price||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}</td>
+        <td>5x</td>
+        <td>${statusHtml}</td>
+      </tr>`;
+    });
+    const fTbody = $('futures-log-tbody');
+    if (fTbody) fTbody.innerHTML = fRows || '<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">Aguardando sinais de Futuros...</td></tr>';
   }catch(e){}
 }
 
