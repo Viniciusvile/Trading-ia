@@ -927,6 +927,32 @@ button.sm{padding:5px 10px;font-size:11px;}
       </div>
     </div>
 
+    <!-- Novo: Ação Manual (Teste) -->
+    <div class="card" style="display:flex; flex-direction:column; gap:10px">
+      <div style="display:flex; justify-content:space-between; align-items:center">
+        <h2 style="margin-bottom:0">⚡ Execução Manual (Teste)</h2>
+        <span class="badge neutral">MODO TESTE</span>
+      </div>
+      <div style="font-size:11px; color:var(--muted); margin-bottom:5px">
+        Force uma entrada imediata para testar ordens e conexão.
+      </div>
+      <div class="grid g2" style="gap:10px">
+        <button class="btn up sm" id="btn-force-long" onclick="forceFuturesTrade('LONG')" style="height:45px; font-weight:800; background:rgba(63,185,80,0.15); border:1px solid var(--green)">
+          <i class="fas fa-arrow-up mr-2"></i> COMPRAR (LONG)
+        </button>
+        <button class="btn down sm" id="btn-force-short" onclick="forceFuturesTrade('SHORT')" style="height:45px; font-weight:800; background:rgba(248,81,73,0.15); border:1px solid var(--red)">
+          <i class="fas fa-arrow-down mr-2"></i> VENDER (SHORT)
+        </button>
+      </div>
+      <div style="margin-top:10px">
+        <select id="force-symbol-select" style="width:100%; padding:8px; font-size:12px">
+          <option value="BTCUSDT">BTCUSDT (Principal)</option>
+          <option value="ETHUSDT">ETHUSDT</option>
+          <option value="SOLUSDT">SOLUSDT</option>
+        </select>
+      </div>
+    </div>
+
     <!-- Novo: Configuração de Trade -->
     <div class="card" style="border-left:4px solid var(--green)">
       <h2>⚙️ Configuração de Risco (Futuros)</h2>
@@ -3474,6 +3500,37 @@ async function loadBotLog(){
       if (hTbody) hTbody.innerHTML = hRows || '<tr><td colspan="5" class="muted" style="text-align:center;padding:14px">Nenhuma operação fechada.</td></tr>';
     } catch(e) {}
   }catch(e){}
+}
+
+async function forceFuturesTrade(side) {
+  const symbol = $('force-symbol-select').value;
+  const btn = side === 'LONG' ? $('btn-force-long') : $('btn-force-short');
+  const oldText = btn.textContent;
+  
+  if (!confirm(`Deseja realmente forçar uma entrada de ${side} em ${symbol}?`)) return;
+  
+  btn.disabled = true;
+  btn.textContent = '⏳ Executando...';
+  
+  try {
+    const r = await fetch(B+'/api/bot/force-trade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol, side, timeframe: '1h' }) // Usa 1h como padrão para teste
+    }).then(r=>r.json());
+    
+    if (r.success) {
+      toast(`Ordem de ${side} enviada com sucesso para ${symbol}!`, 'success');
+      loadBotLog();
+    } else {
+      toast(`Erro na execução: ${r.error || 'Verifique os logs'}`, 'danger');
+    }
+  } catch (e) {
+    toast(`Erro de rede: ${e.message}`, 'danger');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
 }
 
 async function saveFuturesConfig() {
