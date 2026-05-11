@@ -73,6 +73,39 @@
   "notes": "Estratégia swing — desenhada para 4H e timeframes maiores. NÃO aplicar em scalping (1m/5m). O padrão 123 exige 3 candles fechados consecutivos antes da confirmação; em 4H isso significa esperar ~12h entre padrões. Fonte original: Pine Script em tradingview-mcp-jackson/dashboard/server.js (STORMER_SOURCE).",
   "group_plans": [
     {
+      "name": "Alpha_Futures_Trend",
+      "description": "🚀 Binance Futuros · LONG/SHORT · Alavancagem 5x · Tendência Forte",
+      "symbols": [
+        "BTCUSDT",
+        "ETHUSDT",
+        "SOLUSDT"
+      ],
+      "timeframes": [
+        "1H",
+        "4H"
+      ],
+      "strategy": "warrior",
+      "mode": "futures",
+      "leverage": 5,
+      "breakeven_pct": 35.0,
+      "sl": {
+        "type": "atr",
+        "multiplier": 1.5
+      },
+      "tp": {
+        "type": "atr",
+        "multiplier": 2.5
+      },
+      "filters": {
+        "ema_triple": true,
+        "adx_min": 25,
+        "rsi_min": 40,
+        "rsi_max": 70,
+        "macd_growing": true,
+        "volume_mult": 2.0
+      }
+    },
+    {
       "name": "Alpha_Apex_BTC",
       "description": "Bitcoin Alpha · 4H · Trend Master",
       "symbols": [
@@ -195,39 +228,6 @@
         "macd_growing": true,
         "supertrend_period": 10,
         "supertrend_mult": 3.0
-      }
-    },
-    {
-      "name": "Alpha_Futures_Trend",
-      "description": "🚀 Binance Futuros · LONG/SHORT · Alavancagem 5x · Tendência Forte",
-      "symbols": [
-        "BTCUSDT",
-        "ETHUSDT",
-        "SOLUSDT"
-      ],
-      "timeframes": [
-        "1H",
-        "4H"
-      ],
-      "strategy": "warrior",
-      "mode": "futures",
-      "leverage": 5,
-      "breakeven_pct": 35.0,
-      "sl": {
-        "type": "atr",
-        "multiplier": 1.5
-      },
-      "tp": {
-        "type": "atr",
-        "multiplier": 2.5
-      },
-      "filters": {
-        "ema_triple": true,
-        "adx_min": 25,
-        "rsi_min": 40,
-        "rsi_max": 70,
-        "macd_growing": true,
-        "volume_mult": 2.0
       }
     }
   ],
