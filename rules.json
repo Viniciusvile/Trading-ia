@@ -212,6 +212,7 @@
       "strategy": "warrior",
       "mode": "futures",
       "leverage": 5,
+      "breakeven_pct": 35.0,
       "sl": {
         "type": "atr",
         "multiplier": 1.5
