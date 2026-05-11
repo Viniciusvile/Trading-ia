@@ -930,11 +930,12 @@ button.sm{padding:5px 10px;font-size:11px;}
     <!-- Novo: Ação Manual (Teste) -->
     <div class="card" style="display:flex; flex-direction:column; gap:10px">
       <div style="display:flex; justify-content:space-between; align-items:center">
-        <h2 style="margin-bottom:0">⚡ Execução Manual (Teste)</h2>
-        <span class="badge neutral">MODO TESTE</span>
+        <h2 style="margin-bottom:0">⚡ Execução Manual</h2>
+        <span class="badge neutral" id="force-trade-mode-badge">MODO TESTE</span>
       </div>
       <div style="font-size:11px; color:var(--muted); margin-bottom:5px">
-        Force uma entrada imediata para testar ordens e conexão.
+        Force uma entrada imediata para testar ordens e conexão. <br>
+        <b style="color:var(--red)">Atenção:</b> Se o modo acima for 🔴 LIVE, esta ordem será REAL.
       </div>
       <div class="grid g2" style="gap:10px">
         <button class="btn up sm" id="btn-force-long" onclick="forceFuturesTrade('LONG')" style="height:45px; font-weight:800; background:rgba(63,185,80,0.15); border:1px solid var(--green)">
@@ -944,12 +945,23 @@ button.sm{padding:5px 10px;font-size:11px;}
           <i class="fas fa-arrow-down mr-2"></i> VENDER (SHORT)
         </button>
       </div>
-      <div style="margin-top:10px">
-        <select id="force-symbol-select" style="width:100%; padding:8px; font-size:12px">
-          <option value="BTCUSDT">BTCUSDT (Principal)</option>
-          <option value="ETHUSDT">ETHUSDT</option>
-          <option value="SOLUSDT">SOLUSDT</option>
-        </select>
+      <div class="grid g2" style="gap:10px; margin-top:5px">
+        <div>
+          <label class="muted" style="font-size:10px; display:block; margin-bottom:4px">Ativo</label>
+          <select id="force-symbol-select" style="width:100%; padding:8px; font-size:12px">
+            <option value="BTCUSDT">BTCUSDT (Principal)</option>
+            <option value="ETHUSDT">ETHUSDT</option>
+            <option value="SOLUSDT">SOLUSDT</option>
+            <option value="XRPUSDT">XRPUSDT</option>
+            <option value="LTCUSDT">LTCUSDT</option>
+            <option value="AVAXUSDT">AVAXUSDT</option>
+            <option value="TRXUSDT">TRXUSDT</option>
+          </select>
+        </div>
+        <div>
+          <label class="muted" style="font-size:10px; display:block; margin-bottom:4px">Valor da Margem ($)</label>
+          <input type="number" id="force-trade-amount" value="10" step="1" style="width:100%; padding:8px; font-size:12px">
+        </div>
       </div>
     </div>
 
@@ -1837,9 +1849,12 @@ async function loadBotConfig(){
     const stratKey = (stratSel && stratSel.value) ? stratSel.value : (r.strategyKey||'stormer');
     const stratDisplay = STRAT_NAMES[stratKey] || r.strategy || '—';
     $('bot-mode-badge-standard').className='badge '+(r.paperTrading?'neutral':'short');
-    $('bot-mode-badge-standard').textContent=r.paperTrading?'📋 PAPER':'🔴 LIVE';
-    const liveWarn=$('bot-live-warning');
-    if(liveWarn) liveWarn.style.display=(!r.paperTrading && !r.hasRealKeys)?'block':'none';
+    // Atualizar badge de modo na execução manual
+    const forceBadge = $('force-trade-mode-badge');
+    if (forceBadge) {
+      forceBadge.textContent = r.paperTrading ? 'MODO TESTE' : 'MODO LIVE 🔴';
+      forceBadge.className = r.paperTrading ? 'badge neutral' : 'badge danger';
+    }
 
     // Verificar saldo disponível
     if (!r.paperTrading && r.hasRealKeys) {
@@ -1847,10 +1862,14 @@ async function loadBotConfig(){
       fetch(B+'/api/bot/balance').then(res=>res.json()).then(b=>{
         const balWarn=$('bot-balance-warning');
         if (!balWarn) return;
-        balWarn.style.display = (b.success && b.usdt < minTrade) ? 'block' : 'none';
+        
+        const isFutures = r.activePlan?.toLowerCase().includes('futures') || r.symbol?.endsWith('USDT'); // heurística simples
+        const balance = isFutures ? (b.futures || 0) : (b.spot || 0);
+        
+        balWarn.style.display = (b.success && balance < minTrade) ? 'block' : 'none';
         if (b.success) {
           balWarn.querySelector('span').textContent =
-            `Saldo Spot: $${b.usdt?.toFixed(2)} USDT — mínimo necessário: $${minTrade}. Aguardando posições fecharem.`;
+            `Saldo ${isFutures ? 'Futuros' : 'Spot'}: $${balance.toFixed(2)} USDT — mínimo sugerido: $${minTrade}.`;
         }
       }).catch(()=>{});
     } else {
@@ -3513,10 +3532,11 @@ async function loadBotLog(){
 
 async function forceFuturesTrade(side) {
   const symbol = $('force-symbol-select').value;
+  const amount = parseFloat($('force-trade-amount').value || 10);
   const btn = side === 'LONG' ? $('btn-force-long') : $('btn-force-short');
   const oldText = btn.textContent;
   
-  if (!confirm(`Deseja realmente forçar uma entrada de ${side} em ${symbol}?`)) return;
+  if (!confirm(`Deseja realmente forçar uma entrada de ${side} em ${symbol} com $${amount} de margem?`)) return;
   
   btn.disabled = true;
   btn.textContent = '⏳ Executando...';
@@ -3525,7 +3545,7 @@ async function forceFuturesTrade(side) {
     const r = await fetch(B+'/api/bot/force-trade', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ symbol, side, timeframe: '1h' }) // Usa 1h como padrão para teste
+      body: JSON.stringify({ symbol, side, timeframe: '1h', amount }) 
     }).then(r=>r.json());
     
     if (r.success) {
@@ -3533,6 +3553,7 @@ async function forceFuturesTrade(side) {
       loadBotLog();
     } else {
       toast(`Erro na execução: ${r.error || 'Verifique os logs'}`, 'danger');
+      if (r.stderr) console.error('Bot Stderr:', r.stderr);
     }
   } catch (e) {
     toast(`Erro de rede: ${e.message}`, 'danger');

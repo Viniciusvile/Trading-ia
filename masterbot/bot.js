@@ -500,21 +500,33 @@ function checkTradeLimits(log) {
   return true;
 }
 
-async function getAvailableUSDT() {
+async function getAvailableUSDT(isFutures = false) {
   try {
-    const timeRes = await fetch("https://api.binance.com/api/v3/time");
+    const baseUrl = isFutures ? "https://fapi.binance.com" : "https://api.binance.com";
+    const endpoint = isFutures ? "/fapi/v2/account" : "/api/v3/account";
+    
+    const timeRes = await fetch(`${baseUrl}${isFutures ? '/fapi/v1/time' : '/api/v3/time'}`);
     const timestamp = (await timeRes.json()).serverTime;
     const queryString = `timestamp=${timestamp}`;
     const signature = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(queryString).digest("hex");
-    const res = await fetch(`${CONFIG.binance.baseUrl}/api/v3/account?${queryString}&signature=${signature}`, {
+    
+    const res = await fetch(`${baseUrl}${endpoint}?${queryString}&signature=${signature}`, {
       headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey }
     });
     const data = await res.json();
+    
     if (data.code && data.code < 0) throw new Error(`[${data.code}] ${data.msg}`);
-    const usdt = data.balances?.find(b => b.asset === "USDT");
-    return usdt ? parseFloat(usdt.free) : 0;
+    
+    if (isFutures) {
+      // No futuros (V2), o saldo está em assets
+      const usdt = data.assets?.find(a => a.asset === "USDT");
+      return usdt ? parseFloat(usdt.availableBalance) : 0;
+    } else {
+      const usdt = data.balances?.find(b => b.asset === "USDT");
+      return usdt ? parseFloat(usdt.free) : 0;
+    }
   } catch (e) {
-    console.log(`⚠ Não foi possível verificar saldo: ${e.message}`);
+    console.log(`⚠ Não foi possível verificar saldo (${isFutures ? 'FUTUROS' : 'SPOT'}): ${e.message}`);
     return null; // null = inconclusivo, não bloqueia
   }
 }
@@ -522,25 +534,29 @@ async function getAvailableUSDT() {
 async function checkBinancePermissions() {
   console.log("\n── Binance API Diagnostic ───────────────────────────────");
   try {
-    const timeRes = await fetch("https://api.binance.com/api/v3/time");
-    const time = await timeRes.json();
-    const timestamp = time.serverTime;
-    const queryString = `timestamp=${timestamp}`;
-    const signature = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(queryString).digest("hex");
-    
-    const res = await fetch(`${CONFIG.binance.baseUrl}/api/v3/account?${queryString}&signature=${signature}`, {
+    // 1. Check SPOT
+    const tsS = (await (await fetch("https://api.binance.com/api/v3/time")).json()).serverTime;
+    const qsS = `timestamp=${tsS}`;
+    const sigS = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(qsS).digest("hex");
+    const resS = await fetch(`https://api.binance.com/api/v3/account?${qsS}&signature=${sigS}`, {
       headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey }
     });
-    const data = await res.json();
+    const dataS = await resS.json();
     
-    if (data.canTrade) {
-      console.log("✅ API Key: Conectada e com permissão de Trading!");
-    } else if (data.code === -2015) {
-      console.log("❌ Erro [-2015]: Chave Inválida ou sem permissão de IP/Trading.");
-    } else {
-      console.log("⚠ API Key conectada, mas verifique 'Spot Trading' na Binance.");
-      if (data.msg) console.log(`   Motivo: ${data.msg}`);
-    }
+    if (dataS.canTrade) console.log("✅ SPOT Trading: ATIVADO");
+    else console.log("❌ SPOT Trading: DESATIVADO");
+
+    // 2. Check FUTURES
+    const tsF = (await (await fetch("https://fapi.binance.com/fapi/v1/time")).json()).serverTime;
+    const qsF = `timestamp=${tsF}`;
+    const sigF = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(qsF).digest("hex");
+    const resF = await fetch(`https://fapi.binance.com/fapi/v2/account?${qsF}&signature=${sigF}`, {
+      headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey }
+    });
+    const dataF = await resF.json();
+    
+    if (dataF.canTrade) console.log("✅ FUTURES Trading: ATIVADO");
+    else console.log("❌ FUTURES Trading: DESATIVADO (Habilite 'Futures' na sua API Key)");
   } catch (e) {
     console.log("❌ Erro no diagnóstico Binance:", e.message);
   }
@@ -1370,16 +1386,17 @@ async function run(isMaster = false) {
   await monitorPositions();
 
   // ── Verificar saldo disponível para novas entradas ───────────────
+  const isFutures = !!(currentRules.group_plans || []).find(p => p.mode === 'futures');
   const minRequired = Math.min(CONFIG.portfolioValue * CONFIG.tradePercent, CONFIG.maxTradeSizeUSD);
   let balanceOk = true;
   if (!CONFIG.paperTrading) {
-    const usdtBalance = await getAvailableUSDT();
-    if (usdtBalance !== null && usdtBalance < minRequired) {
-      console.log(`\n💰 Saldo insuficiente para novas entradas: $${usdtBalance.toFixed(2)} disponível (mínimo: $${minRequired.toFixed(2)})`);
+    const usdtBalance = await getAvailableUSDT(isFutures);
+    if (usdtBalance !== null && usdtBalance < (minRequired / (isFutures ? 1 : 1))) {
+      console.log(`\n💰 Saldo insuficiente para novas entradas: $${usdtBalance.toFixed(2)} disponível no ${isFutures ? 'FUTUROS' : 'SPOT'} (mínimo necessário para margem: ~$${minRequired.toFixed(2)})`);
       console.log(`   Bot aguardando posições fecharem para recuperar saldo...`);
       balanceOk = false;
     } else if (usdtBalance !== null) {
-      console.log(`\n💰 Saldo disponível: $${usdtBalance.toFixed(2)} USDT ✅`);
+      console.log(`\n💰 Saldo disponível (${isFutures ? 'FUTUROS' : 'SPOT'}): $${usdtBalance.toFixed(2)} USDT ✅`);
     }
   }
 

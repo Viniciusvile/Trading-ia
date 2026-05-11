@@ -1069,8 +1069,9 @@ app.post('/api/bot/run', (_req, res) => {
 // ── Force Trade (ignora safety check) ───────────────────────────
 app.post('/api/bot/force-trade', (req, res) => {
   if (!existsSync(BOT_DIR)) return res.status(404).json({ success: false, error: 'Pasta do bot não encontrada' });
-  const { symbol, timeframe, side } = req.body || {};
+  const { symbol, timeframe, side, amount } = req.body || {};
   if (!symbol || !timeframe || !side) return res.status(400).json({ success: false, error: 'symbol, timeframe e side são obrigatórios' });
+  
   const env = { 
     ...process.env, 
     FORCE_SYMBOL: symbol, 
@@ -1078,10 +1079,14 @@ app.post('/api/bot/force-trade', (req, res) => {
     FORCE_SIDE: side.toUpperCase(), 
     FORCE_ONCE: '1',
     PAPER_TRADING: 'false',
+    // Se o usuário passar um valor específico, usamos ele via env var que o bot.js pode ler
+    MAX_TRADE_SIZE_USD: amount ? String(amount) : (process.env.MAX_TRADE_SIZE_USD || '10'),
     BINANCE_API_KEY: (process.env.BINANCE_API_KEY || '').trim(),
     BINANCE_SECRET_KEY: (process.env.BINANCE_SECRET_KEY || '').trim(),
     DATABASE_URL: process.env.DATABASE_URL
   };
+  
+  console.log(`⚡ FORÇANDO TRADE: ${symbol} ${side} ${amount ? `($${amount})` : ''}`);
   const proc = spawn(process.execPath, ['bot.js'], { cwd: BOT_DIR, shell: false, env });
   let stdout = '', stderr = '';
   const timer = setTimeout(() => proc.kill('SIGKILL'), 60000);
@@ -1630,17 +1635,25 @@ app.get('/api/bot/balance', async (_req, res) => {
     const secretKey = env.BINANCE_SECRET_KEY || env.BITGET_SECRET_KEY;
     if (!apiKey || !secretKey) return res.json({ success: false, error: 'Sem credenciais' });
 
-    const timeRes = await fetch('https://api.binance.com/api/v3/time');
-    const timestamp = (await timeRes.json()).serverTime;
-    const queryString = `timestamp=${timestamp}`;
-    const signature = crypto.createHmac('sha256', secretKey).update(queryString).digest('hex');
-    const r = await fetch(`https://api.binance.com/api/v3/account?${queryString}&signature=${signature}`, {
-      headers: { 'X-MBX-APIKEY': apiKey }
+    // 1. Balance SPOT
+    const tsS = (await (await fetch('https://api.binance.com/api/v3/time')).json()).serverTime;
+    const qsS = `timestamp=${tsS}`;
+    const sigS = crypto.createHmac('sha256', secretKey).update(qsS).digest('hex');
+    const resS = await (await fetch(`https://api.binance.com/api/v3/account?${qsS}&signature=${sigS}`, { headers: { 'X-MBX-APIKEY': apiKey } })).json();
+    const spotUsdt = resS.balances?.find(b => b.asset === 'USDT');
+
+    // 2. Balance FUTURES
+    const tsF = (await (await fetch('https://fapi.binance.com/fapi/v1/time')).json()).serverTime;
+    const qsF = `timestamp=${tsF}`;
+    const sigF = crypto.createHmac('sha256', secretKey).update(qsF).digest('hex');
+    const resF = await (await fetch(`https://fapi.binance.com/fapi/v2/account?${qsF}&signature=${sigF}`, { headers: { 'X-MBX-APIKEY': apiKey } })).json();
+    const futuresUsdt = resF.assets?.find(a => a.asset === 'USDT');
+
+    res.json({ 
+      success: true, 
+      spot: spotUsdt ? parseFloat(spotUsdt.free) : 0,
+      futures: futuresUsdt ? parseFloat(futuresUsdt.availableBalance) : 0
     });
-    const data = await r.json();
-    if (data.code && data.code < 0) return res.json({ success: false, error: data.msg });
-    const usdt = data.balances?.find(b => b.asset === 'USDT');
-    res.json({ success: true, usdt: usdt ? parseFloat(usdt.free) : 0 });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
