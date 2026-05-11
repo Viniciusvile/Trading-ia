@@ -1062,6 +1062,10 @@ async function runSymbolCycle(symbol, timeframe, rules) {
 
   // Update CONFIG for this specific symbol
   const localConfig = { ...CONFIG, symbol, timeframe };
+  if (plan) {
+    if (plan.portfolioValue) localConfig.portfolioValue = plan.portfolioValue;
+    if (plan.maxTradeUsd) localConfig.maxTradeSizeUSD = plan.maxTradeUsd;
+  }
 
   const isFutures = plan?.mode === 'futures';
   const candles = await fetchCandles(localConfig.symbol, localConfig.timeframe, 500, isFutures);
