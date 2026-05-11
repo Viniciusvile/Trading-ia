@@ -1716,12 +1716,16 @@ app.get('/api/micro-scalper/log', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
     const all = await db.loadMicroSessions(200);
-    if (!all.length) return res.json({ success: true, sessions: 0, trades: [], daily: { trades: 0, pnl: 0 } });
+    if (!all.length) return res.json({ success: true, sessions: 0, trades: [], daily: { trades: 0, pnl: 0 }, weekly: {} });
 
     const flat = [];
     let todayTrades = 0, todayPnl = 0, todayProfit = 0;
+    const weeklyStats = {}; // { 'YYYY-MM-DD': pnlPct }
     const processedTs = new Set();
-    const todayStr = new Date(new Date().getTime() - (3 * 60 * 60 * 1000)).toISOString().split('T')[0];
+    
+    // Usamos UTC-3 para alinhar com o horário do usuário
+    const nowLocal = new Date(new Date().getTime() - (3 * 60 * 60 * 1000));
+    const todayStr = nowLocal.toISOString().split('T')[0];
 
     for (const sess of all) {
       const trades = sess.trades || [];
@@ -1742,9 +1746,15 @@ app.get('/api/micro-scalper/log', async (req, res) => {
 
         flat.push({ session: sess.sessionStart, isOpen, ...tr });
         
-        if (tr.t.includes(todayStr) && tr.event === 'exit') {
-          todayTrades++;
-          if (tr.pnlPct != null) {
+        if (tr.event === 'exit' && tr.pnlPct != null) {
+          // Converter timestamp da trade para data local (UTC-3)
+          const trLocalDate = new Date(new Date(tr.t).getTime() - (3 * 60 * 60 * 1000)).toISOString().split('T')[0];
+          
+          // Acumular no semanal (usamos todas as sessões carregadas)
+          weeklyStats[trLocalDate] = (weeklyStats[trLocalDate] || 0) + tr.pnlPct;
+
+          if (trLocalDate === todayStr) {
+            todayTrades++;
             todayPnl += tr.pnlPct;
             const entries = trades.filter(t => t.event === 'entry');
             const entry = entries.filter(e => e.t < tr.t).pop();
@@ -1761,7 +1771,8 @@ app.get('/api/micro-scalper/log', async (req, res) => {
       success: true,
       sessions: all.length,
       trades: flat.slice(-limit).reverse(),
-      daily: { trades: todayTrades, pnl: todayPnl, profit: todayProfit }
+      daily: { trades: todayTrades, pnl: todayPnl, profit: todayProfit },
+      weekly: weeklyStats
     });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
