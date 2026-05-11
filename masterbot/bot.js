@@ -1075,7 +1075,10 @@ async function runSymbolCycle(symbol, timeframe, rules) {
     return null; // sem plano em Modo Auto → não opera
   }
   if (plan && plan.timeframes && !plan.timeframes.some(t => t.toLowerCase() === timeframe.toLowerCase())) {
-    return null; // silencioso — apenas pula TFs fora do plano
+    if (process.env.FORCE_ONCE === '1') {
+      console.log(`⚠️  [${symbol}] Timeframe ${timeframe} não permitido no plano ${plan.name}. Timeframes válidos: ${plan.timeframes.join(', ')}`);
+    }
+    return null; 
   }
 
   console.log(`\n🔍 Scanning: ${symbol} (${timeframe})${plan ? ` [${plan.name}]` : ''}`);
