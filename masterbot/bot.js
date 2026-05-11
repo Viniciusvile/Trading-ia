@@ -223,13 +223,7 @@ function calcVWAP(candles, nowMs = Date.now()) {
 
 function getPlanForSymbol(symbol, rules) {
   const plans = rules.group_plans || [];
-  const found = plans.find(p => p.symbols.includes(symbol)) || null;
-  if (found) {
-    console.log(`  [PLAN MATCH] Symbol: ${symbol} -> Plan: ${found.name} | Mode: ${found.mode} | Leverage: ${found.leverage}x`);
-  } else {
-    console.log(`  [PLAN MATCH] Symbol: ${symbol} -> NO PLAN FOUND`);
-  }
-  return found;
+  return plans.find(p => p.symbols.includes(symbol)) || null;
 }
 
 const _missingPlanWarned = new Set();
@@ -1092,8 +1086,6 @@ async function runSymbolCycle(symbol, timeframe, rules) {
 
   const isFutures = plan?.mode === 'futures';
   const leverage = isFutures ? (plan.leverage || 1) : 1;
-  
-  console.log(`[SCAN DEBUG] Symbol: ${symbol} | Plan: ${plan?.name || 'NONE'} | Mode: ${plan?.mode || 'spot'} | Leverage: ${leverage}x`);
   const candles = await fetchCandles(localConfig.symbol, localConfig.timeframe, 500, isFutures);
   const closes = candles.map((c) => c.close);
   const price = closes[closes.length - 1];
