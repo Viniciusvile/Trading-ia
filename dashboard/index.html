@@ -3421,18 +3421,21 @@ async function loadBotLog(){
     const r=await fetch(B+'/api/bot/log').then(r=>r.json());
     _botLogTrades = (r.trades||[]);
 
-    // Agrupar por ciclo (gap > 5 min = novo ciclo) e deduplicar símbolo por ciclo
-    const CYCLE_GAP_MS = 5 * 60 * 1000;
+    // 1. Filtrar logs por categoria (Spot vs Futuros)
+    const futuresLogs = _botLogTrades.filter(t => t.mode === 'futures' || t.plan === 'Alpha_Futures_Trend');
+    const spotLogs = _botLogTrades.filter(t => !futuresLogs.includes(t));
+
+    // 2. Popular Tabela Standard (Spot)
     const cycles = [];
+    const CYCLE_GAP_MS = 5 * 60 * 1000;
     let cur = null;
-    for (const t of _botLogTrades) {
+    for (const t of spotLogs) {
       const ts = new Date(t.timestamp).getTime();
       if (!cur || ts - cur.lastTs > CYCLE_GAP_MS) {
         cur = { ts, lastTs: ts, trades: [] };
         cycles.push(cur);
       }
       cur.lastTs = ts;
-      // deduplicar: mantém só o mais recente por símbolo dentro do ciclo
       const existing = cur.trades.findIndex(x => x.symbol === t.symbol && x.timeframe === t.timeframe);
       if (existing >= 0) cur.trades[existing] = t;
       else cur.trades.push(t);
@@ -3464,13 +3467,11 @@ async function loadBotLog(){
         </tr>`;
       });
     });
-
-    $('bot-log-tbody-standard').innerHTML=rows||'<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:14px">Nenhuma execução ainda.</td></tr>';
+    $('bot-log-tbody-standard').innerHTML=rows||'<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:14px">Nenhuma execução Spot ainda.</td></tr>';
     
-    // Popular tabela de Futuros
-    const futuresTrades = _botLogTrades.filter(t => t.plan === 'Alpha_Futures_Trend');
+    // 3. Popular Tabela de Futuros
     let fRows = '';
-    futuresTrades.slice().reverse().forEach(t => {
+    futuresLogs.slice().reverse().forEach(t => {
       const fails=(t.conditions||[]).filter(c=>!c.pass).length;
       const total=(t.conditions||[]).length;
       let statusHtml = t.allPass ? '<span class="up">✓ OK</span>' : '<span class="down">✗ Bloqueado</span>';
@@ -3479,7 +3480,6 @@ async function loadBotLog(){
       } else if (t.orderPlaced) {
         statusHtml = `<span class="up" style="color:#f59e0b;font-weight:700">⚡ EXECUTADA</span>`;
       }
-
       const idx = _botLogTrades.indexOf(t);
       fRows += `<tr style="cursor:pointer;transition:background .15s"
         onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''"
