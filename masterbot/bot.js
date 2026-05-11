@@ -1233,16 +1233,21 @@ async function runSymbolCycle(symbol, timeframe, rules) {
     side,
     stopPrice: stopPrice || null,
     trailingRate: trailingRate ? parseFloat(trailingRate) : null,
-    conditions: originalResults, // sempre usa resultados reais (sem override de force)
+    conditions: originalResults,
     allPass,
     forced: forcedOverride,
     tradeSize,
     orderPlaced: false,
     orderId: null,
     paperTrading: localConfig.paperTrading,
+    strategy: usedStrategy,
     plan: plan?.name || null,
     leverage: leverage
   };
+
+  if (isFutures) {
+    console.log(`  DEBUG: [${symbol}] Mode: Futures | Plan: ${plan?.name} | Leverage: ${leverage}x`);
+  }
 
   if (allPass) {
     const orderSide = side === "LONG" ? "buy" : "sell";
