@@ -345,10 +345,10 @@ export function applyPlanFilters(candles, plan) {
   const closes = candles.map(c => c.close);
 
   if (f.ema_triple) {
-    const e9 = calcEMA(closes, 9), e20 = calcEMA(closes, 20);
-    const e50 = calcEMA(closes, 50), e200 = calcEMA(closes, 200);
-    const pass = e9 > e20 && e20 > e50 && e50 > e200;
-    extra.push({ label: `EMA9>EMA20>EMA50>EMA200 (tendência tripla)`, pass, required: 'crescente', actual: pass ? 'ok' : 'falhou' });
+    const e9 = calcEMA(closes, 9), e21 = calcEMA(closes, 21);
+    const e55 = calcEMA(closes, 55), e200 = calcEMA(closes, 200);
+    const pass = e9 > e21 && e21 > e55 && e55 > e200;
+    extra.push({ label: `EMA9>EMA21>EMA55>EMA200 (tendência tripla)`, pass, required: 'crescente', actual: pass ? 'ok' : 'falhou' });
   }
   if (f.adx_min != null || f.di_direction) {
     const di = calcADX(candles, 14);
@@ -1129,10 +1129,16 @@ async function runSymbolCycle(symbol, timeframe, rules) {
 
   // Trailing Stop
   let trailingRate = null;
-  if (allPass && rules.exit_rules_config?.trailing_stop?.enabled) {
-    if (atr) {
-      const multiplier = rules.exit_rules_config.trailing_stop.multiplier || 2.0;
-      trailingRate = ((atr * multiplier) / price).toFixed(4);
+  if (allPass) {
+    if (plan && plan.tp?.type === 'trail') {
+      // Trail do plano (ex: PlanTrend)
+      trailingRate = (plan.tp.offset / 100).toFixed(4);
+    } else if (rules.exit_rules_config?.trailing_stop?.enabled) {
+      // Trail global via ATR
+      if (atr) {
+        const multiplier = rules.exit_rules_config.trailing_stop.multiplier || 2.0;
+        trailingRate = ((atr * multiplier) / price).toFixed(4);
+      }
     }
   }
 
