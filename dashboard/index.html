@@ -899,8 +899,14 @@ button.sm{padding:5px 10px;font-size:11px;}
 <div class="tab-panel" id="tab-futures">
   <div class="grid g2">
     <div class="card" style="border-left:4px solid var(--accent)">
-      <h2>🚀 Status do Mercado Futuros</h2>
-      <div style="display:flex; flex-direction:column; gap:12px; margin-top:10px">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px">
+        <h2 style="margin-bottom:0">🚀 Status do Mercado Futuros</h2>
+        <div style="display:flex; align-items:center; gap:6px">
+          <div id="futures-status-dot" class="dot red"></div>
+          <span id="futures-status-text" style="font-size:10px; font-weight:700; text-transform:uppercase; color:var(--muted)">Desligado</span>
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:12px">
         <div style="display:flex; justify-content:space-between">
           <span class="muted">Plano Ativo</span>
           <span style="color:var(--accent); font-weight:700">Alpha_Futures_Trend</span>
@@ -910,6 +916,12 @@ button.sm{padding:5px 10px;font-size:11px;}
           <span style="font-weight:700">Cruzada (Padrão)</span>
         </div>
       </div>
+      
+      <div id="futures-bot-controls" style="margin-top:15px; display:flex; gap:10px">
+        <button id="btn-futures-start" class="primary sm" onclick="startMasterBot()" style="flex:1; font-weight:700">▶ LIGAR BOT</button>
+        <button id="btn-futures-stop" class="danger sm" onclick="stopMasterBot()" style="flex:1; font-weight:700; display:none">🛑 DESLIGAR BOT</button>
+      </div>
+
       <div style="margin-top:16px; padding:12px; background:var(--surface2); border-radius:var(--radius); font-size:11px; color:var(--muted)">
         ℹ️ O bot de Futuros utiliza o motor <b>MasterBot</b> para identificar tendências fortes (ADX > 25) e abrir posições LONG/SHORT automaticamente com proteção de Stop Loss.
       </div>
@@ -3112,6 +3124,12 @@ async function loadMasterStatus() {
     const btnStart = $('btn-master-start');
     const btnStop = $('btn-master-stop');
 
+    // Sync Futures tab
+    const fDot = $('futures-status-dot');
+    const fTxt = $('futures-status-text');
+    const fBtnStart = $('btn-futures-start');
+    const fBtnStop = $('btn-futures-stop');
+
     if (d.status === 'running') {
       dot.className = 'dot green';
       txt.textContent = 'Em Execução';
@@ -3119,6 +3137,11 @@ async function loadMasterStatus() {
       btnStart.style.display = 'none';
       btnStop.style.display = 'block';
       btnStop.disabled = false;
+      
+      if(fDot){ fDot.className = 'dot green'; fTxt.textContent = 'ATIVO'; fTxt.style.color = 'var(--green)'; }
+      if(fBtnStart) fBtnStart.style.display = 'none';
+      if(fBtnStop) fBtnStop.style.display = 'block';
+
       _startCountdown(d.nextRun);
       const countEl = $('master-countdown');
       if (countEl) countEl.textContent = '⚡ Rodando agora...';
@@ -3129,6 +3152,11 @@ async function loadMasterStatus() {
       btnStart.style.display = 'none';
       btnStop.style.display = 'block';
       btnStop.disabled = false;
+
+      if(fDot){ fDot.className = 'dot yellow'; fTxt.textContent = 'EM ESPERA'; fTxt.style.color = '#f59e0b'; }
+      if(fBtnStart) fBtnStart.style.display = 'none';
+      if(fBtnStop) fBtnStop.style.display = 'block';
+
       _startCountdown(d.nextRun);
     } else {
       dot.className = 'dot red';
@@ -3139,6 +3167,11 @@ async function loadMasterStatus() {
       btnStart.disabled = false;
       btnStart.textContent = '🚀 Iniciar Ciclo';
       btnStart.innerHTML = '<i class="fas fa-play mr-2"></i> Iniciar Ciclo';
+
+      if(fDot){ fDot.className = 'dot red'; fTxt.textContent = 'DESLIGADO'; fTxt.style.color = 'var(--red)'; }
+      if(fBtnStart) fBtnStart.style.display = 'block';
+      if(fBtnStop) fBtnStop.style.display = 'none';
+
       _stopCountdown();
     }
 
