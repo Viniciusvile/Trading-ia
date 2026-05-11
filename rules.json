@@ -81,7 +81,6 @@
         "SOLUSDT"
       ],
       "timeframes": [
-        "1H",
         "4H"
       ],
       "strategy": "warrior",
