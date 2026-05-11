@@ -1240,10 +1240,8 @@ async function runSymbolCycle(symbol, timeframe, rules) {
     orderPlaced: false,
     orderId: null,
     paperTrading: localConfig.paperTrading,
-    strategy: usedStrategy,
     plan: plan?.name || null,
-    leverage: leverage,
-    conditions: [],
+    leverage: leverage
   };
 
   if (allPass) {
