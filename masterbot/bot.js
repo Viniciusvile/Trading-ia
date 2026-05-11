@@ -223,7 +223,13 @@ function calcVWAP(candles, nowMs = Date.now()) {
 
 function getPlanForSymbol(symbol, rules) {
   const plans = rules.group_plans || [];
-  return plans.find(p => p.symbols.includes(symbol)) || null;
+  const found = plans.find(p => p.symbols.includes(symbol)) || null;
+  if (found) {
+    console.log(`  [PLAN MATCH] Symbol: ${symbol} -> Plan: ${found.name} | Mode: ${found.mode} | Leverage: ${found.leverage}x`);
+  } else {
+    console.log(`  [PLAN MATCH] Symbol: ${symbol} -> NO PLAN FOUND`);
+  }
+  return found;
 }
 
 const _missingPlanWarned = new Set();
