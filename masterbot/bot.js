@@ -624,23 +624,34 @@ async function setFuturesLeverage(symbol, leverage) {
 }
 
 async function placeBinanceFuturesOrder(symbol, side, sizeUSD, leverage, price) {
-  await setFuturesLeverage(symbol, leverage);
-  
-  // No futuros, precisamos da quantidade no ativo base (ex: 0.001 BTC)
-  // Cálculo: (USD * leverage) / preço_atual
-  const rawQty = (sizeUSD * leverage) / price;
-  const qty = await roundQty(symbol, rawQty);
+  try {
+    await setFuturesLeverage(symbol, leverage);
+    
+    // No futuros, precisamos da quantidade no ativo base (ex: 0.001 BTC)
+    // Cálculo: (USD * leverage) / preço_atual
+    const rawQty = (sizeUSD * leverage) / price;
+    const qty = await roundQty(symbol, rawQty, true); // true = isFutures
 
-  const timestamp = Date.now();
-  const queryString = `symbol=${symbol}&side=${side.toUpperCase()}&type=MARKET&quantity=${qty}&timestamp=${timestamp}`;
-  const signature = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(queryString).digest("hex");
-  const url = `https://fapi.binance.com/fapi/v1/order?${queryString}&signature=${signature}`;
+    const timestamp = Date.now();
+    const queryString = `symbol=${symbol}&side=${side.toUpperCase()}&type=MARKET&quantity=${qty}&timestamp=${timestamp}`;
+    const signature = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(queryString).digest("hex");
+    const url = `https://fapi.binance.com/fapi/v1/order?${queryString}&signature=${signature}`;
 
-  const res = await fetch(url, { method: "POST", headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey } });
-  const data = await res.json();
-  if (data.code && data.code < 0) throw new Error(`Futures order failed: [${data.code}] ${data.msg}`);
-  
-  return { orderId: String(data.orderId), executedQty: data.executedQty, avgPrice: data.avgPrice };
+    console.log(`  🚀 [${symbol}] Enviando ordem de Futuros: ${side} ${qty} @ market (Aprox. $${price})`);
+    const res = await fetch(url, { method: "POST", headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey } });
+    const data = await res.json();
+    
+    if (data.code && data.code < 0) {
+      console.error(`  ❌ [${symbol}] Erro na ordem de Futuros: [${data.code}] ${data.msg}`);
+      throw new Error(`Futures order failed: [${data.code}] ${data.msg}`);
+    }
+    
+    console.log(`  ✅ [${symbol}] Ordem de Futuros EXECUTADA: #${data.orderId}`);
+    return { orderId: String(data.orderId), executedQty: data.executedQty, avgPrice: data.avgPrice };
+  } catch (e) {
+    console.error(`  ❌ [${symbol}] Falha crítica em placeBinanceFuturesOrder: ${e.message}`);
+    throw e;
+  }
 }
 
 async function placeFuturesStopOrders(symbol, side, quantity, stopPrice, tpPrice) {
@@ -648,12 +659,12 @@ async function placeFuturesStopOrders(symbol, side, quantity, stopPrice, tpPrice
   const timestamp = Date.now();
   
   // 1. Stop Loss (MARKET)
-  const slQuery = `symbol=${symbol}&side=${closeSide}&type=STOP_MARKET&stopPrice=${await roundPrice(symbol, stopPrice)}&closePosition=true&timestamp=${timestamp}`;
+  const slQuery = `symbol=${symbol}&side=${closeSide}&type=STOP_MARKET&stopPrice=${await roundPrice(symbol, stopPrice, true)}&closePosition=true&timestamp=${timestamp}`;
   const slSig = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(slQuery).digest("hex");
   await fetch(`https://fapi.binance.com/fapi/v1/order?${slQuery}&signature=${slSig}`, { method: "POST", headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey } });
 
   // 2. Take Profit (MARKET)
-  const tpQuery = `symbol=${symbol}&side=${closeSide}&type=TAKE_PROFIT_MARKET&stopPrice=${await roundPrice(symbol, tpPrice)}&closePosition=true&timestamp=${timestamp}`;
+  const tpQuery = `symbol=${symbol}&side=${closeSide}&type=TAKE_PROFIT_MARKET&stopPrice=${await roundPrice(symbol, tpPrice, true)}&closePosition=true&timestamp=${timestamp}`;
   const tpSig = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(tpQuery).digest("hex");
   await fetch(`https://fapi.binance.com/fapi/v1/order?${tpQuery}&signature=${tpSig}`, { method: "POST", headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey } });
   
@@ -662,10 +673,13 @@ async function placeFuturesStopOrders(symbol, side, quantity, stopPrice, tpPrice
 
 let _symbolPrecisionCache = {};
 
-async function getPrecision(symbol) {
-  if (_symbolPrecisionCache[symbol]) return _symbolPrecisionCache[symbol];
+async function getPrecision(symbol, isFutures = false) {
+  const cacheKey = `${symbol}_${isFutures}`;
+  if (_symbolPrecisionCache[cacheKey]) return _symbolPrecisionCache[cacheKey];
   try {
-    const res = await fetch(`https://api.binance.com/api/v3/exchangeInfo?symbol=${symbol}`);
+    const baseUrl = isFutures ? 'https://fapi.binance.com' : 'https://api.binance.com';
+    const endpoint = isFutures ? '/fapi/v1/exchangeInfo' : '/api/v3/exchangeInfo';
+    const res = await fetch(`${baseUrl}${endpoint}?symbol=${symbol}`);
     const data = await res.json();
     const info = data.symbols?.[0];
     if (!info) return { price: 8, qty: 8 };
@@ -676,21 +690,24 @@ async function getPrecision(symbol) {
     const countDecimals = (n) => {
       if (Math.floor(n) === n) return 0;
       const s = n.toString();
-      if (s.includes('e-')) return parseInt(s.split('e-')[1]);
+      if (s.includes('e-')) {
+        const parts = s.split('e-');
+        return parseInt(parts[1]);
+      }
       return s.split(".")[1].length || 0;
     };
-    _symbolPrecisionCache[symbol] = { price: countDecimals(tick), qty: countDecimals(step) };
-    return _symbolPrecisionCache[symbol];
+    _symbolPrecisionCache[cacheKey] = { price: countDecimals(tick), qty: countDecimals(step) };
+    return _symbolPrecisionCache[cacheKey];
   } catch (e) { return { price: 8, qty: 8 }; }
 }
 
-async function roundPrice(symbol, price) {
-  const p = await getPrecision(symbol);
+async function roundPrice(symbol, price, isFutures = false) {
+  const p = await getPrecision(symbol, isFutures);
   return parseFloat(price.toFixed(p.price));
 }
 
-async function roundQty(symbol, qty) {
-  const p = await getPrecision(symbol);
+async function roundQty(symbol, qty, isFutures = false) {
+  const p = await getPrecision(symbol, isFutures);
   return parseFloat(qty.toFixed(p.qty));
 }
 
@@ -1247,6 +1264,7 @@ async function runSymbolCycle(symbol, timeframe, rules) {
           order = await placeBinanceFuturesOrder(symbol, orderSide, tradeSize, leverage, price);
           logEntry.orderPlaced = true;
           logEntry.orderId = order.orderId;
+          logEntry.leverage = leverage;
           execQtyNum = (tradeSize * leverage) / price;
           
           if (stopPrice && takeProfitPrice) {

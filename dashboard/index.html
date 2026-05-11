@@ -3455,12 +3455,18 @@ async function loadBotLog(){
       const fails=(t.conditions||[]).filter(c=>!c.pass).length;
       const total=(t.conditions||[]).length;
       let statusHtml = t.allPass ? '<span class="up">✓ OK</span>' : '<span class="down">✗ Bloqueado</span>';
+      if ((t.allPass || t.forced) && t.error && !t.orderPlaced) {
+        statusHtml = `<span class="down" title="${t.error}">⚠ Erro Exec.</span>`;
+      } else if (t.orderPlaced) {
+        statusHtml = `<span class="up" style="color:#f59e0b;font-weight:700">⚡ EXECUTADA</span>`;
+      }
+
       fRows += `<tr>
         <td style="font-size:11px;color:var(--muted)">${new Date(t.timestamp).toLocaleString('pt-BR')}</td>
         <td><b>${t.symbol||'—'}</b></td>
         <td style="color:var(--muted)">${t.side||'—'}</td>
         <td style="font-family:monospace">$${Number(t.price||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}</td>
-        <td>5x</td>
+        <td>${t.leverage || 1}x</td>
         <td>${statusHtml}</td>
       </tr>`;
     });

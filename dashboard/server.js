@@ -1077,8 +1077,10 @@ app.post('/api/bot/force-trade', (req, res) => {
     FORCE_TF: timeframe, 
     FORCE_SIDE: side.toUpperCase(), 
     FORCE_ONCE: '1',
+    PAPER_TRADING: 'false',
     BINANCE_API_KEY: (process.env.BINANCE_API_KEY || '').trim(),
-    BINANCE_SECRET_KEY: (process.env.BINANCE_SECRET_KEY || '').trim()
+    BINANCE_SECRET_KEY: (process.env.BINANCE_SECRET_KEY || '').trim(),
+    DATABASE_URL: process.env.DATABASE_URL
   };
   const proc = spawn(process.execPath, ['bot.js'], { cwd: BOT_DIR, shell: false, env });
   let stdout = '', stderr = '';
