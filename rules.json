@@ -7,7 +7,10 @@
     "PEPEUSDT",
     "RENDERUSDT",
     "BTCUSDT",
-    "SOLUSDT"
+    "SOLUSDT",
+    "LTCUSDT",
+    "AVAXUSDT",
+    "TRXUSDT"
   ],
   "timeframes": [
     "15m",
@@ -78,7 +81,11 @@
       "symbols": [
         "BTCUSDT",
         "ETHUSDT",
-        "SOLUSDT"
+        "SOLUSDT",
+        "XRPUSDT",
+        "LTCUSDT",
+        "AVAXUSDT",
+        "TRXUSDT"
       ],
       "timeframes": [
         "4H"
@@ -101,7 +108,7 @@
         "rsi_min": 40,
         "rsi_max": 72,
         "macd_growing": true,
-        "volume_mult": 2.0
+        "volume_mult": 1.3
       }
     },
     {
