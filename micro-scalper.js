@@ -32,8 +32,38 @@ if (existsSync(envPath)) {
   });
 }
 
-const mainConfig = JSON.parse(readFileSync(new URL("rules.json", import.meta.url), "utf8")).micro_scalper;
-if (!mainConfig) throw new Error("rules.json is missing 'micro_scalper' block");
+let rulesObj = {};
+try {
+  rulesObj = JSON.parse(readFileSync(new URL("rules.json", import.meta.url), "utf8"));
+} catch (e) {}
+
+let mainConfig = rulesObj.micro_scalper;
+if (!mainConfig || !mainConfig.plans) {
+  mainConfig = {
+    active_symbols: ["XRPUSDT", "SOLUSDT"],
+    max_trade_usdt: 10,
+    min_trade_usdt: 5,
+    max_session_ms: 86400000,
+    cooldown_ms: 5000,
+    cooldown_after_loss_ms: 10000,
+    max_trades: 50,
+    daily_profit_target_usdt: 0,
+    btc_drop_block_pct: 0.015,
+    plans: {
+      XRPUSDT: {
+        strategy_mode: "turbo-reversion",
+        bb_length: 20, bb_mult: 2.0, rsi_period: 3, rsi_limit: 30, vol_mult: 1.5,
+        tp_pct: 0.015, sl_pct: 0.005, qty_decimals: 1, quote_decimals: 4
+      },
+      SOLUSDT: {
+        strategy_mode: "micro-dip",
+        ema_period: 20, rsi_period: 3, min_dip_pct: 0.001, min_rsi: 20, max_rsi: 65,
+        tp_pct: 0.010, sl_pct: 0.005, qty_decimals: 2, quote_decimals: 2
+      }
+    }
+  };
+  console.warn("⚠️ 'micro_scalper' block ausente ou vazio em rules.json. Utilizando fallback padrão de alta resiliência.");
+}
 
 const client = createBinanceClient({
   apiKey: process.env.USE_BINANCE_KEY || process.env.BINANCE_API_KEY,
@@ -85,7 +115,12 @@ async function closeLong(symbol, qty, ocoId, config) {
 }
 
 async function main() {
-  await db.initDb();
+  try {
+    await db.initDb();
+  } catch (e) {
+    console.error("⚠️ PostgreSQL indisponível na inicialização do Micro-Scalper:", e.message);
+    console.warn("   O robô prosseguirá operando com alta resiliência em fallback local.");
+  }
   await db.writeMicroHeartbeat(process.pid).catch(() => {});
   const activeSymbols = mainConfig.active_symbols || [];
   console.log(`\n🤖 [MULTI-SCALPER] INICIADO — Símbolos: ${activeSymbols.join(", ")}`);
@@ -482,6 +517,8 @@ async function main() {
                 console.log(`  🟢 [ENTRY] ${symbol} COMPRADO @ ${entryPrice.toFixed(4)}`);
                 // Sem notificação de abertura — apenas resumo ao fechar
               }
+            } else {
+              console.log(`  ⚠️ [SALDO] ${symbol}: Sinal de compra (${sig.reason}) ignorado! Saldo livre na Binance (${bals.usdt.toFixed(2)} USDT) é menor que o mínimo exigido (${mainConfig.min_trade_usdt} USDT).`);
             }
           }
         }
