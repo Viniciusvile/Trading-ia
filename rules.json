@@ -115,7 +115,9 @@
     {
       "name": "Alpha_Apex_BTC",
       "description": "Bitcoin Alpha · 4H · Trend Master",
-      "symbols": [],
+      "symbols": [
+        "BTCUSDT"
+      ],
       "timeframes": [
         "4H"
       ],
@@ -206,7 +208,10 @@
     {
       "name": "Alpha_BlueChips",
       "description": "Altcoins Liderança · ETH · SOL · 4H",
-      "symbols": [],
+      "symbols": [
+        "ETHUSDT",
+        "SOLUSDT"
+      ],
       "timeframes": [
         "4H"
       ],

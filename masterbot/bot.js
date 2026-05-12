@@ -221,9 +221,13 @@ function calcVWAP(candles, nowMs = Date.now()) {
 
 // ─── Group Plans ─────────────────────────────────────────────────────────────
 
-function getPlanForSymbol(symbol, rules) {
+function getPlanForSymbol(symbol, rules, runMode = 'master') {
   const plans = rules.group_plans || [];
-  return plans.find(p => p.symbols.includes(symbol)) || null;
+  if (runMode === 'futures') {
+    return plans.find(p => p.mode === 'futures' && p.symbols.includes(symbol)) || null;
+  } else {
+    return plans.find(p => p.mode !== 'futures' && p.symbols.includes(symbol)) || null;
+  }
 }
 
 const _missingPlanWarned = new Set();
@@ -1062,10 +1066,10 @@ async function generateTaxSummary() {
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 
-async function runSymbolCycle(symbol, timeframe, rules) {
+async function runSymbolCycle(symbol, timeframe, rules, runMode = 'master') {
   // Plano aplicado quando: active_plan definido OU Modo Auto ativo
   const isAutoMode = rules?.strategy?.key === 'auto';
-  const plan = (rules?.active_plan || isAutoMode) ? getPlanForSymbol(symbol, rules) : null;
+  const plan = (rules?.active_plan || isAutoMode) ? getPlanForSymbol(symbol, rules, runMode) : null;
 
   if (isAutoMode && !plan && !_missingPlanWarned.has(symbol)) {
     console.log(`⚠️  [${symbol}] Modo Auto sem plano — símbolo será ignorado. Adicione-o a um group_plan ou remova da watchlist.`);
@@ -1444,11 +1448,11 @@ async function run(runMode = 'manual') {
       timeframes = (activePlan?.timeframes?.length) ? activePlan.timeframes : (refreshedRules.timeframes || ["15m"]);
       currentRules = refreshedRules;
       
-      // ISOLAR AMBIENTES: MasterBot roda apenas Spot; FuturesBot roda apenas Futuros
-      if (runMode === 'master') {
-        watchlistToUse = watchlistToUse.filter(s => !futuresSymbols.has(s));
-      } else if (runMode === 'futures') {
-        watchlistToUse = watchlistToUse.filter(s => futuresSymbols.has(s));
+      // ISOLAR AMBIENTES: MasterBot (Spot) executa todos os ativos checados na sua Watchlist;
+      // FuturesBot executa exclusivamente os ativos configurados no plano de Futuros.
+      if (runMode === 'futures') {
+        const fPlan = (refreshedRules.group_plans || []).find(p => p.mode === 'futures');
+        watchlistToUse = fPlan?.symbols?.length ? fPlan.symbols : watchlistToUse.filter(s => futuresSymbols.has(s));
       }
     } else {
       watchlistToUse = [CONFIG.symbol];
@@ -1460,16 +1464,16 @@ async function run(runMode = 'manual') {
        for (const symbol of targetSymbols) {
          let tfsForSymbol = timeframes;
          if (isAutoMode) {
-           const symPlan = getPlanForSymbol(symbol, currentRules);
+           const symPlan = getPlanForSymbol(symbol, currentRules, runMode);
            if (!symPlan) {
-             await runSymbolCycle(symbol, timeframes[0] || "1h", currentRules);
+             await runSymbolCycle(symbol, timeframes[0] || "1h", currentRules, runMode);
              continue;
            }
            tfsForSymbol = (symPlan.timeframes && symPlan.timeframes.length) ? symPlan.timeframes : timeframes;
          }
          for (const tf of tfsForSymbol) {
            try {
-             const result = await runSymbolCycle(symbol, tf, currentRules);
+             const result = await runSymbolCycle(symbol, tf, currentRules, runMode);
              if (result) {
                summary.push(result);
                await db.appendToLog(result);
@@ -1485,7 +1489,7 @@ async function run(runMode = 'manual') {
     } else {
        const symbol = symbolEntry;
        for (const tf of timeframes) {
-          const result = await runSymbolCycle(symbol, tf, currentRules);
+          const result = await runSymbolCycle(symbol, tf, currentRules, runMode);
           if (result) {
             summary.push(result);
             await db.appendToLog(result);
