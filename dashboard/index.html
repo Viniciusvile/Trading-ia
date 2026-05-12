@@ -2381,9 +2381,10 @@ async function loadPositions() {
     if (!data.success) return;
     const positions = data.positions || [];
 
-    // Fetch current prices for open positions
-    const open = positions.filter(p => p.status === 'open');
-    const closed = positions.filter(p => p.status === 'closed');
+    // Filtrar posições de Futuros para manter apenas as de Spot na área principal
+    const spotPositions = positions.filter(p => p.plan !== 'Alpha_Futures_Trend' && p.strategy !== 'futures');
+    const open = spotPositions.filter(p => p.status === 'open');
+    const closed = spotPositions.filter(p => p.status === 'closed');
 
     // Fetch live prices
     for (const pos of open) {
