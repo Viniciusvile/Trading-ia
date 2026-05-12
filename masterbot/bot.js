@@ -1370,40 +1370,27 @@ async function runSymbolCycle(symbol, timeframe, rules) {
   return logEntry;
 }
 
-async function run(isMaster = false) {
+async function run(runMode = 'manual') {
   checkOnboarding();
   await db.initDb();
-  if (isMaster) await writeMasterStatus("running", []);
+  
+  const isLoop = runMode === 'master' || runMode === 'futures';
+  if (isLoop) {
+    await writeLoopStatus("running", [], runMode === 'futures');
+  }
 
   if (!CONFIG.paperTrading) {
     await checkBinancePermissions();
   }
-  if (isMaster && typeof syncBrain === 'function') await syncBrain();
+  if (runMode === 'master' && typeof syncBrain === 'function') await syncBrain();
 
   console.log("\n" + "═".repeat(60));
-  console.log(`  🤖 ${isMaster ? "MASTERBOT" : "MANUAL"} CYCLE START: ${new Date().toLocaleString()}`);
+  console.log(`  🤖 ${runMode.toUpperCase()} CYCLE START: ${new Date().toLocaleString()}`);
   console.log(`  Trade Mode: ${CONFIG.paperTrading ? "📋 PAPER" : "🔴 LIVE"}`);
   console.log("═".repeat(60));
 
   // ── Monitorar posições abertas ANTES de escanear novos sinais ──
   await monitorPositions();
-
-  // ── Verificar saldo disponível para novas entradas ───────────────
-  const isFutures = !!(currentRules.group_plans || []).find(p => p.mode === 'futures');
-  const minRequired = Math.min(CONFIG.portfolioValue * CONFIG.tradePercent, CONFIG.maxTradeSizeUSD);
-  let balanceOk = true;
-  if (!CONFIG.paperTrading) {
-    const usdtBalance = await getAvailableUSDT(isFutures);
-    if (usdtBalance !== null && usdtBalance < (minRequired / (isFutures ? 1 : 1))) {
-      console.log(`\n💰 Saldo insuficiente para novas entradas: $${usdtBalance.toFixed(2)} disponível no ${isFutures ? 'FUTUROS' : 'SPOT'} (mínimo necessário para margem: ~$${minRequired.toFixed(2)})`);
-      console.log(`   Bot aguardando posições fecharem para recuperar saldo...`);
-      balanceOk = false;
-    } else if (usdtBalance !== null) {
-      console.log(`\n💰 Saldo disponível (${isFutures ? 'FUTUROS' : 'SPOT'}): $${usdtBalance.toFixed(2)} USDT ✅`);
-    }
-  }
-
-  const summary = [];
 
   // Read rules once at start to get the base structures
   let currentRules = JSON.parse(readFileSync(RULES_FILE, "utf8"));
@@ -1416,18 +1403,38 @@ async function run(isMaster = false) {
   }
   let timeframes = currentRules.timeframes || [CONFIG.timeframe];
 
-  // If master, keep re-reading watchlist before each group
-  const entries = isMaster ? ["DYNAMIC"] : (currentRules.watchlist || [CONFIG.symbol]);
+  // Identificar quais ativos pertencem ao mercado de Futuros
+  const futuresSymbols = new Set();
+  (currentRules.group_plans || []).forEach(p => {
+    if (p.mode === 'futures') (p.symbols || []).forEach(s => futuresSymbols.add(s));
+  });
+
+  // ── Verificar saldo disponível para novas entradas ───────────────
+  const isFuturesMode = runMode === 'futures';
+  const minRequired = Math.min(CONFIG.portfolioValue * CONFIG.tradePercent, CONFIG.maxTradeSizeUSD);
+  let balanceOk = true;
+  if (!CONFIG.paperTrading) {
+    const usdtBalance = await getAvailableUSDT(isFuturesMode);
+    if (usdtBalance !== null && usdtBalance < minRequired) {
+      console.log(`\n💰 Saldo insuficiente para novas entradas: $${usdtBalance.toFixed(2)} disponível no ${isFuturesMode ? 'FUTUROS' : 'SPOT'} (mínimo necessário para margem: ~$${minRequired.toFixed(2)})`);
+      console.log(`   Bot aguardando posições fecharem para recuperar saldo...`);
+      balanceOk = false;
+    } else if (usdtBalance !== null) {
+      console.log(`\n💰 Saldo disponível (${isFuturesMode ? 'FUTUROS' : 'SPOT'}): $${usdtBalance.toFixed(2)} USDT ✅`);
+    }
+  }
+
+  const summary = [];
+  const entries = isLoop ? ["DYNAMIC"] : (currentRules.watchlist || [CONFIG.symbol]);
   
   if (!balanceOk) {
-    if (isMaster) await writeMasterStatus("waiting", summary);
+    if (isLoop) await writeLoopStatus("waiting", summary, isFuturesMode);
     return;
   }
 
   for (const symbolEntry of entries) {
-    // If master, we re-load rules to respect UI changes INSTANTLY
     let watchlistToUse = [];
-    if (isMaster) {
+    if (isLoop) {
       const refreshedRules = JSON.parse(readFileSync(RULES_FILE, "utf8"));
       const activePlanName = refreshedRules.active_plan || null;
       const activePlan = activePlanName
@@ -1436,22 +1443,25 @@ async function run(isMaster = false) {
       watchlistToUse = (activePlan?.symbols?.length) ? activePlan.symbols : (refreshedRules.watchlist || []);
       timeframes = (activePlan?.timeframes?.length) ? activePlan.timeframes : (refreshedRules.timeframes || ["15m"]);
       currentRules = refreshedRules;
+      
+      // ISOLAR AMBIENTES: MasterBot roda apenas Spot; FuturesBot roda apenas Futuros
+      if (runMode === 'master') {
+        watchlistToUse = watchlistToUse.filter(s => !futuresSymbols.has(s));
+      } else if (runMode === 'futures') {
+        watchlistToUse = watchlistToUse.filter(s => futuresSymbols.has(s));
+      }
     } else {
       watchlistToUse = [CONFIG.symbol];
     }
 
-    // Since we are inside a loop that might have been dynamic, we handle the nesting
-    const targetSymbols = isMaster ? watchlistToUse : [symbolEntry];
-    if (isMaster && symbolEntry === "DYNAMIC") {
-       // Em Modo Auto, cada símbolo roda nos TFs DO PLANO dele.
-       // Em modo com plano fixo (active_plan) ou estratégia única, usa os TFs globais.
+    const targetSymbols = isLoop ? watchlistToUse : [symbolEntry];
+    if (isLoop && symbolEntry === "DYNAMIC") {
        const isAutoMode = currentRules?.strategy?.key === 'auto' && !currentRules?.active_plan;
        for (const symbol of targetSymbols) {
          let tfsForSymbol = timeframes;
          if (isAutoMode) {
            const symPlan = getPlanForSymbol(symbol, currentRules);
            if (!symPlan) {
-             // Aviso já é emitido em runSymbolCycle (uma vez por símbolo)
              await runSymbolCycle(symbol, timeframes[0] || "1h", currentRules);
              continue;
            }
@@ -1471,10 +1481,9 @@ async function run(isMaster = false) {
          console.log(`⏳ Aguardando 5s antes do próximo ativo...`);
          await sleep(5000);
        }
-       break; // Exit the "DYNAMIC" wrapper
+       break; 
     } else {
-       // Manual mode logic
-       const symbol = isMaster ? symbolEntry : symbolEntry;
+       const symbol = symbolEntry;
        for (const tf of timeframes) {
           const result = await runSymbolCycle(symbol, tf, currentRules);
           if (result) {
@@ -1485,12 +1494,10 @@ async function run(isMaster = false) {
     }
   }
 
-  if (isMaster) {
-    // ... logic for obsidian ...
-    await writeMasterStatus("waiting", summary);
-    
+  if (isLoop) {
+    await writeLoopStatus("waiting", summary, isFuturesMode);
     console.log("\n" + "═".repeat(60));
-    console.log(`  🏁 CYCLE COMPLETE. Status: WAITING for next interval.`);
+    console.log(`  🏁 ${runMode.toUpperCase()} CYCLE COMPLETE. Status: WAITING for next interval.`);
     console.log("═".repeat(60));
   } else {
     console.log("\n" + "═".repeat(60));
@@ -1502,29 +1509,33 @@ async function run(isMaster = false) {
 function parseIntervalMs(str) {
   const n = parseInt(str);
   if (str.endsWith('m')) return n * 60 * 1000;
-  return n * 60 * 60 * 1000; // h = horas
+  return n * 60 * 60 * 1000; 
 }
 
-function startScheduler() {
+function startScheduler(runMode = 'master') {
   const intervalStr = process.env.MASTERBOT_LOOP_INTERVAL || "4h";
   const ms = parseIntervalMs(intervalStr);
 
-  console.log(`\n⏰ MasterBot Scheduler Active: Runs every ${intervalStr} (${ms/1000}s)`);
+  console.log(`\n⏰ ${runMode.toUpperCase()} Scheduler Active: Runs every ${intervalStr} (${ms/1000}s)`);
 
-  run(true).catch(console.error);
-  setInterval(() => { run(true).catch(console.error); }, ms);
+  run(runMode).catch(console.error);
+  setInterval(() => { run(runMode).catch(console.error); }, ms);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (process.argv.includes("--tax-summary")) {
     generateTaxSummary();
+  } else if (process.argv.includes("--futures")) {
+    const pidFile = join(__dirname, "futures.pid");
+    writeFileSync(pidFile, process.pid.toString());
+    console.log(`📌 Futures PID saved to: ${pidFile}`);
+    startScheduler('futures');
   } else if (process.argv.includes("--master")) {
     const pidFile = join(__dirname, "master.pid");
     writeFileSync(pidFile, process.pid.toString());
     console.log(`📌 Master PID saved to: ${pidFile}`);
-    startScheduler();
+    startScheduler('master');
   } else if (process.env.FORCE_ONCE === '1') {
-    // Force trade: executa apenas o símbolo/TF forçado e sai
     const forceSym = process.env.FORCE_SYMBOL;
     const forceTf  = process.env.FORCE_TF;
     const forceRules = JSON.parse(readFileSync(RULES_FILE, "utf8"));
@@ -1534,15 +1545,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       process.exit(0);
     }).catch(err => { console.error("Force trade error:", err); process.exit(1); });
   } else {
-    run(false).catch((err) => {
+    run('manual').catch((err) => {
       console.error("Bot error:", err);
       process.exit(1);
     });
   }
 }
 
-
-async function writeMasterStatus(status = "running", results = []) {
+async function writeLoopStatus(status = "running", results = [], isFutures = false) {
   const now = Date.now();
   const rules = JSON.parse(readFileSync(RULES_FILE, "utf8"));
   const intervalStr = process.env.MASTERBOT_LOOP_INTERVAL || "4h";
@@ -1571,5 +1581,7 @@ async function writeMasterStatus(status = "running", results = []) {
       strategy: r.strategy || null,
     }))
   };
-  await db.writeMasterStatus(state);
+  
+  if (isFutures) await db.writeFuturesStatus(state);
+  else await db.writeMasterStatus(state);
 }

@@ -762,8 +762,10 @@ const BOT_DIR = join(ROOT, 'masterbot');
 const BOT_ENV = join(ROOT, '.env');
 const BOT_RULES = join(ROOT, 'rules.json');
 const BOT_MASTER_PID = join(BOT_DIR, 'master.pid');
+const BOT_FUTURES_PID = join(BOT_DIR, 'futures.pid');
 
 let masterProcess = null;
+let futuresProcess = null;
 
 function parseEnv(txt) {
   const out = {};
@@ -1242,6 +1244,102 @@ app.post('/api/bot/master/stop', async (req, res) => {
       state.nextRun = null;
       await db.writeMasterStatus(state);
     } catch (e) { console.error('Erro ao limpar status:', e); }
+
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ── FuturesBot Loop Management ───────────────────────────────────
+
+app.get('/api/bot/futures/status', async (req, res) => {
+  try {
+    let loopState = await db.loadFuturesStatus();
+    
+    let isAlive = !!(futuresProcess && !futuresProcess.killed);
+    
+    if (!isAlive && existsSync(BOT_FUTURES_PID)) {
+      try {
+        const pid = parseInt(readFileSync(BOT_FUTURES_PID, 'utf8'));
+        if (pid) {
+          try { process.kill(pid, 0); isAlive = true; } catch { isAlive = false; }
+        }
+      } catch (e) { isAlive = false; }
+    }
+
+    if (!isAlive && loopState.status !== 'stopped') {
+      loopState.status = 'stopped';
+    }
+
+    res.json({ success: true, ...loopState, isAlive });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/api/bot/futures/start', (req, res) => {
+  try {
+    if (existsSync(BOT_FUTURES_PID)) {
+      const oldPid = parseInt(readFileSync(BOT_FUTURES_PID, 'utf8'));
+      if (oldPid) {
+        try { process.kill(oldPid, 'SIGTERM'); } catch {}
+      }
+      unlinkSync(BOT_FUTURES_PID);
+    }
+    if (futuresProcess && !futuresProcess.killed) {
+      try { futuresProcess.kill('SIGTERM'); } catch {}
+      futuresProcess = null;
+    }
+
+    console.log(`🚀 Iniciando FuturesBot independente em modo LOOP (--futures)...`);
+    const logFile = join(BOT_DIR, 'futuresbot.log');
+    const out = openSync(logFile, 'a');
+    const err = openSync(logFile, 'a');
+
+    futuresProcess = spawn('node', ['bot.js', '--futures'], {
+      cwd: BOT_DIR,
+      detached: true,
+      stdio: ['ignore', out, err],
+      env: { ...process.env }
+    });
+
+    futuresProcess.on('error', (e) => console.error(`❌ FuturesBot spawn error: ${e.message}`));
+    futuresProcess.on('exit', (code, signal) => console.log(`⚠️ FuturesBot exited code=${code} signal=${signal}`));
+
+    if (futuresProcess.pid) {
+      writeFileSync(BOT_FUTURES_PID, futuresProcess.pid.toString());
+    }
+
+    futuresProcess.unref();
+
+    setTimeout(() => {
+      try { process.kill(futuresProcess.pid, 0); }
+      catch { console.error(`❌ FuturesBot morreu logo após start.`); }
+    }, 500);
+
+    res.json({ success: true, pid: futuresProcess.pid });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/api/bot/futures/stop', async (req, res) => {
+  try {
+    let pidToKill = futuresProcess?.pid;
+    
+    if (!pidToKill && existsSync(BOT_FUTURES_PID)) {
+      pidToKill = parseInt(readFileSync(BOT_FUTURES_PID, 'utf8'));
+    }
+
+    if (pidToKill) {
+      console.log(`🛑 Matando FuturesBot (PID: ${pidToKill})...`);
+      try { process.kill(pidToKill, 'SIGTERM'); } catch (e) { console.log('Processo já estava morto:', e.message); }
+    }
+
+    futuresProcess = null;
+    if (existsSync(BOT_FUTURES_PID)) unlinkSync(BOT_FUTURES_PID);
+
+    try {
+      const state = await db.loadFuturesStatus();
+      state.status = 'stopped';
+      state.nextRun = null;
+      await db.writeFuturesStatus(state);
+    } catch (e) { console.error('Erro ao limpar status de futuros:', e); }
 
     res.json({ success: true });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }

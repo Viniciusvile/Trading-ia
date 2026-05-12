@@ -267,6 +267,19 @@ export async function loadMasterStatus() {
   return res.rows[0]?.data ?? { status: 'stopped', watchlist: [], timeframes: [], lastResults: [] };
 }
 
+export async function writeFuturesStatus(state) {
+  await getPool().query(
+    `INSERT INTO master_status (id, data) VALUES (2, $1)
+     ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`,
+    [JSON.stringify(state)]
+  );
+}
+
+export async function loadFuturesStatus() {
+  const res = await getPool().query('SELECT data FROM master_status WHERE id = 2');
+  return res.rows[0]?.data ?? { status: 'stopped', watchlist: [], timeframes: [], lastResults: [] };
+}
+
 // ─── Micro-Scalper Sessions ───────────────────────────────────────────────────
 
 /** Salva (upsert) uma sessão do Micro-Scalper. */

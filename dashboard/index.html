@@ -918,8 +918,8 @@ button.sm{padding:5px 10px;font-size:11px;}
       </div>
       
       <div id="futures-bot-controls" style="margin-top:15px; display:flex; gap:10px">
-        <button id="btn-futures-start" class="primary sm" onclick="startMasterBot()" style="flex:1; font-weight:700">▶ LIGAR BOT</button>
-        <button id="btn-futures-stop" class="danger sm" onclick="stopMasterBot()" style="flex:1; font-weight:700; display:none">🛑 DESLIGAR BOT</button>
+        <button id="btn-futures-start" class="primary sm" onclick="startFuturesBot()" style="flex:1; font-weight:700">▶ LIGAR BOT</button>
+        <button id="btn-futures-stop" class="danger sm" onclick="stopFuturesBot()" style="flex:1; font-weight:700; display:none">🛑 DESLIGAR BOT</button>
       </div>
 
       <div style="margin-top:16px; padding:12px; background:var(--surface2); border-radius:var(--radius); font-size:11px; color:var(--muted)">
@@ -3216,13 +3216,11 @@ async function loadMasterStatus() {
     const d = await r.json();
     if (!d.success) return;
 
-    // Sincroniza o seletor de intervalo se o usuário não estiver interagindo
     const intervalSelect = $('master-interval-select');
     if (intervalSelect && d.interval && intervalSelect.value !== d.interval) {
       intervalSelect.value = d.interval;
     }
 
-    // Detecta fim de ciclo: lastRun mudou → atualiza histórico automaticamente
     if (d.lastRun && d.lastRun !== _lastMasterRun) {
       _lastMasterRun = d.lastRun;
       loadBotLog().catch(() => {});
@@ -3233,12 +3231,6 @@ async function loadMasterStatus() {
     const btnStart = $('btn-master-start');
     const btnStop = $('btn-master-stop');
 
-    // Sync Futures tab
-    const fDot = $('futures-status-dot');
-    const fTxt = $('futures-status-text');
-    const fBtnStart = $('btn-futures-start');
-    const fBtnStop = $('btn-futures-stop');
-
     if (d.status === 'running') {
       dot.className = 'dot green';
       txt.textContent = 'Em Execução';
@@ -3246,10 +3238,6 @@ async function loadMasterStatus() {
       btnStart.style.display = 'none';
       btnStop.style.display = 'block';
       btnStop.disabled = false;
-      
-      if(fDot){ fDot.className = 'dot green'; fTxt.textContent = 'ATIVO'; fTxt.style.color = 'var(--green)'; }
-      if(fBtnStart) fBtnStart.style.display = 'none';
-      if(fBtnStop) fBtnStop.style.display = 'block';
 
       _startCountdown(d.nextRun);
       const countEl = $('master-countdown');
@@ -3262,10 +3250,6 @@ async function loadMasterStatus() {
       btnStop.style.display = 'block';
       btnStop.disabled = false;
 
-      if(fDot){ fDot.className = 'dot yellow'; fTxt.textContent = 'EM ESPERA'; fTxt.style.color = '#f59e0b'; }
-      if(fBtnStart) fBtnStart.style.display = 'none';
-      if(fBtnStop) fBtnStop.style.display = 'block';
-
       _startCountdown(d.nextRun);
     } else {
       dot.className = 'dot red';
@@ -3276,10 +3260,6 @@ async function loadMasterStatus() {
       btnStart.disabled = false;
       btnStart.textContent = '🚀 Iniciar Ciclo';
       btnStart.innerHTML = '<i class="fas fa-play mr-2"></i> Iniciar Ciclo';
-
-      if(fDot){ fDot.className = 'dot red'; fTxt.textContent = 'DESLIGADO'; fTxt.style.color = 'var(--red)'; }
-      if(fBtnStart) fBtnStart.style.display = 'block';
-      if(fBtnStop) fBtnStop.style.display = 'none';
 
       _stopCountdown();
     }
@@ -3295,7 +3275,6 @@ async function loadMasterStatus() {
   }
 }
 
-// Salva o intervalo do MasterBot quando alterado
 async function saveMasterInterval() {
   const interval = $('master-interval-select').value;
   try {
@@ -3316,7 +3295,6 @@ async function saveMasterInterval() {
   }
 }
 
-// Inicializa eventos do MasterBot
 document.addEventListener('DOMContentLoaded', () => {
   const sel = $('master-interval-select');
   if (sel) sel.addEventListener('change', saveMasterInterval);
@@ -3368,9 +3346,86 @@ async function stopMasterBot() {
   }
 }
 
-// Polling a cada 5s
+// ── FuturesBot Functions ─────────────────────────────────────────
+
+async function loadFuturesStatus() {
+  try {
+    const r = await fetch(B+'/api/bot/futures/status?t=' + Date.now());
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!d.success) return;
+
+    const fDot = $('futures-status-dot');
+    const fTxt = $('futures-status-text');
+    const fBtnStart = $('btn-futures-start');
+    const fBtnStop = $('btn-futures-stop');
+
+    if (d.status === 'running') {
+      if(fDot){ fDot.className = 'dot green'; fTxt.textContent = 'ATIVO'; fTxt.style.color = 'var(--green)'; }
+      if(fBtnStart) fBtnStart.style.display = 'none';
+      if(fBtnStop) { fBtnStop.style.display = 'block'; fBtnStop.disabled = false; fBtnStop.textContent = '🛑 DESLIGAR BOT'; }
+    } else if (d.status === 'waiting') {
+      if(fDot){ fDot.className = 'dot yellow'; fTxt.textContent = 'EM ESPERA'; fTxt.style.color = '#f59e0b'; }
+      if(fBtnStart) fBtnStart.style.display = 'none';
+      if(fBtnStop) { fBtnStop.style.display = 'block'; fBtnStop.disabled = false; fBtnStop.textContent = '🛑 DESLIGAR BOT'; }
+    } else {
+      if(fDot){ fDot.className = 'dot red'; fTxt.textContent = 'DESLIGADO'; fTxt.style.color = 'var(--red)'; }
+      if(fBtnStart) { fBtnStart.style.display = 'block'; fBtnStart.disabled = false; fBtnStart.textContent = '▶ LIGAR BOT'; }
+      if(fBtnStop) fBtnStop.style.display = 'none';
+    }
+    
+    // Atualiza resultados na aba de Futuros caso existam
+    const fResultsContainer = $('futures-recent-decisions');
+    if (fResultsContainer && d.lastResults && d.lastResults.length > 0) {
+      // Opcional: renderizar os lastResults do robô de futuros na tabela se necessário
+    }
+  } catch (e) {
+    console.error('Erro futures status:', e);
+  }
+}
+
+async function startFuturesBot() {
+  const btn = $('btn-futures-start');
+  if(btn) { btn.disabled = true; btn.textContent = '⏳ Iniciando...'; }
+  try {
+    const r = await fetch(B+'/api/bot/futures/start', { method: 'POST' });
+    const d = await r.json();
+    if (d.success) {
+      toast('FuturesBot de Futuros iniciado!', 'success');
+      setTimeout(loadFuturesStatus, 1000);
+    } else {
+      toast('Erro ao iniciar FuturesBot', 'error');
+      if(btn) { btn.disabled = false; btn.textContent = '▶ LIGAR BOT'; }
+    }
+  } catch (e) {
+    toast('Erro de rede: ' + e.message, 'error');
+    if(btn) { btn.disabled = false; btn.textContent = '▶ LIGAR BOT'; }
+  }
+}
+
+async function stopFuturesBot() {
+  const btn = $('btn-futures-stop');
+  if(btn) { btn.disabled = true; btn.textContent = '⏳ Parando...'; }
+  try {
+    const r = await fetch(B+'/api/bot/futures/stop', { method: 'POST' });
+    const d = await r.json();
+    if (d.success) {
+      toast('FuturesBot de Futuros interrompido.', 'info');
+      setTimeout(loadFuturesStatus, 800);
+    } else {
+      toast('Erro ao parar FuturesBot', 'error');
+      if(btn) { btn.disabled = false; btn.textContent = '🛑 DESLIGAR BOT'; }
+    }
+  } catch (e) {
+    toast('Erro de rede: ' + e.message, 'error');
+    if(btn) { btn.disabled = false; btn.textContent = '🛑 DESLIGAR BOT'; }
+  }
+}
+
 setInterval(loadMasterStatus, 5000);
+setInterval(loadFuturesStatus, 5000);
 loadMasterStatus();
+loadFuturesStatus();
 async function runBot(){
   const btn=$('bot-run-btn');
   if(btn){ btn.disabled=true; btn.textContent='⏳ Executando...'; }
