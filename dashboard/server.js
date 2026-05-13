@@ -840,7 +840,7 @@ app.get('/api/bot/config', (_req, res) => {
       activePlan: rules?.active_plan || null,
       groupPlans: (rules?.group_plans || []).map(p => ({ name: p.name, description: p.description, symbols: p.symbols })),
       watchlist: rules?.watchlist || [],
-      watchlistPreset: ['BTCUSDT','ETHUSDT','ENAUSDT','SOLUSDT','RENDERUSDT','PEPEUSDT','XRPUSDT','BONKUSDT'],
+      watchlistPreset: ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','LTCUSDT','AVAXUSDT','TRXUSDT'],
     });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
