@@ -41,7 +41,7 @@ let mainConfig = rulesObj.micro_scalper;
 if (!mainConfig || !mainConfig.plans) {
   mainConfig = {
     active_symbols: ["XRPUSDT", "SOLUSDT"],
-    max_trade_usdt: 10,
+    max_trade_usdt: 30,
     min_trade_usdt: 5,
     max_session_ms: 86400000,
     cooldown_ms: 5000,

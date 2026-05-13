@@ -245,7 +245,7 @@
       "XRPUSDT",
       "SOLUSDT"
     ],
-    "max_trade_usdt": 10,
+    "max_trade_usdt": 30,
     "min_trade_usdt": 5,
     "loop_interval_ms": 5000,
     "max_session_ms": 86400000,
