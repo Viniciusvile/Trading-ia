@@ -1863,7 +1863,7 @@ async function loadBotConfig(){
         const balWarn=$('bot-balance-warning');
         if (!balWarn) return;
         
-        const isFutures = r.activePlan?.toLowerCase().includes('futures') || r.symbol?.endsWith('USDT'); // heurística simples
+        const isFutures = r.activePlan ? (r.activePlan.toLowerCase().includes('futures') || (r.rules?.group_plans || []).some(p => p.name === r.activePlan && p.mode === 'futures')) : false;
         const balance = isFutures ? (b.futures || 0) : (b.spot || 0);
         
         balWarn.style.display = (b.success && balance < minTrade) ? 'block' : 'none';
