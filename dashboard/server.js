@@ -1832,6 +1832,115 @@ app.get('/api/micro-scalper/config', (_req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
+app.patch('/api/micro-scalper/config', (req, res) => {
+  try {
+    const { plan, action } = req.body;
+    const rules = getRules();
+    if (!rules.micro_scalper) {
+      rules.micro_scalper = { active_symbols: ['XRPUSDT', 'SOLUSDT'], plans: {} };
+    }
+    
+    const symbolMap = { btc: 'BTCUSDT', eth: 'ETHUSDT', xrp: 'XRPUSDT', sol: 'SOLUSDT' };
+    const targetSymbol = symbolMap[plan?.toLowerCase()] || plan?.toUpperCase();
+    if (!targetSymbol) return res.status(400).json({ success: false, error: 'Plano inválido' });
+
+    let active = rules.micro_scalper.active_symbols || [];
+    if (action === 'add' && !active.includes(targetSymbol)) {
+      active.push(targetSymbol);
+    } else if (action === 'remove') {
+      active = active.filter(s => s !== targetSymbol);
+    }
+    rules.micro_scalper.active_symbols = active;
+    writeFileSync(join(ROOT, 'rules.json'), JSON.stringify(rules, null, 2));
+    res.json({ success: true, active_symbols: active });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.get('/api/micro-scalper/signal', async (_req, res) => {
+  try {
+    const rules = getRules();
+    const microCfg = rules.micro_scalper || {};
+    const activeSymbols = microCfg.active_symbols || ['XRPUSDT', 'SOLUSDT'];
+    const plans = microCfg.plans || {};
+    const { turboReversionSignal, microScalpSignal } = await import('../src/scalper/signals.js');
+
+    const signals = await Promise.all(activeSymbols.map(async (symbol) => {
+      try {
+        const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=5m&limit=50`);
+        const klines = await r.json();
+        if (!Array.isArray(klines)) return { symbol, success: false, error: 'Falha na API Binance' };
+
+        const candles = klines.map(k => ({
+          close: parseFloat(k[4]),
+          high: parseFloat(k[2]),
+          low: parseFloat(k[3]),
+          vol: parseFloat(k[5])
+        }));
+
+        const cfg = plans[symbol] || {};
+        let sig;
+        if (cfg.strategy_mode === 'turbo-reversion') {
+          sig = turboReversionSignal(candles, {
+            bbLen: cfg.bb_length || 20, bbMult: cfg.bb_mult || 1.8,
+            rsiLen: cfg.rsi_period || 14, rsiLimit: cfg.rsi_limit || 45, volMult: cfg.vol_mult || 1.2,
+            trendEmaPeriod: cfg.trend_ema_period || 0, trendSlopeBars: cfg.trend_slope_bars || 5,
+            trendMaxDownPct: cfg.trend_max_down_pct || 0, minAtrPct: cfg.min_atr_pct || 0
+          });
+        } else {
+          sig = microScalpSignal(candles, {
+            emaPeriod: cfg.ema_period || 20, rsiPeriod: cfg.rsi_period || 3,
+            minDip: cfg.min_dip_pct || 0.0005, minRsi: cfg.min_rsi || 20, maxRsi: cfg.max_rsi || 75,
+            trendEmaPeriod: cfg.trend_ema_period || 0, trendSlopeBars: cfg.trend_slope_bars || 5,
+            trendMaxDownPct: cfg.trend_max_down_pct || 0, minAtrPct: cfg.min_atr_pct || 0
+          });
+        }
+
+        return { symbol, success: true, signal: sig };
+      } catch (e) {
+        return { symbol, success: false, error: e.message };
+      }
+    }));
+
+    res.json({ success: true, signals });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/api/micro-scalper/trade', async (req, res) => {
+  try {
+    const { side, amount } = req.body;
+    const rules = getRules();
+    const active = rules.micro_scalper?.active_symbols || ['XRPUSDT'];
+    const symbol = active[0] || 'XRPUSDT';
+    
+    const env = existsSync(join(ROOT, '.env')) ? readFileSync(join(ROOT, '.env'), 'utf8') : '';
+    const apiKey = process.env.BINANCE_API_KEY || env.match(/BINANCE_API_KEY=(.*)/)?.[1]?.trim();
+    const secretKey = process.env.BINANCE_SECRET_KEY || env.match(/BINANCE_SECRET_KEY=(.*)/)?.[1]?.trim();
+
+    if (!apiKey || !secretKey) {
+      return res.json({ success: true, simulated: true, symbol, side, amount });
+    }
+
+    const pr = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+    const price = parseFloat((await pr.json()).price);
+    if (!price) return res.status(400).json({ success: false, error: 'Preço indisponível' });
+
+    const qty = parseFloat((amount / price).toFixed(4));
+    const ts = (await (await fetch('https://api.binance.com/api/v3/time')).json()).serverTime;
+    const qs = `symbol=${symbol}&side=${side.toUpperCase()}&type=MARKET&quantity=${qty}&recvWindow=10000&timestamp=${ts}`;
+    const sig = crypto.createHmac('sha256', secretKey).update(qs).digest('hex');
+    
+    const orderRes = await fetch(`https://api.binance.com/api/v3/order?${qs}&signature=${sig}`, {
+      method: 'POST', headers: { 'X-MBX-APIKEY': apiKey }
+    });
+    const orderData = await orderRes.json();
+    if (orderData.code && orderData.code < 0) {
+      return res.status(400).json({ success: false, error: orderData.msg });
+    }
+
+    res.json({ success: true, order: orderData });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
 app.get('/api/micro-scalper/status', async (_req, res) => {
   try {
     const [hb, sessions] = await Promise.all([
