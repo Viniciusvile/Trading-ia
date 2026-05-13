@@ -226,7 +226,10 @@ function getPlanForSymbol(symbol, rules, runMode = 'master') {
   if (runMode === 'futures') {
     return plans.find(p => p.mode === 'futures' && p.symbols.includes(symbol)) || null;
   } else {
-    return plans.find(p => p.mode !== 'futures' && p.symbols.includes(symbol)) || null;
+    // No modo Master (Spot), busca preferencialmente um plano Spot.
+    // Se não houver, aceita o plano de Futuros associado ao ativo para que ele não suma da tela no Modo Auto.
+    return plans.find(p => p.mode !== 'futures' && p.symbols.includes(symbol)) || 
+           plans.find(p => p.symbols.includes(symbol)) || null;
   }
 }
 
@@ -1076,7 +1079,14 @@ async function runSymbolCycle(symbol, timeframe, rules, runMode = 'master') {
     _missingPlanWarned.add(symbol);
   }
   if (isAutoMode && !plan) {
-    return null; // sem plano em Modo Auto → não opera
+    // Retorna um objeto Neutro com aviso explícito de bloqueio para manter o ativo visível no painel
+    const dummyResults = [{ label: "Plano associado ao ativo", pass: false, required: "Sim", actual: "Não" }];
+    return {
+      symbol, timeframe, price: null, indicators: {}, side: null, stopPrice: null,
+      conditions: dummyResults, allPass: false, forced: false, tradeSize: 0,
+      orderPlaced: false, orderId: null, mode: 'spot', paperTrading: true,
+      strategy: rules?.strategy?.key || 'warrior', plan: 'Sem Plano'
+    };
   }
   if (plan && plan.timeframes && !plan.timeframes.some(t => t.toLowerCase() === timeframe.toLowerCase())) {
     if (process.env.FORCE_ONCE === '1') {
@@ -1107,7 +1117,8 @@ async function runSymbolCycle(symbol, timeframe, rules, runMode = 'master') {
     if (plan.maxTradeUsd) localConfig.maxTradeSizeUSD = plan.maxTradeUsd;
   }
 
-  const isFutures = plan?.mode === 'futures';
+  // Força execução estritamente no ambiente ativo (Spot ou Futures) para evitar cruzamento e conflito de ordens
+  const isFutures = runMode === 'futures';
   const leverage = isFutures ? (plan.leverage || 1) : 1;
   const candles = await fetchCandles(localConfig.symbol, localConfig.timeframe, 500, isFutures);
   const closes = candles.map((c) => c.close);
