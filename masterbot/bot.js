@@ -679,19 +679,61 @@ async function placeBinanceFuturesOrder(symbol, side, sizeUSD, leverage, price) 
 
 async function placeFuturesStopOrders(symbol, side, quantity, stopPrice, tpPrice) {
   const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
-  const timestamp = Date.now();
-  
-  // 1. Stop Loss (MARKET)
-  const slQuery = `symbol=${symbol}&side=${closeSide}&type=STOP_MARKET&stopPrice=${await roundPrice(symbol, stopPrice, true)}&closePosition=true&timestamp=${timestamp}`;
-  const slSig = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(slQuery).digest("hex");
-  await fetch(`https://fapi.binance.com/fapi/v1/order?${slQuery}&signature=${slSig}`, { method: "POST", headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey } });
+  const delays = [1000, 3000, 6000]; // Retentativas para dar tempo de a posição assentar no motor da Binance
 
-  // 2. Take Profit (MARKET)
-  const tpQuery = `symbol=${symbol}&side=${closeSide}&type=TAKE_PROFIT_MARKET&stopPrice=${await roundPrice(symbol, tpPrice, true)}&closePosition=true&timestamp=${timestamp}`;
-  const tpSig = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(tpQuery).digest("hex");
-  await fetch(`https://fapi.binance.com/fapi/v1/order?${tpQuery}&signature=${tpSig}`, { method: "POST", headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey } });
-  
-  console.log(`  🛡️ [${symbol}] Stop Loss e Take Profit (Futures) ativados.`);
+  let slSuccess = false;
+  let tpSuccess = false;
+
+  for (let attempt = 0; attempt < delays.length; attempt++) {
+    await sleep(delays[attempt]);
+    const timestamp = Date.now();
+    const slpRounded = await roundPrice(symbol, stopPrice, true);
+    const tppRounded = await roundPrice(symbol, tpPrice, true);
+
+    // 1. Tenta Stop Loss
+    if (!slSuccess) {
+      const slQuery = `symbol=${symbol}&side=${closeSide}&type=STOP_MARKET&stopPrice=${slpRounded}&closePosition=true&timestamp=${timestamp}`;
+      const slSig = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(slQuery).digest("hex");
+      try {
+        const res = await fetch(`https://fapi.binance.com/fapi/v1/order?${slQuery}&signature=${slSig}`, {
+          method: "POST", headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey }
+        });
+        const data = await res.json();
+        if (data.code && data.code < 0) {
+          console.log(`  ⚠ [${symbol}] SL Futures falhou (tentativa ${attempt+1}): [${data.code}] ${data.msg}`);
+        } else {
+          console.log(`  ✅ [${symbol}] SL Futures ativado com sucesso @ $${slpRounded}`);
+          slSuccess = true;
+        }
+      } catch(e) { console.log(`  ⚠ [${symbol}] Erro de rede no SL Futures: ${e.message}`); }
+    }
+
+    // 2. Tenta Take Profit
+    if (!tpSuccess) {
+      const tpQuery = `symbol=${symbol}&side=${closeSide}&type=TAKE_PROFIT_MARKET&stopPrice=${tppRounded}&closePosition=true&timestamp=${timestamp}`;
+      const tpSig = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(tpQuery).digest("hex");
+      try {
+        const res = await fetch(`https://fapi.binance.com/fapi/v1/order?${tpQuery}&signature=${tpSig}`, {
+          method: "POST", headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey }
+        });
+        const data = await res.json();
+        if (data.code && data.code < 0) {
+          console.log(`  ⚠ [${symbol}] TP Futures falhou (tentativa ${attempt+1}): [${data.code}] ${data.msg}`);
+        } else {
+          console.log(`  ✅ [${symbol}] TP Futures ativado com sucesso @ $${tppRounded}`);
+          tpSuccess = true;
+        }
+      } catch(e) { console.log(`  ⚠ [${symbol}] Erro de rede no TP Futures: ${e.message}`); }
+    }
+
+    if (slSuccess && tpSuccess) break;
+  }
+
+  if (!slSuccess || !tpSuccess) {
+    console.error(`  ❌ [${symbol}] Falha final ao atrelar SL/TP de Futuros na exchange após ${delays.length} tentativas.`);
+  } else {
+    console.log(`  🛡️ [${symbol}] Proteção total de Futuros (SL + TP) consolidada na exchange com sucesso.`);
+  }
 }
 
 let _symbolPrecisionCache = {};
