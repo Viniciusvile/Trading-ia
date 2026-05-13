@@ -944,6 +944,40 @@ async function monitorPositions() {
 
   for (const pos of open) {
     try {
+      // ── Sincronização Ativa de Posições de Futuros via exchange ──
+      const isPosFutures = pos.plan?.includes('Futures') || pos.plan === 'Alpha_Futures_Trend';
+      if (isPosFutures && !CONFIG.paperTrading) {
+        try {
+          const timestamp = Date.now();
+          const qs = `symbol=${pos.symbol}&timestamp=${timestamp}`;
+          const sig = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(qs).digest("hex");
+          const res = await fetch(`https://fapi.binance.com/fapi/v2/positionRisk?${qs}&signature=${sig}`, {
+            headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey }
+          });
+          const riskData = await res.json();
+          if (Array.isArray(riskData) && riskData.length > 0) {
+            const currentRisk = riskData.find(r => r.symbol === pos.symbol);
+            const amt = parseFloat(currentRisk?.positionAmt || 0);
+            if (amt === 0) {
+              console.log(`  🔄 [${pos.symbol}] Posição de Futuros encerrada na exchange. Atualizando sistema...`);
+              pos.status = "closed";
+              pos.closedAt = new Date().toISOString();
+              pos.exitReason = "Fechado na Exchange (TP / SL / Manual)";
+              pos.exitPrice = pos.takeProfitPrice || pos.entryPrice;
+              pos.pnl = 0;
+              await db.savePosition(pos);
+              continue;
+            } else {
+              console.log(`  📈 [${pos.symbol}] Futuros ativo na exchange: ${amt} contratos abertos.`);
+              continue;
+            }
+          }
+        } catch(riskErr) {
+          console.log(`  ⚠ Erro ao checar positionRisk para ${pos.symbol}: ${riskErr.message}`);
+        }
+        continue; // Garante que a posição de futuros nunca sofra interferência das rotinas Spot abaixo
+      }
+
       // ── Posição com OCO ativa: verifica status na Binance ──
       if (pos.ocoPlaced && !CONFIG.paperTrading && !pos.ocoManual && pos.ocoOrderListId) {
         try {
