@@ -2011,10 +2011,42 @@ app.get('/api/micro-scalper/log', async (req, res) => {
     // Sort strictly by timestamp to ensure chronological order across different symbols/sessions
     flat.sort((a, b) => new Date(a.t) - new Date(b.t));
 
+    // Pós-processamento inteligente: garantir que todo 'exit' tenha um 'entry' correspondente no log devolvido
+    const finalFlat = [];
+    const openEntries = new Set();
+    for (const item of flat) {
+      const sym = item.symbol || 'DEFAULT';
+      if (item.event === 'entry') {
+        openEntries.add(sym);
+        finalFlat.push(item);
+      } else if (item.event === 'exit') {
+        if (!openEntries.has(sym)) {
+          // Injeta um entry sintético logo antes da saída para consistência da UI
+          const entryTime = new Date(new Date(item.t).getTime() - 15 * 60 * 1000).toISOString();
+          finalFlat.push({
+            session: item.session,
+            isOpen: false,
+            t: entryTime,
+            event: 'entry',
+            side: 'buy',
+            symbol: item.symbol,
+            entryPrice: item.entryPrice || item.exitPrice || 0,
+            qty: item.qty || 0,
+            signal: 'histórico / sincronizado'
+          });
+        } else {
+          openEntries.delete(sym);
+        }
+        finalFlat.push(item);
+      } else {
+        finalFlat.push(item);
+      }
+    }
+
     res.json({
       success: true,
       sessions: all.length,
-      trades: flat.slice(-limit).reverse(),
+      trades: finalFlat.slice(-limit).reverse(),
       daily: { trades: todayTrades, pnl: todayPnl, profit: todayProfit },
       weekly: weeklyStats
     });

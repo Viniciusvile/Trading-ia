@@ -220,6 +220,17 @@ async function main() {
         }
         
         sessionData[symbol].pos = pos;
+        sessionData[symbol].log.push(isLogOpen ? logEntry : {
+          t: new Date(openedAt).toISOString(),
+          event: "entry",
+          side: "buy",
+          entryPrice: entryPriceToUse,
+          qty: finalQty,
+          signal: "sync-recovery",
+          ocoId: pos.ocoId || null,
+          tpPrice: pos.tpPrice,
+          slPrice: pos.slPrice
+        });
       }
     } catch (e) {
       console.warn(`  ⚠️ Erro ao sincronizar ${symbol}: ${e.message}`);
