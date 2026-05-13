@@ -3572,9 +3572,10 @@ async function loadBotLog(){
       futuresPos.slice().reverse().forEach(p => {
         const pnl = p.pnl || 0;
         const color = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--muted)';
-        hRows += `<tr>
+        const posJson = encodeURIComponent(JSON.stringify(p));
+        hRows += `<tr style="cursor:pointer;transition:background .15s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''" ondblclick="openPosDetail(JSON.parse(decodeURIComponent('${posJson}')))" title="Duplo clique para ver detalhes da posição">
           <td><b>${p.symbol}</b></td>
-          <td style="color:var(--muted)">${p.side}</td>
+          <td style="color:var(--muted)">${p.side || 'LONG'}</td>
           <td>$${Number(p.entryPrice).toFixed(2)}</td>
           <td><span class="badge ${p.status==='open'?'long':'neutral'}">${p.status.toUpperCase()}</span></td>
           <td style="color:${color};font-weight:700">${pnl > 0 ? '+' : ''}${pnl.toFixed(2)}</td>
