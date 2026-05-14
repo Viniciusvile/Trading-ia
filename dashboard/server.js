@@ -1033,7 +1033,7 @@ app.post('/api/bot/emergency-sell', async (req, res) => {
 
 app.get('/api/bot/log', async (_req, res) => {
   try {
-    const { trades } = await db.loadRecentLog(20);
+    const { trades } = await db.loadRecentLog(100);
     res.json({ success: true, trades });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });

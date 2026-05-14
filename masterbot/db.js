@@ -213,7 +213,7 @@ export async function appendToLog(entry) {
 }
 
 /** Retorna as últimas `limit` entradas do log, em ordem cronológica (mais antigas primeiro). */
-export async function loadRecentLog(limit = 20) {
+export async function loadRecentLog(limit = 100) {
   const res = await getPool().query(
     `SELECT data FROM trades ORDER BY id DESC LIMIT $1`,
     [limit]
