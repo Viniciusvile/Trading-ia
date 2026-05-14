@@ -793,29 +793,55 @@ let _symbolPrecisionCache = {};
 async function getPrecision(symbol, isFutures = false) {
   const cacheKey = `${symbol}_${isFutures}`;
   if (_symbolPrecisionCache[cacheKey]) return _symbolPrecisionCache[cacheKey];
+  
+  // Fallback garantido e curado por contrato para impedir rejeições de precisão caso a API falhe
+  const fallbacksFutures = {
+    BTCUSDT: { price: 1, qty: 3 },
+    ETHUSDT: { price: 2, qty: 2 },
+    SOLUSDT: { price: 3, qty: 0 },
+    XRPUSDT: { price: 4, qty: 1 },
+    ADAUSDT: { price: 4, qty: 0 },
+    AVAXUSDT: { price: 3, qty: 0 },
+    LINKUSDT: { price: 3, qty: 2 },
+    DOGEUSDT: { price: 5, qty: 0 },
+    BNBUSDT: { price: 2, qty: 2 }
+  };
+  const fb = isFutures ? (fallbacksFutures[symbol] || { price: 4, qty: 2 }) : { price: 4, qty: 4 };
+
   try {
     const baseUrl = isFutures ? 'https://fapi.binance.com' : 'https://api.binance.com';
     const endpoint = isFutures ? '/fapi/v1/exchangeInfo' : '/api/v3/exchangeInfo';
     const res = await fetch(`${baseUrl}${endpoint}?symbol=${symbol}`);
     const data = await res.json();
     const info = data.symbols?.[0];
-    if (!info) return { price: 8, qty: 8 };
+    if (!info) {
+      _symbolPrecisionCache[cacheKey] = fb;
+      return fb;
+    }
     const pf = info.filters.find(f => f.filterType === 'PRICE_FILTER');
     const lf = info.filters.find(f => f.filterType === 'LOT_SIZE');
-    const tick = pf ? parseFloat(pf.tickSize) : 0.00000001;
-    const step = lf ? parseFloat(lf.stepSize) : 0.00000001;
-    const countDecimals = (n) => {
-      if (Math.floor(n) === n) return 0;
-      const s = n.toString();
-      if (s.includes('e-')) {
-        const parts = s.split('e-');
-        return parseInt(parts[1]);
-      }
-      return s.split(".")[1].length || 0;
+    
+    const countDecimalsStr = (s) => {
+      if (!s) return null;
+      const str = s.toString().trim().replace(/0+$/, '');
+      if (str.endsWith('.')) return 0;
+      if (str.includes('e-')) return parseInt(str.split('e-')[1]);
+      if (str.includes('.')) return str.split('.')[1].length;
+      return 0;
     };
-    _symbolPrecisionCache[cacheKey] = { price: countDecimals(tick), qty: countDecimals(step) };
+
+    const pPrice = pf ? countDecimalsStr(pf.tickSize) : null;
+    const pQty = lf ? countDecimalsStr(lf.stepSize) : null;
+    
+    _symbolPrecisionCache[cacheKey] = {
+      price: pPrice !== null ? pPrice : fb.price,
+      qty: pQty !== null ? pQty : fb.qty
+    };
     return _symbolPrecisionCache[cacheKey];
-  } catch (e) { return { price: 8, qty: 8 }; }
+  } catch (e) {
+    _symbolPrecisionCache[cacheKey] = fb;
+    return fb;
+  }
 }
 
 async function roundPrice(symbol, price, isFutures = false) {
@@ -825,7 +851,12 @@ async function roundPrice(symbol, price, isFutures = false) {
 
 async function roundQty(symbol, qty, isFutures = false) {
   const p = await getPrecision(symbol, isFutures);
-  return parseFloat(qty.toFixed(p.qty));
+  let rounded = parseFloat(qty.toFixed(p.qty));
+  // Prevenção de LOT_SIZE zero no fapi: garante no mínimo 1 stepSize se o arredondamento zerar
+  if (rounded <= 0) {
+    rounded = p.qty === 0 ? 1 : parseFloat((1 / Math.pow(10, p.qty)).toFixed(p.qty));
+  }
+  return rounded;
 }
 
 // ─── OCO Order (Take Profit + Stop Loss via Binance) ─────────────────────────
