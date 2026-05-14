@@ -799,21 +799,21 @@ async function getPrecision(symbol, isFutures = false) {
     BTCUSDT: { price: 1, qty: 3 },
     ETHUSDT: { price: 2, qty: 2 },
     SOLUSDT: { price: 3, qty: 0 },
-    XRPUSDT: { price: 4, qty: 1 },
+    XRPUSDT: { price: 4, qty: 0 },
     ADAUSDT: { price: 4, qty: 0 },
     AVAXUSDT: { price: 3, qty: 0 },
     LINKUSDT: { price: 3, qty: 2 },
     DOGEUSDT: { price: 5, qty: 0 },
     BNBUSDT: { price: 2, qty: 2 }
   };
-  const fb = isFutures ? (fallbacksFutures[symbol] || { price: 4, qty: 2 }) : { price: 4, qty: 4 };
+  const fb = isFutures ? (fallbacksFutures[symbol] || { price: 4, qty: 0 }) : { price: 4, qty: 4 };
 
   try {
     const baseUrl = isFutures ? 'https://fapi.binance.com' : 'https://api.binance.com';
     const endpoint = isFutures ? '/fapi/v1/exchangeInfo' : '/api/v3/exchangeInfo';
     const res = await fetch(`${baseUrl}${endpoint}?symbol=${symbol}`);
     const data = await res.json();
-    const info = data.symbols?.[0];
+    const info = (data.symbols || []).find(s => s.symbol === symbol);
     if (!info) {
       _symbolPrecisionCache[cacheKey] = fb;
       return fb;
