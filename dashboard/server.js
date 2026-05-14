@@ -1782,6 +1782,7 @@ app.post('/api/bot/positions/:id/oco', async (req, res) => {
       // --- ATRELAR STOP E TP EM FUTUROS ---
       const fb = fallbacksFutures[pos.symbol] || { price: 4, qty: 2 };
       let pPrice = fb.price;
+      let pQty = fb.qty;
       try {
         const resInfo = await fetch(`https://fapi.binance.com/fapi/v1/exchangeInfo?symbol=${pos.symbol}`);
         const dInfo = await resInfo.json();
@@ -1792,33 +1793,59 @@ app.post('/api/bot/positions/:id/oco', async (req, res) => {
             const str = pf.tickSize.toString().trim().replace(/0+$/, '');
             pPrice = str.includes('.') ? str.split('.')[1].length : 0;
           }
+          const lf = info.filters.find(f => f.filterType === 'LOT_SIZE');
+          if (lf && lf.stepSize) {
+            const str = lf.stepSize.toString().trim().replace(/0+$/, '');
+            pQty = str.includes('.') ? str.split('.')[1].length : 0;
+          }
         }
       } catch(e) {}
 
       const slPriceStr = parseFloat(stopPrice.toFixed(pPrice));
       const tpPriceStr = parseFloat(takeProfitPrice.toFixed(pPrice));
+      const qtyRounded = parseFloat(pos.quantity.toFixed(pQty));
       const closeSide = pos.side === 'LONG' ? 'SELL' : 'BUY';
 
+      // 1. Tenta Stop Loss com closePosition=true
+      let orderIdSL = null;
       const t1 = Date.now();
-      const qsSL = `symbol=${pos.symbol}&side=${closeSide}&type=STOP_MARKET&stopPrice=${slPriceStr}&closePosition=true&recvWindow=10000&timestamp=${t1}`;
-      const sigSL = crypto.createHmac('sha256', secretKey).update(qsSL).digest('hex');
-      const resSL = await fetch(`https://fapi.binance.com/fapi/v1/order?${qsSL}&signature=${sigSL}`, { method: 'POST', headers: { 'X-MBX-APIKEY': apiKey } });
-      const dataSL = await resSL.json();
+      let qsSL = `symbol=${pos.symbol}&side=${closeSide}&type=STOP_MARKET&stopPrice=${slPriceStr}&closePosition=true&recvWindow=10000&timestamp=${t1}`;
+      let sigSL = crypto.createHmac('sha256', secretKey).update(qsSL).digest('hex');
+      let resSL = await fetch(`https://fapi.binance.com/fapi/v1/order?${qsSL}&signature=${sigSL}`, { method: 'POST', headers: { 'X-MBX-APIKEY': apiKey } });
+      let dataSL = await resSL.json();
       if (dataSL.code && dataSL.code < 0) {
-        return res.status(400).json({ success: false, error: `Stop Loss Futures falhou: [${dataSL.code}] ${dataSL.msg}` });
+        // Fallback imune: usa reduceOnly=true e quantidade explícita
+        const fbTs1 = Date.now();
+        qsSL = `symbol=${pos.symbol}&side=${closeSide}&type=STOP_MARKET&stopPrice=${slPriceStr}&quantity=${qtyRounded}&reduceOnly=true&recvWindow=10000&timestamp=${fbTs1}`;
+        sigSL = crypto.createHmac('sha256', secretKey).update(qsSL).digest('hex');
+        resSL = await fetch(`https://fapi.binance.com/fapi/v1/order?${qsSL}&signature=${sigSL}`, { method: 'POST', headers: { 'X-MBX-APIKEY': apiKey } });
+        dataSL = await resSL.json();
+        if (dataSL.code && dataSL.code < 0) {
+          return res.status(400).json({ success: false, error: `Stop Loss Futures falhou: [${dataSL.code}] ${dataSL.msg}` });
+        }
       }
+      orderIdSL = dataSL.orderId;
 
+      // 2. Tenta Take Profit com closePosition=true
       const t2 = Date.now();
-      const qsTP = `symbol=${pos.symbol}&side=${closeSide}&type=TAKE_PROFIT_MARKET&stopPrice=${tpPriceStr}&closePosition=true&recvWindow=10000&timestamp=${t2}`;
-      const sigTP = crypto.createHmac('sha256', secretKey).update(qsTP).digest('hex');
-      const resTP = await fetch(`https://fapi.binance.com/fapi/v1/order?${qsTP}&signature=${sigTP}`, { method: 'POST', headers: { 'X-MBX-APIKEY': apiKey } });
-      const dataTP = await resTP.json();
+      let qsTP = `symbol=${pos.symbol}&side=${closeSide}&type=TAKE_PROFIT_MARKET&stopPrice=${tpPriceStr}&closePosition=true&recvWindow=10000&timestamp=${t2}`;
+      let sigTP = crypto.createHmac('sha256', secretKey).update(qsTP).digest('hex');
+      let resTP = await fetch(`https://fapi.binance.com/fapi/v1/order?${qsTP}&signature=${sigTP}`, { method: 'POST', headers: { 'X-MBX-APIKEY': apiKey } });
+      let dataTP = await resTP.json();
       if (dataTP.code && dataTP.code < 0) {
-        return res.status(400).json({ success: false, error: `Take Profit Futures falhou: [${dataTP.code}] ${dataTP.msg}` });
+        // Fallback imune: usa reduceOnly=true e quantidade explícita
+        const fbTs2 = Date.now();
+        qsTP = `symbol=${pos.symbol}&side=${closeSide}&type=TAKE_PROFIT_MARKET&stopPrice=${tpPriceStr}&quantity=${qtyRounded}&reduceOnly=true&recvWindow=10000&timestamp=${fbTs2}`;
+        sigTP = crypto.createHmac('sha256', secretKey).update(qsTP).digest('hex');
+        resTP = await fetch(`https://fapi.binance.com/fapi/v1/order?${qsTP}&signature=${sigTP}`, { method: 'POST', headers: { 'X-MBX-APIKEY': apiKey } });
+        dataTP = await resTP.json();
+        if (dataTP.code && dataTP.code < 0) {
+          return res.status(400).json({ success: false, error: `Take Profit Futures falhou: [${dataTP.code}] ${dataTP.msg}` });
+        }
       }
 
       pos.ocoPlaced = true;
-      pos.ocoOrderListId = `FUT-STOP-${dataSL.orderId || Date.now()}`;
+      pos.ocoOrderListId = `FUT-STOP-${orderIdSL || Date.now()}`;
       pos.ocoManual = true;
       await db.savePosition(pos);
       return res.json({ success: true, orderListId: pos.ocoOrderListId });
