@@ -1927,7 +1927,14 @@ async function loadBotConfig(){
 
     // Initialize watchlist editor
     if (r.watchlist) {
-      renderWatchlistEditor(r.watchlist, r.watchlistPreset);
+      let planSymbols = null;
+      if (r.activePlan && r.groupPlans) {
+        const pObj = r.groupPlans.find(p => p.name === r.activePlan);
+        if (pObj && pObj.symbols && pObj.symbols.length > 0) {
+          planSymbols = pObj.symbols;
+        }
+      }
+      renderWatchlistEditor(r.watchlist, r.watchlistPreset, planSymbols, r.activePlan, r.groupPlans);
     }
     // Sync master strategy selector (inclui group plans)
     populateMasterStrategySelect(r.strategyKey, r.activePlan, r.groupPlans);
@@ -1987,6 +1994,8 @@ async function saveMasterStrategy(value) {
       setTimeout(() => { if (log) log.textContent = ''; }, 2000);
       const displayName = isPlan ? ('Plano ' + planName) : ({ auto:'Modo Auto', both:'Ambas (Warrior+Stormer)', warrior:'Warrior', stormer:'Stormer' }[value] || value);
       toast('Estratégia: ' + displayName, 'success');
+      loadBotConfig();
+      loadStrategies();
     } else {
       if (log) log.innerHTML = `<span class="down">${r.error}</span>`;
     }
@@ -2003,29 +2012,59 @@ async function saveMasterStrategy(value) {
 let _wlPreset = ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','LTCUSDT','AVAXUSDT','TRXUSDT'];
 let _wlActive = new Set(_wlPreset); // all on by default until loaded
 
-function renderWatchlistEditor(activeList, presetList) {
-  if (activeList) _wlActive = new Set(activeList);
-  if (presetList) _wlPreset = [...new Set([...presetList, ..._wlPreset])];
-
-  // Add any active symbols not in preset (custom added)
-  for (const s of _wlActive) {
-    if (!_wlPreset.includes(s)) _wlPreset.push(s);
+function renderWatchlistEditor(activeList, presetList, planSymbols, activePlanName, allGroupPlans) {
+  if (planSymbols && planSymbols.length > 0) {
+    // Modo isolado: a estratégia / plano controla estritamente os símbolos permitidos!
+    _wlPreset = [...planSymbols];
+    _wlActive = new Set(planSymbols);
+  } else {
+    if (activeList) _wlActive = new Set(activeList);
+    if (presetList) _wlPreset = [...new Set([...presetList, ..._wlPreset])];
+    // Identificar e remover ativos exclusivos de Futuros se não estivermos no plano de Futuros
+    if (allGroupPlans) {
+      const fPlan = allGroupPlans.find(p => p.mode === 'futures' || p.name === 'Alpha_Futures_Trend');
+      if (fPlan && fPlan.symbols) {
+        // Remove da lista de sugestões do Spot os símbolos que são apenas de Futuros
+        _wlPreset = _wlPreset.filter(s => _wlActive.has(s) || !fPlan.symbols.includes(s));
+      }
+    }
+    for (const s of _wlActive) {
+      if (!_wlPreset.includes(s)) _wlPreset.push(s);
+    }
   }
 
   const container = $('master-watchlist-editor');
   if (!container) return;
 
+  const isPlanLocked = planSymbols && planSymbols.length > 0;
+  
   container.innerHTML = _wlPreset.map(sym => {
     const on = _wlActive.has(sym);
-    return `<button onclick="toggleWatchlistChip('${sym}', this)" id="wlchip-${sym}"
-      style="padding:5px 12px; border-radius:20px; font-size:12px; font-weight:600; cursor:pointer;
+    return `<button onclick="${isPlanLocked ? 'return false' : `toggleWatchlistChip('${sym}', this)`}" id="wlchip-${sym}"
+      style="padding:5px 12px; border-radius:20px; font-size:12px; font-weight:600; ${isPlanLocked ? 'cursor:default;' : 'cursor:pointer;'}
         border:2px solid ${on ? 'var(--accent)' : 'var(--border)'};
         background:${on ? 'var(--accent-light)' : 'var(--surface2)'};
         color:${on ? 'var(--accent)' : 'var(--muted)'};
-        transition:all 0.15s;">
+        transition:all 0.15s;" title="${isPlanLocked ? 'Símbolo controlado pela estratégia ativa' : ''}">
       ${on ? '✅' : '⬜'} ${sym}
     </button>`;
   }).join('');
+
+  // Se a estratégia bloqueia a lista, esconde os botões de adicionar e salvar customizados para evitar confusão
+  const customBox = container.nextElementSibling;
+  if (customBox && customBox.tagName === 'DIV') {
+    if (isPlanLocked) {
+      let infoMsg = container.previousElementSibling?.querySelector('.strat-locked-msg');
+      if (!infoMsg && container.previousElementSibling) {
+        container.previousElementSibling.insertAdjacentHTML('beforeend', `<span class="strat-locked-msg" style="color:var(--accent);font-size:10px;margin-left:8px">🔒 Filtrado pela estratégia ${activePlanName}</span>`);
+      }
+      customBox.style.display = 'none';
+    } else {
+      const lockMsg = container.previousElementSibling?.querySelector('.strat-locked-msg');
+      if (lockMsg) lockMsg.remove();
+      customBox.style.display = 'flex';
+    }
+  }
 
   const countEl = $('master-active-count');
   if (countEl) countEl.textContent = _wlActive.size;
@@ -4457,6 +4496,7 @@ async function activatePlan(planName) {
       if (log) log.innerHTML = `<span class="up">✓ ${planName ? 'Plano ' + planName + ' ativado' : 'Plano desativado — usando watchlist completa'}</span>`;
       setTimeout(() => { if (log) log.textContent = ''; }, 3000);
       populateMasterStrategySelect(null, planName, null);
+      loadBotConfig();
       loadStrategies();
     } else {
       if (log) log.innerHTML = `<span class="down">${r.error}</span>`;
