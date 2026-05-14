@@ -1266,13 +1266,78 @@ app.get('/api/bot/futures/status', async (req, res) => {
       } catch (e) { isAlive = false; }
     }
 
-    if (!isAlive && loopState.status !== 'stopped') {
-      loopState.status = 'stopped';
+    if (!isAlive) {
+      if (loopState.status !== 'stopped') {
+        loopState.status = 'stopped';
+        // Atualiza a persistência real no banco para limpar o status pendente/crachado
+        try { await db.writeFuturesStatus(loopState); } catch (_) {}
+      }
+      // Limpa PID zumbi para evitar conflitos no start e 'Connection Refused'
+      if (existsSync(BOT_FUTURES_PID)) {
+        try { unlinkSync(BOT_FUTURES_PID); } catch (_) {}
+      }
     }
 
     res.json({ success: true, ...loopState, isAlive });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
+
+// Watchdog Keep-Alive Automático: monitora a saúde e religa os bots em caso de queda
+setInterval(async () => {
+  // 1. Watchdog FuturesBot
+  try {
+    const fState = await db.loadFuturesStatus();
+    if (fState && (fState.status === 'running' || fState.status === 'waiting')) {
+      let isAlive = !!(futuresProcess && !futuresProcess.killed);
+      if (!isAlive && existsSync(BOT_FUTURES_PID)) {
+        try {
+          const pid = parseInt(readFileSync(BOT_FUTURES_PID, 'utf8'));
+          if (pid) { try { process.kill(pid, 0); isAlive = true; } catch { isAlive = false; } }
+        } catch {}
+      }
+      if (!isAlive) {
+        console.log(`⚠️  [Watchdog] FuturesBot inativo detectado! O processo encerrou inesperadamente. Religa automática iniciada...`);
+        if (existsSync(BOT_FUTURES_PID)) try { unlinkSync(BOT_FUTURES_PID); } catch {}
+        futuresProcess = null;
+        
+        const logFile = join(BOT_DIR, 'futuresbot.log');
+        const out = openSync(logFile, 'a');
+        const err = openSync(logFile, 'a');
+        futuresProcess = spawn('node', ['bot.js', '--futures'], {
+          cwd: BOT_DIR, detached: true, stdio: ['ignore', out, err], env: { ...process.env }
+        });
+        if (futuresProcess.pid) writeFileSync(BOT_FUTURES_PID, futuresProcess.pid.toString());
+        futuresProcess.unref();
+      }
+    }
+  } catch (err) {}
+
+  // 2. Watchdog Micro-Scalper
+  try {
+    const microPidPath = join(ROOT, '.micro-scalper.pid');
+    const microScriptPath = join(ROOT, 'micro-scalper.js');
+    if (existsSync(microPidPath)) {
+      let isAlive = false;
+      try {
+        const pid = parseInt(readFileSync(microPidPath, 'utf8'));
+        if (pid) { try { process.kill(pid, 0); isAlive = true; } catch { isAlive = false; } }
+      } catch {}
+      
+      if (!isAlive) {
+        console.log(`⚠️  [Watchdog] Micro-Scalper inativo detectado! O processo encerrou inesperadamente. Religa automática iniciada...`);
+        try { unlinkSync(microPidPath); } catch {}
+        
+        if (existsSync(microScriptPath)) {
+          const child = spawn('node', [microScriptPath], {
+            cwd: ROOT, detached: true, stdio: 'ignore', env: { ...process.env }
+          });
+          if (child.pid) writeFileSync(microPidPath, child.pid.toString());
+          child.unref();
+        }
+      }
+    }
+  } catch (err) {}
+}, 30000);
 
 app.post('/api/bot/futures/start', (req, res) => {
   try {

@@ -84,13 +84,19 @@ async function sendTelegram(message) {
 }
 
 function fmtQty(symbol, n, config) {
-  const decimals = config.qty_decimals !== undefined ? config.qty_decimals : 0;
+  let decimals = config?.qty_decimals;
+  if (decimals === undefined) {
+    if (symbol.startsWith("BTC")) decimals = 5;
+    else if (symbol.startsWith("ETH")) decimals = 4;
+    else if (symbol.startsWith("SOL")) decimals = 2;
+    else decimals = 0;
+  }
   const f = Math.pow(10, decimals);
   return (Math.floor(n * f) / f).toFixed(decimals);
 }
 function fmtQuote(n, config) {
-  const f = Math.pow(10, config.quote_decimals || 2);
-  return (Math.floor(n * f) / f).toFixed(config.quote_decimals || 2);
+  const f = Math.pow(10, config?.quote_decimals || 2);
+  return (Math.floor(n * f) / f).toFixed(config?.quote_decimals || 2);
 }
 
 async function openLong(symbol, quoteUsdt, config) {
@@ -106,7 +112,23 @@ async function closeLong(symbol, qty, ocoId, config) {
   if (ocoId) {
     try { await client.cancelOCO(symbol, ocoId); } catch(e) {}
   }
-  const res = await client.placeMarketSellQty(symbol, fmtQty(symbol, qty, config));
+  const baseAsset = symbol.replace("USDT", "");
+  let sellQty = qty;
+  try {
+    const bals = await client.getBalances([baseAsset]);
+    const actualFree = bals[baseAsset.toLowerCase()];
+    if (actualFree !== undefined && actualFree < qty) {
+      sellQty = actualFree;
+    }
+  } catch (e) {}
+
+  const finalQtyStr = fmtQty(symbol, sellQty, config);
+  if (parseFloat(finalQtyStr) <= 0) {
+    console.error(`❌ [ERRO SELL] Quantidade muito baixa para fechar ${symbol}: ${finalQtyStr}`);
+    return { ok: false, res: { data: { msg: "Qty rounded to zero based on precision" } } };
+  }
+
+  const res = await client.placeMarketSellQty(symbol, finalQtyStr);
   if (!res.ok) return { ok: false, res };
   const filledQty = parseFloat(res.data.executedQty || 0);
   const filledQuote = parseFloat(res.data.cummulativeQuoteQty || 0);

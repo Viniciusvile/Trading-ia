@@ -648,6 +648,17 @@ async function setFuturesLeverage(symbol, leverage) {
 
 async function placeBinanceFuturesOrder(symbol, side, sizeUSD, leverage, price) {
   try {
+    // Pre-Trade Balance Check: garante que temos margem suficiente antes de enviar a ordem
+    const availUSDT = await getAvailableUSDT(true);
+    if (availUSDT !== null) {
+      // Deixamos uma margem de segurança de 2% para variações de preço a mercado e taxas
+      const requiredMargin = sizeUSD * 1.02;
+      if (availUSDT < requiredMargin) {
+        console.log(`  🚫 [Margin Check] Saldo insuficiente no Futuros para a margem exigida de ~$${requiredMargin.toFixed(2)} (Disponível: $${availUSDT.toFixed(2)} USDT)`);
+        throw new Error(`[-2010] Saldo insuficiente de margem para o trade (Disponível: $${availUSDT.toFixed(2)} USDT)`);
+      }
+    }
+
     await setFuturesLeverage(symbol, leverage);
     
     // No futuros, precisamos da quantidade no ativo base (ex: 0.001 BTC)
@@ -1553,7 +1564,11 @@ async function run(runMode = 'manual') {
          if (isAutoMode) {
            const symPlan = getPlanForSymbol(symbol, currentRules, runMode);
            if (!symPlan) {
-             await runSymbolCycle(symbol, timeframes[0] || "1h", currentRules, runMode);
+             try {
+               await runSymbolCycle(symbol, timeframes[0] || "1h", currentRules, runMode);
+             } catch (dummyErr) {
+               console.error(`  ❌ Erro no ciclo sem plano para ${symbol}:`, dummyErr.message);
+             }
              continue;
            }
            tfsForSymbol = (symPlan.timeframes && symPlan.timeframes.length) ? symPlan.timeframes : timeframes;
@@ -1576,10 +1591,14 @@ async function run(runMode = 'manual') {
     } else {
        const symbol = symbolEntry;
        for (const tf of timeframes) {
-          const result = await runSymbolCycle(symbol, tf, currentRules, runMode);
-          if (result) {
-            summary.push(result);
-            await db.appendToLog(result);
+          try {
+            const result = await runSymbolCycle(symbol, tf, currentRules, runMode);
+            if (result) {
+              summary.push(result);
+              await db.appendToLog(result);
+            }
+          } catch (manualErr) {
+            console.error(`  ❌ Erro no ciclo manual para ${symbol} ${tf}:`, manualErr.message);
           }
        }
     }
@@ -1609,8 +1628,26 @@ function startScheduler(runMode = 'master') {
 
   console.log(`\n⏰ ${runMode.toUpperCase()} Scheduler Active: Runs every ${intervalStr} (${ms/1000}s)`);
 
-  run(runMode).catch(console.error);
-  setInterval(() => { run(runMode).catch(console.error); }, ms);
+  let isExecuting = false;
+  const heartbeat = async () => {
+    if (isExecuting) {
+      console.log(`⏳ [Scheduler] Execução anterior do ${runMode.toUpperCase()} ainda em processamento. Evitando sobreposição de ciclos.`);
+      return;
+    }
+    isExecuting = true;
+    try {
+      await run(runMode);
+    } catch (err) {
+      console.error(`❌ [Scheduler] Falha não tratada capturada no loop principal do ${runMode.toUpperCase()}:`, err.message);
+      // Garante que o status no banco retorne para 'waiting' permitindo rearmar na UI/Dashboard
+      try { await writeLoopStatus("waiting", [], runMode === 'futures'); } catch (_) {}
+    } finally {
+      isExecuting = false;
+    }
+  };
+
+  heartbeat();
+  setInterval(heartbeat, ms);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

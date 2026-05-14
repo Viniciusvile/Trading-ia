@@ -2949,6 +2949,7 @@ async function loadMicroScalper() {
         const pnl = (t.pnlPct != null) ? (t.pnlPct*100).toFixed(2)+'%' : '';
         const pnlColor = (t.pnlPct||0) > 0 ? '#10b981' : (t.pnlPct||0) < 0 ? '#ef4444' : 'var(--muted)';
         const evColor = t.event === 'entry' ? '#3b82f6' : '#94a3b8';
+        const fmtQty = t.qty != null ? (Number(t.qty) < 0.01 ? Number(t.qty).toFixed(6) : Number(t.qty).toFixed(2)) : '—';
         return `<tr style="border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer;transition:background .1s" 
                     onclick="openMicroTradeDetail(${idx})"
                     onmouseenter="this.style.background='rgba(255,255,255,.03)'"
@@ -2959,7 +2960,7 @@ async function loadMicroScalper() {
           <td style="padding:10px 8px;color:var(--text-dim);font-size:11px">${t.reason || t.signal || ''}</td>
           <td style="padding:10px 8px;font-family:monospace">${t.entryPrice ? Number(t.entryPrice).toFixed(4) : '—'}</td>
           <td style="padding:10px 8px;font-family:monospace">${t.exitPrice ? Number(t.exitPrice).toFixed(4) : '—'}</td>
-          <td style="padding:10px 8px;color:var(--muted)">${t.qty != null ? Number(t.qty).toFixed(2) : '—'}</td>
+          <td style="padding:10px 8px;color:var(--muted)">${fmtQty}</td>
           <td style="padding:10px 8px;color:${pnlColor};font-weight:700">${pnl}</td>
         </tr>`;
       }).join('');
