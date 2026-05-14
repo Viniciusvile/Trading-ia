@@ -579,6 +579,16 @@ function signBinance(queryString) {
 }
 
 async function placeBinanceOrder(symbol, side, sizeUSD, price) {
+  // Fail-Safe Barrier: impede terminantemente que ativos ou chamadas com contexto de Futuros abram ordens na carteira Spot
+  try {
+    const rulesJson = JSON.parse(readFileSync(RULES_FILE, 'utf8'));
+    const isOnlyFutures = (rulesJson.group_plans || []).some(p => p.mode === 'futures' && p.symbols?.includes(symbol));
+    if (process.env.FORCE_MODE === 'futures' || (isOnlyFutures && !rulesJson.group_plans.some(p => p.mode !== 'futures' && p.symbols?.includes(symbol)))) {
+      console.error(`🚨 [FAIL-SAFE DE ROTEAMENTO CRÍTICO] Bloqueada tentativa de enviar ordem do par ${symbol} (Futuros) para o endpoint Spot Trading.`);
+      throw new Error(`[FAIL-SAFE DE ROTEAMENTO] Ativo ${symbol} é estritamente do ambiente de Futuros e não pode consumir saldo da carteira Spot.`);
+    }
+  } catch(err) { if(err.message.includes('FAIL-SAFE')) throw err; }
+
   const MAX_ATTEMPTS = 3;
   const RETRY_DELAYS = [2000, 4000]; // ms entre tentativas
   let lastError;
@@ -1210,7 +1220,11 @@ async function generateTaxSummary() {
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 
-async function runSymbolCycle(symbol, timeframe, rules, runMode = 'master') {
+async function runSymbolCycle(symbol, timeframe, rulesInput, runMode = 'master') {
+  // Recarregamento forçado de rules.json no início do ciclo para assegurar frescor absoluto
+  let rules = rulesInput;
+  try { rules = JSON.parse(readFileSync(RULES_FILE, 'utf8')); } catch(e) {}
+
   // Plano aplicado quando: active_plan definido OU Modo Auto ativo
   const isAutoMode = rules?.strategy?.key === 'auto';
   const plan = (rules?.active_plan || isAutoMode) ? getPlanForSymbol(symbol, rules, runMode) : null;
@@ -1259,8 +1273,10 @@ async function runSymbolCycle(symbol, timeframe, rules, runMode = 'master') {
   }
 
   // Força execução estritamente no ambiente ativo (Spot ou Futures) para evitar cruzamento e conflito de ordens
-  const isFutures = runMode === 'futures';
-  const leverage = isFutures ? (plan.leverage || 1) : 1;
+  const isOnlyFuturesTarget = (rules?.group_plans || []).some(p => p.mode === 'futures' && p.symbols?.includes(symbol));
+  const hasSpotTarget = (rules?.group_plans || []).some(p => p.mode !== 'futures' && p.symbols?.includes(symbol));
+  const isFutures = runMode === 'futures' || process.env.FORCE_MODE === 'futures' || plan?.mode === 'futures' || plan?.name?.includes('Futures') || (isOnlyFuturesTarget && !hasSpotTarget);
+  const leverage = isFutures ? (plan?.leverage || 1) : 1;
   const candles = await fetchCandles(localConfig.symbol, localConfig.timeframe, 500, isFutures);
   const closes = candles.map((c) => c.close);
   const price = closes[closes.length - 1];
@@ -1606,14 +1622,9 @@ async function run(runMode = 'manual') {
       if (runMode === 'futures') {
         watchlistToUse = fPlan?.symbols?.length ? fPlan.symbols : watchlistToUse.filter(s => futuresSymbols.has(s));
       } else {
-        // No modo Spot, se o plano selecionado for de Futuros, não aplicamos seus símbolos ao Spot
-        if (activePlan && (activePlan.mode === 'futures' || activePlan.name === 'Alpha_Futures_Trend')) {
-          watchlistToUse = refreshedRules.watchlist || [];
-        }
-        // Garante que símbolos exclusivos de Futuros não sejam executados acidentalmente pelo bot Spot
-        if (fPlan && fPlan.symbols) {
-          watchlistToUse = watchlistToUse.filter(s => !fPlan.symbols.includes(s) || (refreshedRules.watchlist || []).includes(s));
-        }
+        // No modo Spot, garantimos que os ativos pertencentes a planos de Futuros
+        // jamais sejam varridos nem executados acidentalmente pelo bot Spot
+        watchlistToUse = watchlistToUse.filter(s => !futuresSymbols.has(s));
       }
     } else {
       watchlistToUse = [CONFIG.symbol];
