@@ -1613,6 +1613,33 @@ function floorToStep(qty, stepSize) {
   return parseFloat((Math.floor(qty / step) * step).toFixed(decimals));
 }
 
+const fallbacksFutures = {
+  BTCUSDT: { price: 1, qty: 3 },
+  ETHUSDT: { price: 2, qty: 2 },
+  SOLUSDT: { price: 3, qty: 0 },
+  XRPUSDT: { price: 4, qty: 0 },
+  ADAUSDT: { price: 4, qty: 0 },
+  AVAXUSDT: { price: 3, qty: 0 },
+  LINKUSDT: { price: 3, qty: 2 },
+  DOGEUSDT: { price: 5, qty: 0 },
+  BNBUSDT: { price: 2, qty: 2 }
+};
+
+function isFuturesPosition(pos) {
+  if (pos.mode === 'futures') return true;
+  if (pos.plan && pos.plan.toLowerCase().includes('futures')) return true;
+  if (pos.strategy && pos.strategy.toLowerCase().includes('futures')) return true;
+  try {
+    const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
+    const planObj = (rules?.group_plans || []).find(p => p.name === pos.plan);
+    if (planObj && planObj.mode === 'futures') return true;
+    const inFuturesPlan = (rules?.group_plans || []).some(p => p.mode === 'futures' && p.symbols?.includes(pos.symbol));
+    const inSpotPlan = (rules?.group_plans || []).some(p => p.mode !== 'futures' && p.symbols?.includes(pos.symbol));
+    if (inFuturesPlan && !inSpotPlan) return true;
+  } catch(e) {}
+  return false;
+}
+
 app.post('/api/bot/positions/:id/close', async (req, res) => {
   try {
     const positions = await db.loadPositions();
@@ -1623,71 +1650,101 @@ app.post('/api/bot/positions/:id/close', async (req, res) => {
     const apiKey = env.BINANCE_API_KEY || env.BITGET_API_KEY;
     const secretKey = env.BINANCE_SECRET_KEY || env.BITGET_SECRET_KEY;
     const paperTrading = env.PAPER_TRADING !== 'false';
-    // ?markOnly=true → apenas marca como fechado sem enviar ordem (já vendeu manualmente)
     const markOnly = req.query.markOnly === 'true';
+    const isFut = isFuturesPosition(pos);
 
     // Buscar preço atual
     let exitPrice = null;
     try {
-      const pr = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${pos.symbol}`);
+      const baseUrl = isFut ? 'https://fapi.binance.com/fapi/v1' : 'https://api.binance.com/api/v3';
+      const pr = await fetch(`${baseUrl}/ticker/price?symbol=${pos.symbol}`);
       exitPrice = parseFloat((await pr.json()).price);
     } catch(e) {}
 
     let exitOrderId = null;
 
     if (!markOnly && !paperTrading && apiKey && secretKey) {
-      // ── Cancelar OCO automático (se tiver listId salvo) ──
-      if (pos.ocoOrderListId && !pos.ocoManual) {
+      if (isFut) {
+        // --- FECHAR POSIÇÃO FUTUROS ---
+        const fb = fallbacksFutures[pos.symbol] || { price: 4, qty: 2 };
+        let pQty = fb.qty;
         try {
-          const timeRes = await fetch('https://api.binance.com/api/v3/time');
-          const ts = (await timeRes.json()).serverTime;
-          const qs = `symbol=${pos.symbol}&orderListId=${pos.ocoOrderListId}&timestamp=${ts}&recvWindow=10000`;
-          const sig = crypto.createHmac('sha256', secretKey).update(qs).digest('hex');
-          await fetch(`https://api.binance.com/api/v3/orderList?${qs}&signature=${sig}`, { method: 'DELETE', headers: { 'X-MBX-APIKEY': apiKey } });
+          const resInfo = await fetch(`https://fapi.binance.com/fapi/v1/exchangeInfo?symbol=${pos.symbol}`);
+          const dInfo = await resInfo.json();
+          const info = (dInfo.symbols || []).find(s => s.symbol === pos.symbol);
+          if (info) {
+            const lf = info.filters.find(f => f.filterType === 'LOT_SIZE');
+            if (lf && lf.stepSize) {
+              const str = lf.stepSize.toString().trim().replace(/0+$/, '');
+              pQty = str.includes('.') ? str.split('.')[1].length : 0;
+            }
+          }
         } catch(e) {}
-      }
 
-      // ── Buscar saldo real do ativo na Binance ──
-      // Extrai o base asset com match exato (RENDERUSDT → RENDER, BTCUSDT → BTC)
-      const baseAsset = pos.symbol.endsWith('USDT') ? pos.symbol.slice(0, -4)
-                      : pos.symbol.endsWith('BTC')  ? pos.symbol.slice(0, -3)
-                      : pos.symbol.slice(0, -4);
-      // Fallback: pos.quantity * 0.999 (desconta 0.1% de taxa de compra que a Binance já reteve)
-      let actualBalance = parseFloat((pos.quantity * 0.999).toFixed(8));
-      try {
-        const tsRes = await fetch('https://api.binance.com/api/v3/time');
-        const tsNow = (await tsRes.json()).serverTime;
-        const qsAcc = `timestamp=${tsNow}`;
-        const sigAcc = crypto.createHmac('sha256', secretKey).update(qsAcc).digest('hex');
-        const accRes = await fetch(`https://api.binance.com/api/v3/account?${qsAcc}&signature=${sigAcc}`, { headers: { 'X-MBX-APIKEY': apiKey } });
-        const accData = await accRes.json();
-        // Busca exata pelo asset (evita match parcial como "R" casando antes de "RENDER")
-        const bal = accData.balances?.find(b => b.asset === baseAsset);
-        if (bal && parseFloat(bal.free) > 0) actualBalance = parseFloat(bal.free);
-      } catch(e) {}
-
-      // ── SELL MARKET com quantidade ajustada ao LOT_SIZE ──
-      const stepSize = await getStepSize(pos.symbol);
-      const qty = floorToStep(Math.min(pos.quantity, actualBalance), stepSize);
-      if (qty <= 0) return res.status(400).json({ success: false, error: `Saldo insuficiente na carteira Spot. Saldo detectado: ${actualBalance} ${baseAsset}` });
-
-      const timeRes = await fetch('https://api.binance.com/api/v3/time');
-      const timestamp = (await timeRes.json()).serverTime;
-      const qs = `symbol=${pos.symbol}&side=SELL&type=MARKET&quantity=${qty}&recvWindow=10000&timestamp=${timestamp}`;
-      const sig = crypto.createHmac('sha256', secretKey).update(qs).digest('hex');
-      const sellRes = await fetch(`https://api.binance.com/api/v3/order?${qs}&signature=${sig}`, {
-        method: 'POST', headers: { 'X-MBX-APIKEY': apiKey }
-      });
-      const sellData = await sellRes.json();
-      if (sellData.code && sellData.code < 0) {
-        let errMsg = `Binance SELL falhou: [${sellData.code}] ${sellData.msg}`;
-        if (sellData.code === -2010 || sellData.code === -1100) {
-          errMsg = `Saldo indisponível no Spot Trading (código ${sellData.code}). O ativo pode estar em Earn Flexível ou Funding. Resgate manualmente na Binance e tente novamente, ou use "Já Vendido" para marcar como fechado.`;
+        const qtyRounded = parseFloat(pos.quantity.toFixed(pQty));
+        const timeRes = await fetch('https://fapi.binance.com/fapi/v1/time');
+        const timestamp = (await timeRes.json()).serverTime;
+        const closeSide = pos.side === 'LONG' ? 'SELL' : 'BUY';
+        const qs = `symbol=${pos.symbol}&side=${closeSide}&type=MARKET&quantity=${qtyRounded}&recvWindow=10000&timestamp=${timestamp}`;
+        const sig = crypto.createHmac('sha256', secretKey).update(qs).digest('hex');
+        const sellRes = await fetch(`https://fapi.binance.com/fapi/v1/order?${qs}&signature=${sig}`, {
+          method: 'POST', headers: { 'X-MBX-APIKEY': apiKey }
+        });
+        const sellData = await sellRes.json();
+        if (sellData.code && sellData.code < 0) {
+          return res.status(400).json({ success: false, error: `Binance Futures Close falhou: [${sellData.code}] ${sellData.msg}` });
         }
-        return res.status(400).json({ success: false, error: errMsg, code: sellData.code });
+        exitOrderId = String(sellData.orderId);
+        exitPrice = parseFloat(sellData.avgPrice) || exitPrice;
+      } else {
+        // --- FECHAR POSIÇÃO SPOT ---
+        if (pos.ocoOrderListId && !pos.ocoManual) {
+          try {
+            const timeRes = await fetch('https://api.binance.com/api/v3/time');
+            const ts = (await timeRes.json()).serverTime;
+            const qs = `symbol=${pos.symbol}&orderListId=${pos.ocoOrderListId}&timestamp=${ts}&recvWindow=10000`;
+            const sig = crypto.createHmac('sha256', secretKey).update(qs).digest('hex');
+            await fetch(`https://api.binance.com/api/v3/orderList?${qs}&signature=${sig}`, { method: 'DELETE', headers: { 'X-MBX-APIKEY': apiKey } });
+          } catch(e) {}
+        }
+
+        const baseAsset = pos.symbol.endsWith('USDT') ? pos.symbol.slice(0, -4)
+                        : pos.symbol.endsWith('BTC')  ? pos.symbol.slice(0, -3)
+                        : pos.symbol.slice(0, -4);
+        let actualBalance = parseFloat((pos.quantity * 0.999).toFixed(8));
+        try {
+          const tsRes = await fetch('https://api.binance.com/api/v3/time');
+          const tsNow = (await tsRes.json()).serverTime;
+          const qsAcc = `timestamp=${tsNow}`;
+          const sigAcc = crypto.createHmac('sha256', secretKey).update(qsAcc).digest('hex');
+          const accRes = await fetch(`https://api.binance.com/api/v3/account?${qsAcc}&signature=${sigAcc}`, { headers: { 'X-MBX-APIKEY': apiKey } });
+          const accData = await accRes.json();
+          const bal = accData.balances?.find(b => b.asset === baseAsset);
+          if (bal && parseFloat(bal.free) > 0) actualBalance = parseFloat(bal.free);
+        } catch(e) {}
+
+        const stepSize = await getStepSize(pos.symbol);
+        const qty = floorToStep(Math.min(pos.quantity, actualBalance), stepSize);
+        if (qty <= 0) return res.status(400).json({ success: false, error: `Saldo insuficiente na carteira Spot. Saldo detectado: ${actualBalance} ${baseAsset}` });
+
+        const timeRes = await fetch('https://api.binance.com/api/v3/time');
+        const timestamp = (await timeRes.json()).serverTime;
+        const qs = `symbol=${pos.symbol}&side=SELL&type=MARKET&quantity=${qty}&recvWindow=10000&timestamp=${timestamp}`;
+        const sig = crypto.createHmac('sha256', secretKey).update(qs).digest('hex');
+        const sellRes = await fetch(`https://api.binance.com/api/v3/order?${qs}&signature=${sig}`, {
+          method: 'POST', headers: { 'X-MBX-APIKEY': apiKey }
+        });
+        const sellData = await sellRes.json();
+        if (sellData.code && sellData.code < 0) {
+          let errMsg = `Binance SELL falhou: [${sellData.code}] ${sellData.msg}`;
+          if (sellData.code === -2010 || sellData.code === -1100) {
+            errMsg = `Saldo indisponível no Spot Trading (código ${sellData.code}). O ativo pode estar em Earn Flexível ou Funding. Resgate manualmente na Binance e tente novamente, ou use "Já Vendido" para marcar como fechado.`;
+          }
+          return res.status(400).json({ success: false, error: errMsg, code: sellData.code });
+        }
+        exitOrderId = String(sellData.orderId);
+        exitPrice = parseFloat(sellData.fills?.[0]?.price) || exitPrice;
       }
-      exitOrderId = String(sellData.orderId);
-      exitPrice = parseFloat(sellData.fills?.[0]?.price) || exitPrice;
     } else {
       exitOrderId = markOnly ? 'MARKED-CLOSED' : `PAPER-SELL-${Date.now()}`;
     }
@@ -1698,14 +1755,14 @@ app.post('/api/bot/positions/:id/close', async (req, res) => {
     pos.exitPrice = exitPrice;
     pos.exitReason = reason;
     pos.exitOrderId = exitOrderId;
-    pos.pnl = exitPrice ? parseFloat(((exitPrice - pos.entryPrice) * pos.quantity).toFixed(4)) : null;
+    pos.pnl = exitPrice ? parseFloat(((exitPrice - pos.entryPrice) * (pos.side === 'SHORT' ? -1 : 1) * pos.quantity).toFixed(4)) : null;
 
     await db.savePosition(pos);
     res.json({ success: true, position: pos });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-// ── PLACE OCO FOR EXISTING POSITION ─────────────────────────────
+// ── PLACE OCO / STOP FOR EXISTING POSITION ─────────────────────────────
 app.post('/api/bot/positions/:id/oco', async (req, res) => {
   try {
     const positions = await db.loadPositions();
@@ -1720,7 +1777,54 @@ app.post('/api/bot/positions/:id/oco', async (req, res) => {
     const { stopPrice, takeProfitPrice } = pos;
     if (!stopPrice || !takeProfitPrice) return res.status(400).json({ success: false, error: 'Stop ou TP não definidos na posição' });
 
-    // Buscar saldo real do ativo
+    const isFut = isFuturesPosition(pos);
+    if (isFut) {
+      // --- ATRELAR STOP E TP EM FUTUROS ---
+      const fb = fallbacksFutures[pos.symbol] || { price: 4, qty: 2 };
+      let pPrice = fb.price;
+      try {
+        const resInfo = await fetch(`https://fapi.binance.com/fapi/v1/exchangeInfo?symbol=${pos.symbol}`);
+        const dInfo = await resInfo.json();
+        const info = (dInfo.symbols || []).find(s => s.symbol === pos.symbol);
+        if (info) {
+          const pf = info.filters.find(f => f.filterType === 'PRICE_FILTER');
+          if (pf && pf.tickSize) {
+            const str = pf.tickSize.toString().trim().replace(/0+$/, '');
+            pPrice = str.includes('.') ? str.split('.')[1].length : 0;
+          }
+        }
+      } catch(e) {}
+
+      const slPriceStr = parseFloat(stopPrice.toFixed(pPrice));
+      const tpPriceStr = parseFloat(takeProfitPrice.toFixed(pPrice));
+      const closeSide = pos.side === 'LONG' ? 'SELL' : 'BUY';
+
+      const t1 = Date.now();
+      const qsSL = `symbol=${pos.symbol}&side=${closeSide}&type=STOP_MARKET&stopPrice=${slPriceStr}&closePosition=true&recvWindow=10000&timestamp=${t1}`;
+      const sigSL = crypto.createHmac('sha256', secretKey).update(qsSL).digest('hex');
+      const resSL = await fetch(`https://fapi.binance.com/fapi/v1/order?${qsSL}&signature=${sigSL}`, { method: 'POST', headers: { 'X-MBX-APIKEY': apiKey } });
+      const dataSL = await resSL.json();
+      if (dataSL.code && dataSL.code < 0) {
+        return res.status(400).json({ success: false, error: `Stop Loss Futures falhou: [${dataSL.code}] ${dataSL.msg}` });
+      }
+
+      const t2 = Date.now();
+      const qsTP = `symbol=${pos.symbol}&side=${closeSide}&type=TAKE_PROFIT_MARKET&stopPrice=${tpPriceStr}&closePosition=true&recvWindow=10000&timestamp=${t2}`;
+      const sigTP = crypto.createHmac('sha256', secretKey).update(qsTP).digest('hex');
+      const resTP = await fetch(`https://fapi.binance.com/fapi/v1/order?${qsTP}&signature=${sigTP}`, { method: 'POST', headers: { 'X-MBX-APIKEY': apiKey } });
+      const dataTP = await resTP.json();
+      if (dataTP.code && dataTP.code < 0) {
+        return res.status(400).json({ success: false, error: `Take Profit Futures falhou: [${dataTP.code}] ${dataTP.msg}` });
+      }
+
+      pos.ocoPlaced = true;
+      pos.ocoOrderListId = `FUT-STOP-${dataSL.orderId || Date.now()}`;
+      pos.ocoManual = true;
+      await db.savePosition(pos);
+      return res.json({ success: true, orderListId: pos.ocoOrderListId });
+    }
+
+    // --- COLOCAR OCO SPOT (Lógica inalterada) ---
     const stepSize = await getStepSize(pos.symbol);
     const tsA = (await (await fetch('https://api.binance.com/api/v3/time')).json()).serverTime;
     const qsA = `timestamp=${tsA}`;
@@ -1731,18 +1835,14 @@ app.post('/api/bot/positions/:id/oco', async (req, res) => {
     const qty = floorToStep(Math.min(pos.quantity, actualQty), stepSize);
     if (qty <= 0) return res.status(400).json({ success: false, error: 'Saldo zero na carteira Spot' });
 
-    // Arredondar preços ao tick size
     const tickRes = await fetch(`https://api.binance.com/api/v3/exchangeInfo?symbol=${pos.symbol}`);
     const tickData = await tickRes.json();
     const priceFilter = tickData.symbols?.[0]?.filters?.find(f => f.filterType === 'PRICE_FILTER');
     const tickSize = priceFilter?.tickSize || '0.00001';
-    // Buscar preço atual para validar relação OCO
     const tickerRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${pos.symbol}`);
     const tickerData = await tickerRes.json();
     const currentPrice = parseFloat(tickerData.price);
 
-
-    
     function floorTick(price) {
       const tick = parseFloat(tickSize);
       const dec = tickSize.replace(/0+$/, '').split('.')[1]?.length || 0;
@@ -1756,18 +1856,10 @@ app.post('/api/bot/positions/:id/oco', async (req, res) => {
 
     let tpPrice  = floorTick(takeProfitPrice);
     let spPrice  = floorTick(stopPrice);
-    let slpPrice = floorTick(stopPrice * 0.998); // Reduzido o gap de 0.5% para 0.2%
+    let slpPrice = floorTick(stopPrice * 0.998);
 
-    // Garantir relação de preços (Para SELL OCO)
-    // 1. Preço (TP) deve ser MAIOR que o preço atual
-    if (tpPrice <= currentPrice) {
-      tpPrice = ceilTick(currentPrice * 1.0005); // Força 0.05% acima para validar OCO
-    }
-    // 2. StopPrice deve ser MENOR que o preço atual
-    if (spPrice >= currentPrice) {
-      spPrice = floorTick(currentPrice * 0.9995); // Força 0.05% abaixo para validar OCO
-    }
-    // 3. StopLimit deve ser MENOR ou IGUAL ao StopPrice
+    if (tpPrice <= currentPrice) tpPrice = ceilTick(currentPrice * 1.0005);
+    if (spPrice >= currentPrice) spPrice = floorTick(currentPrice * 0.9995);
     if (slpPrice > spPrice) slpPrice = spPrice;
 
     const ts = (await (await fetch('https://api.binance.com/api/v3/time')).json()).serverTime;
@@ -1786,7 +1878,7 @@ app.post('/api/bot/positions/:id/oco', async (req, res) => {
     pos.ocoPlaced = true;
     pos.ocoOrderListId = ocoData.orderListId;
     pos.ocoManual = false;
-    await db.savePositions(positions);
+    await db.savePosition(pos);
     res.json({ success: true, orderListId: ocoData.orderListId });
   } catch(e) { res.status(500).json({ success: false, error: e.message }); }
 });
