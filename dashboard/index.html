@@ -3521,11 +3521,11 @@ async function loadBotLog(){
     const futuresLogs = _botLogTrades.filter(t => t.mode === 'futures' || t.plan === 'Alpha_Futures_Trend');
     const spotLogs = _botLogTrades.filter(t => !futuresLogs.includes(t));
 
-    // 2. Popular Tabela Standard (Geral/Master)
+    // 2. Popular Tabela Standard (Spot)
     const cycles = [];
     const CYCLE_GAP_MS = 5 * 60 * 1000;
     let cur = null;
-    for (const t of _botLogTrades) {
+    for (const t of spotLogs) {
       const ts = new Date(t.timestamp).getTime();
       if (!cur || ts - cur.lastTs > CYCLE_GAP_MS) {
         cur = { ts, lastTs: ts, trades: [] };
@@ -3549,11 +3549,7 @@ async function loadBotLog(){
           ? (t.orderPlaced ? '<span style="color:#f59e0b;font-weight:700">⚡ Forçado ✓</span>' : '<span style="color:#f59e0b;font-weight:700">⚡ Forçado</span>')
           : t.allPass ? '<span class="up">✓ OK</span>' : '<span class="down">✗ Bloqueado</span>';
         if ((t.allPass || t.forced) && t.error && !t.orderPlaced) statusHtml = `<span class="down" title="${t.error}">⚠ Erro Exec.</span>`;
-        
-        // Tag de Modo (Spot/Futures) se não houver plano explícito
-        const modeTag = t.mode === 'futures' ? `<span style="display:inline-block;margin-left:4px;font-size:9px;padding:1px 4px;border-radius:4px;background:rgba(245,158,11,0.1);color:#f59e0b;border:1px solid rgba(245,158,11,0.3)">FUTUROS</span>` : '';
-        const planTag = t.plan ? `<span style="display:inline-block;margin-left:4px;font-size:9px;padding:1px 4px;border-radius:4px;background:var(--accent-bg,rgba(99,102,241,.15));color:var(--accent,#6366f1);border:1px solid var(--accent-border,rgba(99,102,241,.3))">${t.plan}</span>` : modeTag;
-        
+        const planTag = t.plan ? `<span style="display:inline-block;margin-left:4px;font-size:9px;padding:1px 4px;border-radius:4px;background:var(--accent-bg,rgba(99,102,241,.15));color:var(--accent,#6366f1);border:1px solid var(--accent-border,rgba(99,102,241,.3))">${t.plan}</span>` : '';
         rows += `<tr style="cursor:pointer;transition:background .15s"
           onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''"
           ondblclick="openTradeDetail(${i < 0 ? 0 : i})" title="Duplo clique para ver detalhes">
@@ -3567,7 +3563,7 @@ async function loadBotLog(){
         </tr>`;
       });
     });
-    $('bot-log-tbody-standard').innerHTML=rows||'<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:14px">Nenhum log de execução encontrado.</td></tr>';
+    $('bot-log-tbody-standard').innerHTML=rows||'<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:14px">Nenhuma execução Spot recente encontrada.</td></tr>';
     
     // 3. Popular Tabela de Futuros
     let fRows = '';
