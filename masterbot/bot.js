@@ -1729,9 +1729,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   } else if (process.env.FORCE_ONCE === '1') {
     const forceSym = process.env.FORCE_SYMBOL;
     const forceTf  = process.env.FORCE_TF;
+    const forceMode = process.env.FORCE_MODE || 'spot';
     const forceRules = JSON.parse(readFileSync(RULES_FILE, "utf8"));
-    console.log(`\n⚡ FORCE TRADE MODE: ${forceSym} ${forceTf} ${process.env.FORCE_SIDE}`);
-    db.initDb().then(() => runSymbolCycle(forceSym, forceTf, forceRules)).then(async result => {
+    console.log(`\n⚡ FORCE TRADE MODE: ${forceSym} ${forceTf} ${process.env.FORCE_SIDE} [${forceMode.toUpperCase()}]`);
+    db.initDb().then(() => runSymbolCycle(forceSym, forceTf, forceRules, forceMode)).then(async result => {
       if (result) await db.appendToLog(result);
       process.exit(0);
     }).catch(err => { console.error("Force trade error:", err); process.exit(1); });

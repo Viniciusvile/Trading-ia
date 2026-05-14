@@ -1071,7 +1071,7 @@ app.post('/api/bot/run', (_req, res) => {
 // ── Force Trade (ignora safety check) ───────────────────────────
 app.post('/api/bot/force-trade', (req, res) => {
   if (!existsSync(BOT_DIR)) return res.status(404).json({ success: false, error: 'Pasta do bot não encontrada' });
-  const { symbol, timeframe, side, amount } = req.body || {};
+  const { symbol, timeframe, side, amount, mode } = req.body || {};
   if (!symbol || !timeframe || !side) return res.status(400).json({ success: false, error: 'symbol, timeframe e side são obrigatórios' });
   
   const env = { 
@@ -1079,6 +1079,7 @@ app.post('/api/bot/force-trade', (req, res) => {
     FORCE_SYMBOL: symbol, 
     FORCE_TF: timeframe, 
     FORCE_SIDE: side.toUpperCase(), 
+    FORCE_MODE: mode === 'futures' ? 'futures' : 'spot',
     FORCE_ONCE: '1',
     PAPER_TRADING: 'false',
     // Se o usuário passar um valor específico, usamos ele via env var que o bot.js pode ler
@@ -1088,7 +1089,7 @@ app.post('/api/bot/force-trade', (req, res) => {
     DATABASE_URL: process.env.DATABASE_URL
   };
   
-  console.log(`⚡ FORÇANDO TRADE: ${symbol} ${side} ${amount ? `($${amount})` : ''}`);
+  console.log(`⚡ FORÇANDO TRADE: ${symbol} ${side} ${amount ? `($${amount})` : ''} [Mode: ${env.FORCE_MODE}]`);
   const proc = spawn(process.execPath, ['bot.js'], { cwd: BOT_DIR, shell: false, env });
   let stdout = '', stderr = '';
   const timer = setTimeout(() => proc.kill('SIGKILL'), 60000);

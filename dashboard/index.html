@@ -3642,7 +3642,7 @@ async function forceFuturesTrade(side) {
     const r = await fetch(B+'/api/bot/force-trade', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ symbol, side, timeframe: '1h', amount }) 
+      body: JSON.stringify({ symbol, side, timeframe: '1h', amount, mode: 'futures' }) 
     }).then(r=>r.json());
     
     if (r.success) {
