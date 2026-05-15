@@ -223,13 +223,28 @@ function calcVWAP(candles, nowMs = Date.now()) {
 
 function getPlanForSymbol(symbol, rules, runMode = 'master') {
   const plans = rules.group_plans || [];
+
+  // Se o usuário fixou um plano ativo (active_plan), respeitamos essa escolha
+  // e retornamos APENAS esse plano caso o símbolo esteja contemplado por ele.
+  // Isso evita que planos de Futuros vencem por estarem primeiro no array.
+  if (rules.active_plan) {
+    const fixed = plans.find(p => p.name === rules.active_plan);
+    if (fixed && fixed.symbols && fixed.symbols.includes(symbol)) {
+      // Em runMode 'master' rejeita planos de Futuros mesmo quando fixados
+      if (runMode !== 'futures' && fixed.mode === 'futures') return null;
+      if (runMode === 'futures' && fixed.mode !== 'futures') return null;
+      return fixed;
+    }
+    // Se o active_plan não cobre o símbolo, o símbolo é ignorado nesse run
+    return null;
+  }
+
   if (runMode === 'futures') {
     return plans.find(p => p.mode === 'futures' && p.symbols.includes(symbol)) || null;
   } else {
-    // No modo Master (Spot), busca preferencialmente um plano Spot.
-    // Se não houver, aceita o plano de Futuros associado ao ativo para que ele não suma da tela no Modo Auto.
-    return plans.find(p => p.mode !== 'futures' && p.symbols.includes(symbol)) || 
-           plans.find(p => p.symbols.includes(symbol)) || null;
+    // No modo Master (Spot), busca preferencialmente um plano não-futures.
+    // NUNCA cai em plano de Futuros como fallback — isso causaria gravação incorreta.
+    return plans.find(p => p.mode !== 'futures' && p.symbols.includes(symbol)) || null;
   }
 }
 
@@ -1386,9 +1401,10 @@ async function runSymbolCycle(symbol, timeframe, rulesInput, runMode = 'master')
   }
 
   // Força execução estritamente no ambiente ativo (Spot ou Futures) para evitar cruzamento e conflito de ordens
-  const isOnlyFuturesTarget = (rules?.group_plans || []).some(p => p.mode === 'futures' && p.symbols?.includes(symbol));
-  const hasSpotTarget = (rules?.group_plans || []).some(p => p.mode !== 'futures' && p.symbols?.includes(symbol));
-  const isFutures = runMode === 'futures' || process.env.FORCE_MODE === 'futures' || plan?.mode === 'futures' || plan?.name?.includes('Futures') || (isOnlyFuturesTarget && !hasSpotTarget);
+  // O runMode é a autoridade final: master => SEMPRE spot, futures => SEMPRE futures.
+  // Isso evita que um símbolo só listado em plano de futuros (XRP, LTC, AVAX, TRX)
+  // seja gravado como mode:'futures' quando rodando no MasterBot Spot.
+  const isFutures = runMode === 'futures' || process.env.FORCE_MODE === 'futures';
   const leverage = isFutures ? (plan?.leverage || 1) : 1;
   const candles = await fetchCandles(localConfig.symbol, localConfig.timeframe, 500, isFutures);
   const closes = candles.map((c) => c.close);
