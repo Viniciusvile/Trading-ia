@@ -1801,47 +1801,35 @@ app.post('/api/bot/positions/:id/oco', async (req, res) => {
         }
       } catch(e) {}
 
-      const slPriceStr = parseFloat(stopPrice.toFixed(pPrice));
-      const tpPriceStr = parseFloat(takeProfitPrice.toFixed(pPrice));
-      const qtyRounded = parseFloat(pos.quantity.toFixed(pQty));
+      const slPriceStr = stopPrice.toFixed(pPrice);
+      const tpPriceStr = takeProfitPrice.toFixed(pPrice);
+      const qtyRounded = pos.quantity.toFixed(pQty);
       const closeSide = pos.side === 'LONG' ? 'SELL' : 'BUY';
 
-      // 1. Tenta Stop Loss com closePosition=true
+      // 1. Tenta Stop Loss (STOP Limit com Mark Price para compatibilidade)
+      const slPriceLimit = pos.side === 'LONG' 
+        ? (parseFloat(slPriceStr) * 0.998).toFixed(pPrice)
+        : (parseFloat(slPriceStr) * 1.002).toFixed(pPrice);
+
       let orderIdSL = null;
       const t1 = Date.now();
-      let qsSL = `symbol=${pos.symbol}&side=${closeSide}&type=STOP_MARKET&stopPrice=${slPriceStr}&closePosition=true&recvWindow=10000&timestamp=${t1}`;
+      let qsSL = `symbol=${pos.symbol}&side=${closeSide}&type=STOP&stopPrice=${slPriceStr}&price=${slPriceLimit}&quantity=${qtyRounded}&timeInForce=GTC&reduceOnly=true&workingType=MARK_PRICE&recvWindow=10000&timestamp=${t1}`;
       let sigSL = crypto.createHmac('sha256', secretKey).update(qsSL).digest('hex');
       let resSL = await fetch(`https://fapi.binance.com/fapi/v1/order?${qsSL}&signature=${sigSL}`, { method: 'POST', headers: { 'X-MBX-APIKEY': apiKey } });
       let dataSL = await resSL.json();
       if (dataSL.code && dataSL.code < 0) {
-        // Fallback imune: usa reduceOnly=true e quantidade explícita
-        const fbTs1 = Date.now();
-        qsSL = `symbol=${pos.symbol}&side=${closeSide}&type=STOP_MARKET&stopPrice=${slPriceStr}&quantity=${qtyRounded}&reduceOnly=true&recvWindow=10000&timestamp=${fbTs1}`;
-        sigSL = crypto.createHmac('sha256', secretKey).update(qsSL).digest('hex');
-        resSL = await fetch(`https://fapi.binance.com/fapi/v1/order?${qsSL}&signature=${sigSL}`, { method: 'POST', headers: { 'X-MBX-APIKEY': apiKey } });
-        dataSL = await resSL.json();
-        if (dataSL.code && dataSL.code < 0) {
-          return res.status(400).json({ success: false, error: `Stop Loss Futures falhou: [${dataSL.code}] ${dataSL.msg}` });
-        }
+        return res.status(400).json({ success: false, error: `Stop Loss Futures falhou: [${dataSL.code}] ${dataSL.msg}` });
       }
       orderIdSL = dataSL.orderId;
 
-      // 2. Tenta Take Profit com closePosition=true
+      // 2. Tenta Take Profit (LIMIT padrão)
       const t2 = Date.now();
-      let qsTP = `symbol=${pos.symbol}&side=${closeSide}&type=TAKE_PROFIT_MARKET&stopPrice=${tpPriceStr}&closePosition=true&recvWindow=10000&timestamp=${t2}`;
+      let qsTP = `symbol=${pos.symbol}&side=${closeSide}&type=LIMIT&price=${tpPriceStr}&quantity=${qtyRounded}&timeInForce=GTC&reduceOnly=true&recvWindow=10000&timestamp=${t2}`;
       let sigTP = crypto.createHmac('sha256', secretKey).update(qsTP).digest('hex');
       let resTP = await fetch(`https://fapi.binance.com/fapi/v1/order?${qsTP}&signature=${sigTP}`, { method: 'POST', headers: { 'X-MBX-APIKEY': apiKey } });
       let dataTP = await resTP.json();
       if (dataTP.code && dataTP.code < 0) {
-        // Fallback imune: usa reduceOnly=true e quantidade explícita
-        const fbTs2 = Date.now();
-        qsTP = `symbol=${pos.symbol}&side=${closeSide}&type=TAKE_PROFIT_MARKET&stopPrice=${tpPriceStr}&quantity=${qtyRounded}&reduceOnly=true&recvWindow=10000&timestamp=${fbTs2}`;
-        sigTP = crypto.createHmac('sha256', secretKey).update(qsTP).digest('hex');
-        resTP = await fetch(`https://fapi.binance.com/fapi/v1/order?${qsTP}&signature=${sigTP}`, { method: 'POST', headers: { 'X-MBX-APIKEY': apiKey } });
-        dataTP = await resTP.json();
-        if (dataTP.code && dataTP.code < 0) {
-          return res.status(400).json({ success: false, error: `Take Profit Futures falhou: [${dataTP.code}] ${dataTP.msg}` });
-        }
+        return res.status(400).json({ success: false, error: `Take Profit Futures falhou: [${dataTP.code}] ${dataTP.msg}` });
       }
 
       pos.ocoPlaced = true;
