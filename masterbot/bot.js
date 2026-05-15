@@ -336,6 +336,39 @@ function calcADX(candles, period = 14) {
   return { adx: dx, pdi, mdi };
 }
 
+// Bollinger Bands — retorna { upper, middle, lower, width, pct_b }
+function calcBollingerBands(closes, period = 20, mult = 2.0) {
+  if (closes.length < period) return null;
+  const slice = closes.slice(-period);
+  const sma = slice.reduce((a, b) => a + b, 0) / period;
+  const variance = slice.reduce((a, b) => a + Math.pow(b - sma, 2), 0) / period;
+  const stdDev = Math.sqrt(variance);
+  const upper = sma + mult * stdDev;
+  const lower = sma - mult * stdDev;
+  const width = (upper - lower) / sma;     // BB Width normalizada
+  const price = closes[closes.length - 1];
+  const pct_b = stdDev > 0 ? (price - lower) / (upper - lower) : 0.5; // 0=lower,1=upper
+  return { upper, middle: sma, lower, width, pct_b, stdDev };
+}
+
+// Detecta mercado lateral: BB Width abaixo do percentil histórico
+function isRangeMarket(closes, bbPeriod = 20, bbMult = 2.0, widthThreshold = null) {
+  const bb = calcBollingerBands(closes, bbPeriod, bbMult);
+  if (!bb) return { isRange: false, width: null, adxWeak: false };
+  // Calcula histórico de widths para percentil dinâmico
+  const widths = [];
+  for (let i = bbPeriod; i <= closes.length; i++) {
+    const s = closes.slice(i - bbPeriod, i);
+    const m = s.reduce((a, b) => a + b, 0) / bbPeriod;
+    const sd = Math.sqrt(s.reduce((a, b) => a + Math.pow(b - m, 2), 0) / bbPeriod);
+    widths.push(m > 0 ? (2 * 2 * sd) / m : 0);
+  }
+  const sorted = [...widths].sort((a, b) => a - b);
+  const threshold = widthThreshold ?? sorted[Math.floor(sorted.length * 0.35)]; // 35% mais estreito = range
+  const isRange = bb.width <= threshold;
+  return { isRange, width: bb.width, threshold, bb };
+}
+
 function calcSupertrend(candles, period = 7, multiplier = 3.0) {
   if (candles.length < period + 1) return { direction: null };
   const atr = calcATR(candles.slice(-period * 3), period);
@@ -394,6 +427,51 @@ export function applyPlanFilters(candles, plan) {
     const st = calcSupertrend(candles, f.supertrend_period, f.supertrend_mult || 3.0);
     extra.push({ label: `Supertrend(${f.supertrend_period}) bullish`, pass: st.direction === 'up', required: 'bullish', actual: st.direction || '—' });
   }
+
+  // ── Filtros de mercado lateral (Range) ──────────────────────────────────────
+  // bb_range: true → exige BB Width abaixo do percentil 35% (mercado comprimido)
+  if (f.bb_range) {
+    const { isRange, width, threshold } = isRangeMarket(closes, f.bb_period || 20, f.bb_mult || 2.0);
+    extra.push({
+      label: `BB Width em range (< ${threshold != null ? threshold.toFixed(4) : '—'})`,
+      pass: isRange,
+      required: `< ${threshold != null ? threshold.toFixed(4) : '—'}`,
+      actual: width != null ? width.toFixed(4) : '—',
+    });
+  }
+  // adx_max: ADX abaixo de um máximo (confirma ausência de tendência forte)
+  if (f.adx_max != null) {
+    const di = calcADX(candles, 14);
+    extra.push({
+      label: `ADX ≤ ${f.adx_max} (sem tendência forte)`,
+      pass: di != null && di.adx <= f.adx_max,
+      required: `≤ ${f.adx_max}`,
+      actual: di != null ? di.adx.toFixed(1) : '—',
+    });
+  }
+  // bb_pct_b_min / bb_pct_b_max: posição do preço dentro das bandas (0=lower, 1=upper)
+  if (f.bb_pct_b_min != null || f.bb_pct_b_max != null) {
+    const bb = calcBollingerBands(closes, f.bb_period || 20, f.bb_mult || 2.0);
+    const min = f.bb_pct_b_min ?? 0, max = f.bb_pct_b_max ?? 1;
+    extra.push({
+      label: `%B ${min.toFixed(2)}–${max.toFixed(2)} (posição nas bandas)`,
+      pass: bb != null && bb.pct_b >= min && bb.pct_b <= max,
+      required: `${min.toFixed(2)}–${max.toFixed(2)}`,
+      actual: bb != null ? bb.pct_b.toFixed(3) : '—',
+    });
+  }
+  // rsi_range_mid: RSI próximo de 50 (sem momentum direcional forte)
+  if (f.rsi_range_mid) {
+    const rsi = calcRSI(closes, 14);
+    const lo = f.rsi_range_lo ?? 40, hi = f.rsi_range_hi ?? 60;
+    extra.push({
+      label: `RSI ${lo}–${hi} (neutro/range)`,
+      pass: rsi != null && rsi >= lo && rsi <= hi,
+      required: `${lo}–${hi}`,
+      actual: rsi != null ? rsi.toFixed(1) : '—',
+    });
+  }
+
   return extra;
 }
 
@@ -467,6 +545,42 @@ export function runSafetyCheckWarrior(candles, nowMs = candles[candles.length - 
   const stopPrice = atr ? price - atr * 1.5 : price * 0.985;
   const side = allPass ? 'LONG' : null;
   return { results, allPass, side, stopPrice, indicators: { ema9, ema20, vwap, rsi14 } };
+}
+
+// Safety check para mercado lateral: preço tocando banda inferior das BB com RSI em zona neutra-baixa
+export function runSafetyCheckRange(candles, nowMs = candles[candles.length - 1].time) {
+  const price  = candles[candles.length - 1].close;
+  const closes = candles.map(c => c.close);
+  const bb     = calcBollingerBands(closes, 20, 2.0);
+  const rsi14  = calcRSI(closes, 14);
+  const vwap   = calcVWAP(candles, nowMs);
+  const atr    = calcATR(candles, 14);
+
+  const results = [];
+
+  results.push({
+    label: 'Preço próximo da banda inferior (BB %B ≤ 0.35)',
+    pass: bb != null && bb.pct_b <= 0.35,
+    required: '≤ 0.35',
+    actual: bb != null ? bb.pct_b.toFixed(3) : '—',
+  });
+  results.push({
+    label: 'RSI(14) zona neutra-baixa (38–58)',
+    pass: rsi14 != null && rsi14 >= 38 && rsi14 <= 58,
+    required: '38–58',
+    actual: rsi14 != null ? rsi14.toFixed(1) : '—',
+  });
+  results.push({
+    label: 'Preço acima da banda inferior (suporte BB)',
+    pass: bb != null && price >= bb.lower,
+    required: bb != null ? `≥ ${bb.lower.toFixed(4)}` : '—',
+    actual: price.toFixed(4),
+  });
+
+  const allPass  = results.every(r => r.pass);
+  const stopPrice = atr ? price - atr * 1.2 : price * 0.988;
+  const side      = allPass ? 'LONG' : null;
+  return { results, allPass, side, stopPrice, indicators: { bb, rsi14, vwap } };
 }
 
 
@@ -1305,6 +1419,15 @@ async function runSymbolCycle(symbol, timeframe, rulesInput, runMode = 'master')
       usedStrategy = "stormer";
       console.log(`  Strategy: BOTH → Warrior ❌ | Stormer ${stormerResult.allPass ? "✅" : "❌"}`);
     }
+  } else if (stratKey === "range") {
+    // Bloqueia BTCUSDT no 4H (backtest mostrou 25% winrate nessa combinação)
+    if (symbol === 'BTCUSDT' && timeframe.toLowerCase() === '4h') {
+      safetyResult = { results: [{ label: 'BTC 4H bloqueado no plano Range (backtest negativo)', pass: false, required: 'N/A', actual: 'bloqueado' }], allPass: false, side: null, stopPrice: null };
+    } else {
+      safetyResult = runSafetyCheckRange(candles);
+    }
+    activeIndicators = safetyResult.indicators || {};
+    usedStrategy = "range";
   } else if (stratKey === "warrior") {
     safetyResult = runSafetyCheckWarrior(candles);
     activeIndicators = safetyResult.indicators;

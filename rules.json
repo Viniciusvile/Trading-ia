@@ -202,6 +202,42 @@
       }
     },
     {
+      "name": "Alpha_RangeMaster",
+      "description": "📐 Range Market · BTC(1H) · ETH(1H/4H) · SOL(1H/4H) · Compra na banda inferior das BB",
+      "symbols": [
+        "BTCUSDT",
+        "ETHUSDT",
+        "SOLUSDT"
+      ],
+      "timeframes": [
+        "1H",
+        "4H"
+      ],
+      "strategy": "range",
+      "breakeven_pct": 40.0,
+      "sl": {
+        "type": "atr",
+        "multiplier": 1.2
+      },
+      "tp": {
+        "type": "atr",
+        "multiplier": 1.8
+      },
+      "btc_skip_4h": true,
+      "filters": {
+        "bb_range": true,
+        "bb_period": 20,
+        "bb_mult": 2.0,
+        "adx_max": 22,
+        "bb_pct_b_min": 0.0,
+        "bb_pct_b_max": 0.35,
+        "rsi_range_mid": true,
+        "rsi_range_lo": 38,
+        "rsi_range_hi": 55,
+        "volume_mult": 0.8
+      }
+    },
+    {
       "name": "Alpha_BlueChips",
       "description": "Altcoins Liderança · ETH · SOL · 4H",
       "symbols": [
