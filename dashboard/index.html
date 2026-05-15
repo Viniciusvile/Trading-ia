@@ -1062,7 +1062,7 @@ button.sm{padding:5px 10px;font-size:11px;}
     <div style="max-height:280px;overflow-y:auto">
       <table>
         <thead>
-          <tr><th>Horário</th><th>Símbolo</th><th>Modo</th><th>TF</th><th>Preço</th><th>Lado</th><th>Status</th><th>Conds</th></tr>
+          <tr><th>Horário</th><th>Símbolo</th><th>Plano</th><th>TF</th><th>Preço</th><th>Status</th><th>Conds</th></tr>
         </thead>
         <tbody id="bot-log-tbody-standard"></tbody>
       </table>
@@ -3706,12 +3706,11 @@ async function loadBotLog(){
     const futuresLogs = _botLogTrades.filter(t => t.mode === 'futures' || t.plan === 'Alpha_Futures_Trend');
     const spotLogs = _botLogTrades.filter(t => !futuresLogs.includes(t));
 
-    // 2. Popular Tabela Standard — mostra TODOS os trades (spot + futuros) agrupados por ciclo
-    const allLogs = _botLogTrades; // usa tudo, sem filtrar por modo
+    // 2. Popular Tabela Standard — histórico do MasterBot (futuros)
     const cycles = [];
     const CYCLE_GAP_MS = 5 * 60 * 1000;
     let cur = null;
-    for (const t of allLogs) {
+    for (const t of futuresLogs) {
       const ts = new Date(t.timestamp).getTime();
       if (!cur || ts - cur.lastTs > CYCLE_GAP_MS) {
         cur = { ts, lastTs: ts, trades: [] };
@@ -3726,7 +3725,7 @@ async function loadBotLog(){
     let rows = '';
     cycles.slice().reverse().forEach(cycle => {
       const cycleLabel = new Date(cycle.ts).toLocaleString('pt-BR');
-      rows += `<tr><td colspan="8" style="background:var(--surface2);color:var(--muted);font-size:10px;font-weight:700;padding:4px 8px;letter-spacing:.05em;text-transform:uppercase">⏱ Ciclo ${cycleLabel}</td></tr>`;
+      rows += `<tr><td colspan="7" style="background:var(--surface2);color:var(--muted);font-size:10px;font-weight:700;padding:4px 8px;letter-spacing:.05em;text-transform:uppercase">⏱ Ciclo ${cycleLabel}</td></tr>`;
       cycle.trades.slice().reverse().forEach(t => {
         const i = _botLogTrades.indexOf(t);
         const fails=(t.conditions||[]).filter(c=>!c.pass).length;
@@ -3735,25 +3734,21 @@ async function loadBotLog(){
           ? (t.orderPlaced ? '<span style="color:#f59e0b;font-weight:700">⚡ Forçado ✓</span>' : '<span style="color:#f59e0b;font-weight:700">⚡ Forçado</span>')
           : t.allPass ? '<span class="up">✓ OK</span>' : '<span class="down">✗ Bloqueado</span>';
         if ((t.allPass || t.forced) && t.error && !t.orderPlaced) statusHtml = `<span class="down" title="${t.error}">⚠ Erro Exec.</span>`;
-        const isFutures = t.mode === 'futures' || t.plan === 'Alpha_Futures_Trend';
-        const modeTag = isFutures
-          ? `<span style="font-size:9px;padding:1px 6px;border-radius:4px;background:rgba(59,130,246,.15);color:#3b82f6;border:1px solid rgba(59,130,246,.3);font-weight:700">FUTUROS</span>`
-          : `<span style="font-size:9px;padding:1px 6px;border-radius:4px;background:rgba(16,185,129,.15);color:#10b981;border:1px solid rgba(16,185,129,.3);font-weight:700">SPOT</span>`;
+        const planTag = t.plan ? `<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:var(--accent-light);color:var(--accent);border:1px solid var(--accent-border)">${t.plan}</span>` : '—';
         rows += `<tr style="cursor:pointer;transition:background .15s"
           onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''"
           ondblclick="openTradeDetail(${i < 0 ? 0 : i})" title="Duplo clique para ver detalhes">
           <td style="font-size:11px;color:var(--muted)">${new Date(t.timestamp).toLocaleString('pt-BR')}</td>
           <td><b>${t.symbol||'—'}</b></td>
-          <td>${modeTag}</td>
+          <td>${planTag}</td>
           <td style="color:var(--muted)">${t.timeframe||'—'}</td>
           <td style="font-family:monospace">$${Number(t.price||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}</td>
-          <td style="color:var(--muted)">${t.side||'—'}</td>
           <td>${statusHtml}</td>
           <td style="font-size:11px;color:var(--muted);user-select:none" title="Duplo clique para detalhes">${total-fails}/${total}</td>
         </tr>`;
       });
     });
-    $('bot-log-tbody-standard').innerHTML=rows||'<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:14px">Nenhum ciclo encontrado.</td></tr>';
+    $('bot-log-tbody-standard').innerHTML=rows||'<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:14px">Nenhum ciclo do MasterBot encontrado.</td></tr>';
     
     // 3. Popular Tabela de Futuros
     let fRows = '';
