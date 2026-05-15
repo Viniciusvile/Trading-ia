@@ -1806,21 +1806,10 @@ app.post('/api/bot/positions/:id/oco', async (req, res) => {
       const qtyRounded = pos.quantity.toFixed(pQty);
       const closeSide = pos.side === 'LONG' ? 'SELL' : 'BUY';
 
-      // 1. Tenta Stop Loss (STOP Limit com Mark Price para compatibilidade)
-      const slPriceLimit = pos.side === 'LONG' 
-        ? (parseFloat(slPriceStr) * 0.998).toFixed(pPrice)
-        : (parseFloat(slPriceStr) * 1.002).toFixed(pPrice);
-
-      let orderIdSL = null;
-      const t1 = Date.now();
-      let qsSL = `symbol=${pos.symbol}&side=${closeSide}&type=STOP&stopPrice=${slPriceStr}&price=${slPriceLimit}&quantity=${qtyRounded}&timeInForce=GTC&reduceOnly=true&workingType=MARK_PRICE&recvWindow=10000&timestamp=${t1}`;
-      let sigSL = crypto.createHmac('sha256', secretKey).update(qsSL).digest('hex');
-      let resSL = await fetch(`https://fapi.binance.com/fapi/v1/order?${qsSL}&signature=${sigSL}`, { method: 'POST', headers: { 'X-MBX-APIKEY': apiKey } });
-      let dataSL = await resSL.json();
-      if (dataSL.code && dataSL.code < 0) {
-        return res.status(400).json({ success: false, error: `Stop Loss Futures falhou: [${dataSL.code}] ${dataSL.msg}` });
-      }
-      orderIdSL = dataSL.orderId;
+      // 1. O Stop Loss não será enviado para a Binance (evita erro -4120 de restrição regional)
+      // O bot.js monitorará o preço e fechará a mercado se bater no Stop.
+      console.log(`  ℹ [${pos.symbol}] SL de Futuros será monitorado localmente pelo robô para evitar erro -4120.`);
+      let orderIdSL = 'LOCAL_WATCHDOG';
 
       // 2. Tenta Take Profit (LIMIT padrão)
       const t2 = Date.now();
