@@ -1754,15 +1754,19 @@ async function run(runMode = 'manual') {
       timeframes = (activePlan?.timeframes?.length) ? activePlan.timeframes : (refreshedRules.timeframes || ["15m"]);
       currentRules = refreshedRules;
       
-      // ISOLAR AMBIENTES: MasterBot (Spot) executa todos os ativos checados na sua Watchlist;
+      // ISOLAR AMBIENTES: MasterBot (Spot) executa ativos com cobertura em plano não-futures;
       // FuturesBot executa exclusivamente os ativos configurados no plano de Futuros.
       const fPlan = (refreshedRules.group_plans || []).find(p => p.mode === 'futures' || p.name === 'Alpha_Futures_Trend');
+      const spotSymbols = new Set();
+      (refreshedRules.group_plans || []).forEach(p => {
+        if (p.mode !== 'futures') (p.symbols || []).forEach(s => spotSymbols.add(s));
+      });
       if (runMode === 'futures') {
         watchlistToUse = fPlan?.symbols?.length ? fPlan.symbols : watchlistToUse.filter(s => futuresSymbols.has(s));
       } else {
-        // No modo Spot, garantimos que os ativos pertencentes a planos de Futuros
-        // jamais sejam varridos nem executados acidentalmente pelo bot Spot
-        watchlistToUse = watchlistToUse.filter(s => !futuresSymbols.has(s));
+        // No modo Spot, removemos apenas símbolos EXCLUSIVAMENTE de futuros
+        // (símbolos que estão em planos de futuros mas também em planos spot continuam permitidos)
+        watchlistToUse = watchlistToUse.filter(s => spotSymbols.has(s) || !futuresSymbols.has(s));
       }
     } else {
       watchlistToUse = [CONFIG.symbol];
