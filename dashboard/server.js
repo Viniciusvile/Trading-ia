@@ -1811,9 +1811,9 @@ app.post('/api/bot/positions/:id/oco', async (req, res) => {
       console.log(`  ℹ [${pos.symbol}] SL de Futuros será monitorado localmente pelo robô para evitar erro -4120.`);
       let orderIdSL = 'LOCAL_WATCHDOG';
 
-      // 2. Tenta Take Profit (LIMIT padrão)
+      // 2. Tenta Take Profit (LIMIT padrão) - Sem reduceOnly para evitar erro -2022
       const t2 = Date.now();
-      let qsTP = `symbol=${pos.symbol}&side=${closeSide}&type=LIMIT&price=${tpPriceStr}&quantity=${qtyRounded}&timeInForce=GTC&reduceOnly=true&recvWindow=10000&timestamp=${t2}`;
+      let qsTP = `symbol=${pos.symbol}&side=${closeSide}&type=LIMIT&price=${tpPriceStr}&quantity=${qtyRounded}&timeInForce=GTC&recvWindow=10000&timestamp=${t2}`;
       let sigTP = crypto.createHmac('sha256', secretKey).update(qsTP).digest('hex');
       let resTP = await fetch(`https://fapi.binance.com/fapi/v1/order?${qsTP}&signature=${sigTP}`, { method: 'POST', headers: { 'X-MBX-APIKEY': apiKey } });
       let dataTP = await resTP.json();
@@ -1822,10 +1822,11 @@ app.post('/api/bot/positions/:id/oco', async (req, res) => {
       }
 
       pos.ocoPlaced = true;
-      pos.ocoOrderListId = `FUT-STOP-${orderIdSL || Date.now()}`;
+      pos.ocoOrderListId = `FUT-TP-${dataTP.orderId || Date.now()}`;
       pos.ocoManual = true;
+      pos.slManagedLocally = true; // Ativa o monitoramento local no bot.js para contornar erro -4120
       await db.savePosition(pos);
-      return res.json({ success: true, orderListId: pos.ocoOrderListId });
+      return res.json({ success: true, orderListId: pos.ocoOrderListId, message: 'Take Profit enviado para Binance. Stop Loss monitorado localmente pelo robô.' });
     }
 
     // --- COLOCAR OCO SPOT (Lógica inalterada) ---

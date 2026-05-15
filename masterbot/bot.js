@@ -734,9 +734,9 @@ async function placeFuturesStopOrders(symbol, side, quantity, stopPrice, tpPrice
       } catch(e) { console.log(`  ⚠ [${symbol}] Erro de rede no SL Futures: ${e.message}`); }
     }
 
-    // 2. Tenta Take Profit (Usando LIMIT padrão para fechar posição - Infalível contra erro -4120)
+    // 2. Tenta Take Profit (Usando LIMIT padrão - Sem reduceOnly para evitar erro -2022)
     if (!tpSuccess) {
-      let tpQuery = `symbol=${symbol}&side=${closeSide}&type=LIMIT&price=${tppRounded}&quantity=${qtyRounded}&timeInForce=GTC&reduceOnly=true&recvWindow=10000&timestamp=${timestamp}`;
+      let tpQuery = `symbol=${symbol}&side=${closeSide}&type=LIMIT&price=${tppRounded}&quantity=${qtyRounded}&timeInForce=GTC&recvWindow=10000&timestamp=${timestamp}`;
       let tpSig = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(tpQuery).digest("hex");
       try {
         let res = await fetch(`https://fapi.binance.com/fapi/v1/order?${tpQuery}&signature=${tpSig}`, {
@@ -959,35 +959,39 @@ async function checkOCOStatus(symbol, orderListId) {
 
 // ─── Sell Order ──────────────────────────────────────────────────────────────
 
-async function placeBinanceSellOrder(symbol, quantity) {
-  let timestamp = Date.now();
-  try {
-    const timeRes = await fetch("https://api.binance.com/api/v3/time");
-    const timeData = await timeRes.json();
-    timestamp = timeData.serverTime;
-  } catch (e) {
-    timestamp = Date.now() - 100000;
+async function closePositionMarket(pos) {
+  const symbol = pos.symbol;
+  const isFut = isFuturesPosition(pos);
+  const side = pos.side === 'LONG' ? 'SELL' : 'BUY'; // Lado contrário para fechar
+  const timestamp = Date.now();
+  const qty = await roundQty(symbol, Math.abs(pos.quantity), isFut);
+
+  console.log(`  🚨 [${symbol}] Executando FECHAMENTO DE MERCADO (${isFut ? 'FUTUROS' : 'SPOT'}) | Side: ${side} | Qty: ${qty}`);
+
+  if (isFut) {
+    // FECHAMENTO FUTUROS
+    const queryString = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qty}&reduceOnly=true&recvWindow=10000&timestamp=${timestamp}`;
+    const signature = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(queryString).digest("hex");
+    const url = `https://fapi.binance.com/fapi/v1/order?${queryString}&signature=${signature}`;
+    const res = await fetch(url, { method: "POST", headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey } });
+    const data = await res.json();
+    if (data.code && data.code < 0) throw new Error(`Futures Market Close failed: [${data.code}] ${data.msg}`);
+    return { orderId: String(data.orderId) };
+  } else {
+    // FECHAMENTO SPOT
+    const queryString = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qty}&recvWindow=10000&timestamp=${timestamp}`;
+    const signature = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(queryString).digest("hex");
+    const url = `https://api.binance.com/api/v3/order?${queryString}&signature=${signature}`;
+    const res = await fetch(url, { method: "POST", headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey } });
+    const data = await res.json();
+    if (data.code && data.code < 0) throw new Error(`Spot Market Close failed: [${data.code}] ${data.msg}`);
+    return { orderId: String(data.orderId) };
   }
+}
 
-  // 1. LIMPEZA: Cancela QUALQUER ordem aberta para liberar o saldo total
-  try {
-    const cancelRes = await fetch(`https://api.binance.com/api/v3/openOrders?symbol=${symbol}&timestamp=${timestamp}&signature=${crypto.createHmac('sha256', CONFIG.binance.secretKey).update(`symbol=${symbol}&timestamp=${timestamp}`).digest('hex')}`, {
-      method: 'DELETE',
-      headers: { 'X-MBX-APIKEY': CONFIG.binance.apiKey }
-    });
-    console.log(`  🧹 [${symbol}] Ordens abertas canceladas antes da venda final.`);
-  } catch (e) {}
-
-  // 2. PRECISÃO: Arredonda a quantidade conforme as regras da Binance (LOT_SIZE)
-  const qtyRounded = await roundQty(symbol, parseFloat(quantity));
-  const queryString = `symbol=${symbol}&side=SELL&type=MARKET&quantity=${qtyRounded}&recvWindow=10000&timestamp=${timestamp}`;
-  const signature = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(queryString).digest("hex");
-  const url = `${CONFIG.binance.baseUrl}/api/v3/order?${queryString}&signature=${signature}`;
-  
-  const res = await fetch(url, { method: "POST", headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey } });
-  const data = await res.json();
-  if (data.code && data.code < 0) throw new Error(`Binance SELL failed: [${data.code}] ${data.msg}`);
-  return { orderId: String(data.orderId), executedQty: data.executedQty, cummulativeQuoteQty: data.cummulativeQuoteQty };
+async function placeBinanceSellOrder(symbol, quantity) {
+  // Mantido por retrocompatibilidade, mas closePositionMarket é preferível
+  return closePositionMarket({ symbol, quantity, side: 'LONG' });
 }
 
 // ─── Position Monitor ─────────────────────────────────────────────────────────
@@ -1111,8 +1115,8 @@ async function monitorPositions() {
         continue;
       }
 
-      // ── OCO manual (colocado pelo usuário na Binance): só monitora visualmente ──
-      if (pos.ocoManual && pos.ocoPlaced && !CONFIG.paperTrading) {
+      // ── OCO manual (colocado pelo usuário na Binance): monitora e ativa Watchdog se necessário ──
+      if (pos.ocoManual && pos.ocoPlaced && !CONFIG.paperTrading && !pos.slManagedLocally) {
         const candles = await fetchCandles(pos.symbol, pos.timeframe, 5);
         const price = candles[candles.length - 1].close;
         const pnlUnrealized = ((price - pos.entryPrice) * pos.quantity).toFixed(8);
@@ -1121,42 +1125,31 @@ async function monitorPositions() {
         continue;
       }
 
-      // ── TENTATIVA DE SINCRONIZAÇÃO OCO (Caso tenha falhado na compra ou bot reiniciado) ──
-      if (!pos.ocoPlaced && !CONFIG.paperTrading && pos.stopPrice && pos.takeProfitPrice) {
-        try {
-          console.log(`  🎯 [${pos.symbol}] Tentando sincronizar OCO para posição aberta #${pos.id}...`);
-          const ocoResult = await placeOCOOrder(pos.symbol, String(pos.quantity), pos.takeProfitPrice, pos.stopPrice);
-          pos.ocoPlaced = true;
-          pos.ocoOrderListId = ocoResult.orderListId;
-          console.log(`  ✅ [${pos.symbol}] OCO sincronizada com sucesso: ID #${pos.ocoOrderListId}`);
-          await db.savePositions(positions);
-          continue;
-        } catch (syncErr) {
-          console.log(`  ❌ [${pos.symbol}] Falha na sincronização OCO automática: ${syncErr.message}`);
-        }
-      }
-
-      // ── Posição sem OCO (paper trading ou OCO falhou): monitoramento manual ──
+      // ── MONITORAMENTO LOCAL / WATCHDOG (Para contornar erro -4120 ou Paper Trading) ──
       const candles = await fetchCandles(pos.symbol, pos.timeframe, 100);
       const price = candles[candles.length - 1].close;
-      const closes = candles.map(c => c.close);
-      const ema9 = calcEMA(closes, 9);
-      const ema20 = calcEMA(closes, 20);
-
+      
       let exitReason = null;
-      if (price <= pos.stopPrice) {
-        exitReason = `STOP LOSS @ $${price} (limite: $${pos.stopPrice})`;
-      } else if (price >= pos.takeProfitPrice) {
-        exitReason = `TAKE PROFIT @ $${price} (alvo: $${pos.takeProfitPrice})`;
-      } else if (ema9 < ema20) {
-        exitReason = `REVERSÃO EMA — EMA9 cruzou abaixo da EMA20`;
+      if (pos.side === 'SHORT') {
+        if (price >= pos.stopPrice) exitReason = `WATCHDOG: STOP LOSS (SHORT) @ $${price} (limite: $${pos.stopPrice})`;
+        else if (price <= pos.takeProfitPrice) exitReason = `WATCHDOG: TAKE PROFIT (SHORT) @ $${price} (alvo: $${pos.takeProfitPrice})`;
+      } else {
+        if (price <= pos.stopPrice) exitReason = `WATCHDOG: STOP LOSS (LONG) @ $${price} (limite: $${pos.stopPrice})`;
+        else if (price >= pos.takeProfitPrice) exitReason = `WATCHDOG: TAKE PROFIT (LONG) @ $${price} (alvo: $${pos.takeProfitPrice})`;
+      }
+
+      // Filtro extra: se a OCO estiver na exchange e for TP, ela fecha sozinha. 
+      // Mas se slManagedLocally estiver ativo, nós forçamos a saída aqui se bater no SL.
+      if (exitReason && pos.slManagedLocally && exitReason.includes('TAKE PROFIT')) {
+        // Deixa a ordem LIMIT da Binance cuidar do TP para evitar duplicidade
+        exitReason = null; 
       }
 
       if (exitReason) {
         console.log(`\n🔔 [${pos.symbol}] Saída: ${exitReason}`);
         if (!CONFIG.paperTrading) {
           try {
-            const sellOrder = await placeBinanceSellOrder(pos.symbol, pos.quantity);
+            const sellOrder = await closePositionMarket(pos);
             const pnl = ((price - pos.entryPrice) * pos.quantity).toFixed(4);
             const pnlPct = (((price - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2);
             const usdBrl = 5.7;
