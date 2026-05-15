@@ -1866,7 +1866,19 @@ function startScheduler(runMode = 'master') {
   setInterval(heartbeat, ms);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// Detecta se este arquivo é o entry point — funciona com node direto E com wrappers (PM2 ProcessContainerFork)
+const __isMainEntry = (() => {
+  try {
+    const selfPath = fileURLToPath(import.meta.url);
+    if (process.argv[1] === selfPath) return true;
+    // Sob PM2, process.argv[1] aponta para ProcessContainerFork.js;
+    // nesse caso o entry real está em process.env.pm_exec_path
+    if (process.env.pm_exec_path && process.env.pm_exec_path === selfPath) return true;
+    return false;
+  } catch (e) { return false; }
+})();
+
+if (__isMainEntry) {
   if (process.argv.includes("--tax-summary")) {
     generateTaxSummary();
   } else if (process.argv.includes("--futures")) {
