@@ -712,14 +712,13 @@ async function placeFuturesStopOrders(symbol, side, quantity, stopPrice, tpPrice
     const tppRounded = await roundPrice(symbol, tpPrice, true);
     const qtyRounded = quantity ? await roundQty(symbol, Math.abs(quantity), true) : 0;
 
-    // 1. Tenta Stop Loss (Usando STOP - Stop Limit para evitar erro -4120 de Algo Order)
+    // 1. Tenta Stop Loss (Usando STOP com workingType=MARK_PRICE e timeInForce=GTC)
     if (!slSuccess) {
-      // Para o SL (Limit), usamos um preço levemente pior (0.2%) que o stopPrice para garantir execução rápida (estilo market)
       const slPriceLimit = side === 'LONG' 
         ? await roundPrice(symbol, parseFloat(slpRounded) * 0.998, true)
         : await roundPrice(symbol, parseFloat(slpRounded) * 1.002, true);
 
-      let slQuery = `symbol=${symbol}&side=${closeSide}&type=STOP&stopPrice=${slpRounded}&price=${slPriceLimit}&quantity=${qtyRounded}&reduceOnly=true&recvWindow=10000&timestamp=${timestamp}`;
+      let slQuery = `symbol=${symbol}&side=${closeSide}&type=STOP&stopPrice=${slpRounded}&price=${slPriceLimit}&quantity=${qtyRounded}&timeInForce=GTC&reduceOnly=true&workingType=MARK_PRICE&recvWindow=10000&timestamp=${timestamp}`;
       let slSig = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(slQuery).digest("hex");
       try {
         let res = await fetch(`https://fapi.binance.com/fapi/v1/order?${slQuery}&signature=${slSig}`, {
@@ -727,17 +726,17 @@ async function placeFuturesStopOrders(symbol, side, quantity, stopPrice, tpPrice
         });
         let data = await res.json();
         if (data.code && data.code < 0) {
-          console.log(`  ⚠ [${symbol}] SL Futures (STOP) falhou (tentativa ${attempt+1}): [${data.code}] ${data.msg}`);
+          console.log(`  ⚠ [${symbol}] SL Futures (STOP) falhou: [${data.code}] ${data.msg}`);
         } else {
-          console.log(`  ✅ [${symbol}] SL Futures (Stop-Limit) ativado @ Stop: $${slpRounded} | Limit: $${slPriceLimit}`);
+          console.log(`  ✅ [${symbol}] SL Futures (Stop-Limit) ativado @ Stop: $${slpRounded} | MarkPrice Trigger`);
           slSuccess = true;
         }
       } catch(e) { console.log(`  ⚠ [${symbol}] Erro de rede no SL Futures: ${e.message}`); }
     }
 
-    // 2. Tenta Take Profit (Usando TAKE_PROFIT - Stop Limit para evitar erro -4120)
+    // 2. Tenta Take Profit (Usando LIMIT padrão para fechar posição - Infalível contra erro -4120)
     if (!tpSuccess) {
-      let tpQuery = `symbol=${symbol}&side=${closeSide}&type=TAKE_PROFIT&stopPrice=${tppRounded}&price=${tppRounded}&quantity=${qtyRounded}&reduceOnly=true&recvWindow=10000&timestamp=${timestamp}`;
+      let tpQuery = `symbol=${symbol}&side=${closeSide}&type=LIMIT&price=${tppRounded}&quantity=${qtyRounded}&timeInForce=GTC&reduceOnly=true&recvWindow=10000&timestamp=${timestamp}`;
       let tpSig = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(tpQuery).digest("hex");
       try {
         let res = await fetch(`https://fapi.binance.com/fapi/v1/order?${tpQuery}&signature=${tpSig}`, {
@@ -745,9 +744,9 @@ async function placeFuturesStopOrders(symbol, side, quantity, stopPrice, tpPrice
         });
         let data = await res.json();
         if (data.code && data.code < 0) {
-          console.log(`  ⚠ [${symbol}] TP Futures (TAKE_PROFIT) falhou (tentativa ${attempt+1}): [${data.code}] ${data.msg}`);
+          console.log(`  ⚠ [${symbol}] TP Futures (LIMIT) falhou: [${data.code}] ${data.msg}`);
         } else {
-          console.log(`  ✅ [${symbol}] TP Futures (Take-Profit-Limit) ativado @ $${tppRounded}`);
+          console.log(`  ✅ [${symbol}] TP Futures (Limit Order) ativado @ $${tppRounded}`);
           tpSuccess = true;
         }
       } catch(e) { console.log(`  ⚠ [${symbol}] Erro de rede no TP Futures: ${e.message}`); }
