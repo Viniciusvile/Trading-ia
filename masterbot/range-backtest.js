@@ -15,33 +15,31 @@ import { fileURLToPath } from "url";
 const __dir = dirname(fileURLToPath(import.meta.url));
 dotenvConfig({ path: join(__dir, "..", ".env") });
 
-import { fetchCandles, applyPlanFilters, calcPlanStopTP, calcATR, runSafetyCheckRange } from "./bot.js";
+import { fetchCandles, applyPlanFilters, calcPlanStopTP, calcATR, runSafetyCheckRange, runSafetyCheckRangeV2 } from "./bot.js";
 
 // ─── Plano testado ────────────────────────────────────────────────────────────
 const PLAN = {
   name: "Alpha_RangeMaster",
-  strategy: "warrior",
-  sl: { type: "atr", multiplier: 1.2 },
-  tp: { type: "atr", multiplier: 1.8 },
+  strategy: "range-v2",
+  sl: { type: "atr", multiplier: 1.5 },
+  tp: { type: "boundary", multiplier: 1.0 },
   filters: {
-    bb_range: true,
-    bb_period: 20,
-    bb_mult: 2.0,
-    adx_max: 22,
-    bb_pct_b_min: 0.0,
-    bb_pct_b_max: 0.35,
-    rsi_range_mid: true,
-    rsi_range_lo: 38,
-    rsi_range_hi: 55,
-    volume_mult: 0.8,
+    adx_max: 28,
+    adx_4h_max: 28,
+    choppiness_min: 45,
+    volume_max_mult: 1.3,
+    rsi_long_max: 42,
+    rsi_short_min: 58,
+    stoch_k_long_max: 30,
+    stoch_k_short_min: 70,
+    sr_bars: 24,
+    sr_atr_mult: 1.5,
+    min_rr: 1.5
   },
 };
 
 const TARGETS = [
   { symbol: "BTCUSDT", timeframe: "1H" },
-  { symbol: "BTCUSDT", timeframe: "4H" },
-  { symbol: "ETHUSDT", timeframe: "1H" },
-  { symbol: "ETHUSDT", timeframe: "4H" },
   { symbol: "SOLUSDT", timeframe: "1H" },
   { symbol: "SOLUSDT", timeframe: "4H" },
 ];
@@ -57,42 +55,45 @@ function simulate(candles) {
   while (i < candles.length) {
     const window = candles.slice(0, i + 1);
 
-    // Safety check específico para range (BB lower + RSI neutro)
-    const safety = runSafetyCheckRange(window);
-
-    // Filtros adicionais do plano (bb_range, adx_max, volume)
+    // Filtros de Regime (ADX, Choppiness, Volume) via applyPlanFilters
     const extras = applyPlanFilters(window, PLAN);
-    const allPass = safety.allPass && extras.every(e => e.pass);
+    if (!extras.every(e => e.pass)) { i++; continue; }
 
-    if (!allPass) { i++; continue; }
+    // Gatilho de Entrada via Range v2
+    const safety = runSafetyCheckRangeV2(window, PLAN.filters);
+    if (!safety.allPass) { i++; continue; }
 
     const bar        = candles[i];
     const entryPrice = bar.close;
-    const atr        = calcATR(window, 14);
-    if (!atr) { i++; continue; }
-
-    const { stop, tp } = calcPlanStopTP(entryPrice, atr, PLAN, "LONG");
+    const side       = safety.side;
+    const stop       = safety.stopPrice;
+    const tp         = safety.takeProfitPrice;
 
     let exitPrice = null, exitIdx = null, result = "timeout";
 
     for (let j = i + 1; j < Math.min(candles.length, i + 1 + MAX_HOLD); j++) {
       const b = candles[j];
-      if (b.low  <= stop) { exitPrice = stop; exitIdx = j; result = "loss"; break; }
-      if (b.high >= tp)   { exitPrice = tp;   exitIdx = j; result = "win";  break; }
+      if (side === 'LONG') {
+        if (b.low  <= stop) { exitPrice = stop; exitIdx = j; result = "loss"; break; }
+        if (b.high >= tp)   { exitPrice = tp;   exitIdx = j; result = "win";  break; }
+      } else {
+        if (b.high >= stop) { exitPrice = stop; exitIdx = j; result = "loss"; break; }
+        if (b.low  <= tp)   { exitPrice = tp;   exitIdx = j; result = "win";  break; }
+      }
     }
 
     if (exitPrice == null) {
       const last = candles[Math.min(candles.length - 1, i + MAX_HOLD)];
       exitPrice = last.close;
       exitIdx   = Math.min(candles.length - 1, i + MAX_HOLD);
-      result    = exitPrice >= entryPrice ? "win" : "loss";
+      result    = (side === 'LONG' ? exitPrice >= entryPrice : exitPrice <= entryPrice) ? "win" : "loss";
     }
 
-    const returnPct  = ((exitPrice - entryPrice) / entryPrice) * 100;
+    const returnPct  = side === 'LONG' ? ((exitPrice - entryPrice) / entryPrice) * 100 : ((entryPrice - exitPrice) / entryPrice) * 100;
     const holdBars   = exitIdx - i;
     const entryDate  = new Date(bar.time).toISOString().slice(0, 16).replace("T", " ");
 
-    trades.push({ entryIdx: i, exitIdx, entryPrice, exitPrice, stop, tp, result, returnPct, holdBars, entryDate });
+    trades.push({ entryIdx: i, exitIdx, entryPrice, exitPrice, stop, tp, result, returnPct, holdBars, entryDate, side });
     i = exitIdx + 1;
   }
 
@@ -160,7 +161,8 @@ function printResult(symbol, timeframe, trades, s) {
   const last5 = trades.slice(-5);
   for (const t of last5) {
     const icon = t.result === "win" ? "✅" : "❌";
-    console.log(`    ${icon} ${t.entryDate}  entrada $${t.entryPrice.toFixed(4)}  SL $${t.stop.toFixed(4)}  TP $${t.tp.toFixed(4)}  → ${pct(t.returnPct)} (${t.holdBars}b)`);
+    const side = t.side === 'LONG' ? 'L' : 'S';
+    console.log(`    ${icon} [${side}] ${t.entryDate}  entrada $${t.entryPrice.toFixed(4)}  SL $${t.stop.toFixed(4)}  TP $${t.tp.toFixed(4)}  → ${pct(t.returnPct)} (${t.holdBars}b)`);
   }
 }
 
@@ -176,9 +178,19 @@ async function main() {
 
   for (const { symbol, timeframe } of TARGETS) {
     process.stdout.write(`\n⏳ Buscando ${symbol} ${timeframe}...`);
-    let candles;
+    let candles = [];
     try {
-      candles = await fetchCandles(symbol, timeframe, 1000, false);
+      if (timeframe === '1H' || timeframe === '1h') {
+        const c1 = await fetchCandles(symbol, timeframe, 1000, false);
+        const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=440&endTime=${c1[0].time - 1}`;
+        const res = await fetch(url);
+        const d2 = await res.json();
+        const c2 = d2.map(d => ({ time: d[0], open: parseFloat(d[1]), high: parseFloat(d[2]), low: parseFloat(d[3]), close: parseFloat(d[4]), volume: parseFloat(d[5]) }));
+        candles = [...c2, ...c1];
+      } else {
+        // Para 4H, 60 dias = 360 candles
+        candles = await fetchCandles(symbol, timeframe, 360, false);
+      }
     } catch (e) {
       console.log(` ERRO: ${e.message}`);
       continue;

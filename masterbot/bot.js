@@ -397,6 +397,49 @@ function calcSupertrend(candles, period = 7, multiplier = 3.0) {
   return { direction, lowerBand, upperBand };
 }
 
+// Choppiness Index — formula: 100 * LOG10( SUM(ATR(1), n) / (MaxHigh(n) - MinLow(n)) ) / LOG10(n)
+function calcChoppiness(candles, period = 14) {
+  if (candles.length < period + 1) return null;
+  const slice = candles.slice(-period);
+  const high = Math.max(...slice.map(c => c.high));
+  const low = Math.min(...slice.map(c => c.low));
+  
+  let sumTR = 0;
+  for (let i = candles.length - period; i < candles.length; i++) {
+    const c = candles[i];
+    const prev = candles[i-1];
+    const tr = Math.max(c.high - c.low, Math.abs(c.high - prev.close), Math.abs(c.low - prev.close));
+    sumTR += tr;
+  }
+  
+  if (high === low) return 100;
+  return 100 * (Math.log10(sumTR / (high - low)) / Math.log10(period));
+}
+
+// Stochastic Oscillator — retorna { k, d, prevK, prevD }
+function calcStochastic(candles, kPeriod = 14, dPeriod = 3) {
+  if (candles.length < kPeriod + dPeriod) return null;
+  
+  const getK = (subset) => {
+    const close = subset[subset.length - 1].close;
+    const high = Math.max(...subset.map(c => c.high));
+    const low = Math.min(...subset.map(c => c.low));
+    return high === low ? 50 : ((close - low) / (high - low)) * 100;
+  };
+
+  const ks = [];
+  for (let i = candles.length - dPeriod - 1; i < candles.length; i++) {
+    ks.push(getK(candles.slice(i - kPeriod + 1, i + 1)));
+  }
+
+  const k = ks[ks.length - 1];
+  const d = ks.slice(-dPeriod).reduce((a, b) => a + b, 0) / dPeriod;
+  const prevK = ks[ks.length - 2];
+  const prevD = ks.slice(-dPeriod - 1, -1).reduce((a, b) => a + b, 0) / dPeriod;
+
+  return { k, d, prevK, prevD };
+}
+
 export function applyPlanFilters(candles, plan) {
   const extra = [];
   const f = plan.filters || {};
@@ -427,6 +470,16 @@ export function applyPlanFilters(candles, plan) {
     const avgVol = vols.slice(-21, -1).reduce((a, b) => a + b, 0) / 20;
     const curVol = vols[vols.length - 1];
     extra.push({ label: `Volume ≥ ${f.volume_mult}× média`, pass: avgVol > 0 && curVol >= avgVol * f.volume_mult, required: `≥ ${(avgVol * f.volume_mult).toFixed(0)}`, actual: curVol.toFixed(0) });
+  }
+  if (f.volume_max_mult != null) {
+    const vols = candles.map(c => c.volume);
+    const avgVol = vols.slice(-21, -1).reduce((a, b) => a + b, 0) / 20;
+    const curVol = vols[vols.length - 1];
+    extra.push({ label: `Volume ≤ ${f.volume_max_mult}× média (sem breakout)`, pass: avgVol > 0 && curVol <= avgVol * f.volume_max_mult, required: `≤ ${(avgVol * f.volume_max_mult).toFixed(0)}`, actual: curVol.toFixed(0) });
+  }
+  if (f.choppiness_min != null) {
+    const chop = calcChoppiness(candles, 14);
+    extra.push({ label: `Choppiness ≥ ${f.choppiness_min} (mercado lateral)`, pass: chop != null && chop >= f.choppiness_min, required: `≥ ${f.choppiness_min}`, actual: chop != null ? chop.toFixed(1) : '—' });
   }
   if (f.macd_positive) {
     const hist = calcMACDHist(closes);
@@ -598,6 +651,86 @@ export function runSafetyCheckRange(candles, nowMs = candles[candles.length - 1]
   return { results, allPass, side, stopPrice, indicators: { bb, rsi14, vwap } };
 }
 
+// Alpha_RangeMaster v2 — Mean Reversion com zonas de suporte/resistência e osciladores
+export function runSafetyCheckRangeV2(candles, planFilters = {}) {
+  const last = candles[candles.length - 1];
+  const price = last.close;
+  const closes = candles.map(c => c.close);
+  const atr = calcATR(candles, 14);
+  const rsi = calcRSI(closes, 14);
+  const stoch = calcStochastic(candles, 14, 3);
+  
+  const srBars = planFilters.sr_bars || 24;
+  const srAtrMult = planFilters.sr_atr_mult || 1.5;
+  const srWindow = candles.slice(-srBars);
+  const resistance = Math.max(...srWindow.map(c => c.high));
+  const support = Math.min(...srWindow.map(c => c.low));
+  
+  const results = [];
+  let side = null;
+  let stopPrice = null;
+  let takeProfitPrice = null;
+
+  // Filtros de Gatilho (RSI e Estocástico)
+  const isRsiLong = rsi != null && rsi < (planFilters.rsi_long_max || 42);
+  const isRsiShort = rsi != null && rsi > (planFilters.rsi_short_min || 58);
+  const isStochLong = stoch != null && stoch.k < (planFilters.stoch_k_long_max || 30) && stoch.k > stoch.d && stoch.prevK <= stoch.prevD;
+  const isStochShort = stoch != null && stoch.k > (planFilters.stoch_k_short_min || 70) && stoch.k < stoch.d && stoch.prevK >= stoch.prevD;
+
+  // Proximidade das bordas (Zona de Entrada)
+  const entryAtrBuffer = atr * srAtrMult;
+  const inLongZone = price <= support + entryAtrBuffer;
+  const inShortZone = price >= resistance - entryAtrBuffer;
+
+  if (inLongZone && isRsiLong && isStochLong) {
+    side = 'LONG';
+    stopPrice = support - (atr * 0.3);
+    takeProfitPrice = resistance - (atr * 0.3);
+  } else if (inShortZone && isRsiShort && isStochShort) {
+    side = 'SHORT';
+    stopPrice = resistance + (atr * 0.3);
+    takeProfitPrice = support + (atr * 0.3);
+  }
+
+  results.push({
+    label: `RSI(14) ${side === 'LONG' ? 'comprado' : side === 'SHORT' ? 'vendido' : 'em zona'}`,
+    pass: (side === 'LONG' && isRsiLong) || (side === 'SHORT' && isRsiShort) || (side === null && (isRsiLong || isRsiShort)),
+    required: side === 'SHORT' ? `> ${planFilters.rsi_short_min || 58}` : `< ${planFilters.rsi_long_max || 42}`,
+    actual: rsi != null ? rsi.toFixed(1) : '—'
+  });
+
+  results.push({
+    label: `Stoch %K/${side === 'LONG' ? 'Up' : side === 'SHORT' ? 'Down' : 'Cross'}`,
+    pass: (side === 'LONG' && isStochLong) || (side === 'SHORT' && isStochShort) || (side === null && (isStochLong || isStochShort)),
+    required: side === 'SHORT' ? 'K > 70 & cross down' : 'K < 30 & cross up',
+    actual: stoch != null ? `${stoch.k.toFixed(1)}/${stoch.d.toFixed(1)}` : '—'
+  });
+
+  results.push({
+    label: `Preço na zona de ${side === 'LONG' ? 'Suporte' : 'Resistência'}`,
+    pass: (side === 'LONG' && inLongZone) || (side === 'SHORT' && inShortZone) || (side === null && (inLongZone || inShortZone)),
+    required: side === 'SHORT' ? `≥ ${ (resistance - entryAtrBuffer).toFixed(2) }` : `≤ ${ (support + entryAtrBuffer).toFixed(2) }`,
+    actual: price.toFixed(2)
+  });
+
+  // Validação de Risco/Retorno
+  if (side && stopPrice && takeProfitPrice) {
+    const risk = Math.abs(price - stopPrice);
+    const reward = Math.abs(takeProfitPrice - price);
+    const rr = risk > 0 ? reward / risk : 0;
+    const minRR = planFilters.min_rr || 1.5;
+    const rrPass = rr >= minRR;
+    results.push({
+      label: `Risco:Retorno ≥ ${minRR}`,
+      pass: rrPass,
+      required: `≥ ${minRR}`,
+      actual: rr.toFixed(2)
+    });
+    if (!rrPass) side = null; // Rejeita entrada se R:R for baixo
+  }
+
+  return { results, allPass: results.every(r => r.pass) && !!side, side, stopPrice, takeProfitPrice, indicators: { rsi, stoch, support, resistance } };
+}
 
 // ─── Trade Limits ────────────────────────────────────────────────────────────
 
@@ -1258,6 +1391,26 @@ async function monitorPositions() {
       const candles = await fetchCandles(pos.symbol, pos.timeframe, 100);
       const price = candles[candles.length - 1].close;
       
+      // Breakeven logic para Alpha_RangeMaster v2: quando atinge 50% do alvo, move SL para BE + ATR*0.1
+      if (pos.plan === 'Alpha_RangeMaster' && pos.status === 'open' && !pos.breakevenTriggered) {
+        const tpDist = Math.abs(pos.takeProfitPrice - pos.entryPrice);
+        const currentDist = Math.abs(price - pos.entryPrice);
+        const isProfitable = (pos.side === 'SHORT') ? (price < pos.entryPrice) : (price > pos.entryPrice);
+        
+        if (isProfitable && currentDist >= tpDist * 0.5) {
+          const atrValue = calcATR(candles, 14);
+          const buffer = (atrValue || 0) * 0.1;
+          const newSL = pos.side === 'SHORT' ? pos.entryPrice - buffer : pos.entryPrice + buffer;
+          
+          pos.stopPrice = newSL;
+          pos.breakevenTriggered = true;
+          console.log(`  🛡️ [${pos.symbol}] Breakeven v2 disparado (50% TP atingido). Novo SL: $${newSL.toFixed(8)}`);
+          
+          // Nota: Para ordens OCO em Live Spot, a atualização exigiria cancelar e repor a OCO.
+          // Por ora, o Watchdog local assumirá o controle do novo SL se a OCO original for ignorada.
+        }
+      }
+
       let exitReason = null;
       if (pos.side === 'SHORT') {
         if (price >= pos.stopPrice) exitReason = `WATCHDOG: STOP LOSS (SHORT) @ $${price} (limite: $${pos.stopPrice})`;
@@ -1444,6 +1597,10 @@ async function runSymbolCycle(symbol, timeframe, rulesInput, runMode = 'master')
     }
     activeIndicators = safetyResult.indicators || {};
     usedStrategy = "range";
+  } else if (stratKey === "range-v2") {
+    safetyResult = runSafetyCheckRangeV2(candles, plan ? (plan.filters || {}) : {});
+    activeIndicators = safetyResult.indicators || {};
+    usedStrategy = "range-v2";
   } else if (stratKey === "warrior") {
     safetyResult = runSafetyCheckWarrior(candles);
     activeIndicators = safetyResult.indicators;
@@ -1478,10 +1635,35 @@ async function runSymbolCycle(symbol, timeframe, rulesInput, runMode = 'master')
     }
     // Sobrescrever SL/TP conforme plano
     if (atr && (side || isForced)) {
-      const sltp = calcPlanStopTP(price, atr, plan, isForced ? forceSide : side);
-      stopPrice = sltp.stop;
-      takeProfitPrice = sltp.tp;
+      // Se a estratégia for range-v2, o SL/TP já vem calculado pela zona
+      if (usedStrategy === 'range-v2' && safetyResult.stopPrice && safetyResult.takeProfitPrice) {
+        stopPrice = safetyResult.stopPrice;
+        takeProfitPrice = safetyResult.takeProfitPrice;
+      } else {
+        const sltp = calcPlanStopTP(price, atr, plan, isForced ? forceSide : side);
+        stopPrice = sltp.stop;
+        takeProfitPrice = sltp.tp;
+      }
       console.log(`  📐 [${plan.name}] SL: $${stopPrice.toFixed(6)} | TP: $${takeProfitPrice.toFixed(6)} (break-even alvo: ${plan.breakeven_pct}%)`);
+    }
+
+    // Filtro Dual Timeframe (ADX 4H) para Range v2
+    if (plan.filters.adx_4h_max != null && timeframe !== '4H') {
+      try {
+        const candles4h = await fetchCandles(symbol, '4H', 100, isFutures);
+        const adx4h = calcADX(candles4h, 14);
+        const pass = adx4h != null && adx4h.adx <= plan.filters.adx_4h_max;
+        const res4h = {
+          label: `ADX 4H ≤ ${plan.filters.adx_4h_max} (filtro macro range)`,
+          pass,
+          required: `≤ ${plan.filters.adx_4h_max}`,
+          actual: adx4h != null ? adx4h.adx.toFixed(1) : '—'
+        };
+        results.push(res4h);
+        if (!pass) allPass = false;
+      } catch (e) {
+        console.log(`  ⚠ Erro ao buscar 4H candles para ${symbol} (filtro macro): ${e.message}`);
+      }
     }
   }
 

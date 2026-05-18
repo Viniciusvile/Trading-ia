@@ -1313,7 +1313,40 @@ setInterval(async () => {
     }
   } catch (err) {}
 
-  // 2. Watchdog Micro-Scalper
+  // 2. Watchdog MasterBot
+  try {
+    const mState = await db.loadMasterStatus();
+    if (mState && (mState.status === 'running' || mState.status === 'waiting')) {
+      let isAlive = !!(masterProcess && !masterProcess.killed);
+      if (!isAlive && existsSync(BOT_MASTER_PID)) {
+        try {
+          const pid = parseInt(readFileSync(BOT_MASTER_PID, 'utf8'));
+          if (pid) { try { process.kill(pid, 0); isAlive = true; } catch { isAlive = false; } }
+        } catch {}
+      }
+      if (!isAlive) {
+        console.log(`⚠️  [Watchdog] MasterBot inativo detectado! O processo encerrou inesperadamente. Religa automática iniciada...`);
+        if (existsSync(BOT_MASTER_PID)) try { unlinkSync(BOT_MASTER_PID); } catch {}
+        masterProcess = null;
+
+        const intervalStr = mState.interval || process.env.MASTERBOT_LOOP_INTERVAL || '10m';
+        const logFile = join(BOT_DIR, 'masterbot.log');
+        const out = openSync(logFile, 'a');
+        const err = openSync(logFile, 'a');
+        masterProcess = spawn('node', ['bot.js', '--master'], {
+          cwd: BOT_DIR, detached: true, stdio: ['ignore', out, err],
+          env: { ...process.env, MASTERBOT_LOOP_INTERVAL: intervalStr }
+        });
+        masterProcess.on('error', (e) => console.error(`❌ [Watchdog] MasterBot respawn error: ${e.message}`));
+        masterProcess.on('exit', (code, signal) => console.log(`⚠️ [Watchdog] MasterBot respawned exited code=${code} signal=${signal}`));
+        if (masterProcess.pid) writeFileSync(BOT_MASTER_PID, masterProcess.pid.toString());
+        masterProcess.unref();
+        console.log(`✅ [Watchdog] MasterBot relgado com PID ${masterProcess.pid} | intervalo: ${intervalStr}`);
+      }
+    }
+  } catch (err) {}
+
+  // 3. Watchdog Micro-Scalper
   try {
     const microPidPath = join(ROOT, '.micro-scalper.pid');
     const microScriptPath = join(ROOT, 'micro-scalper.js');
