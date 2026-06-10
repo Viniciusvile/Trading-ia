@@ -242,6 +242,36 @@ export const api = {
     safeJson<{ success: boolean; error?: string }>(`/bot/positions/${encodeURIComponent(id)}/close${markOnly ? "?markOnly=true" : ""}`, {
       method: "POST",
     }, { success: false, error: "Falha na requisição" }),
+
+  // ─── Multi-Account API Endpoints ───
+  accountsList: () =>
+    safeJson<{
+      success: boolean;
+      accounts: {
+        id: string;
+        name: string;
+        apiKey: string;
+        isActive: boolean;
+        isTestnet: boolean;
+        createdAt: string;
+      }[];
+    }>("/accounts", undefined, { success: false, accounts: [] }),
+
+  accountCreate: (params: { name: string; apiKey: string; secretKey: string; isTestnet: boolean }) =>
+    safeJson<{ success: boolean; id?: string; error?: string }>("/accounts", {
+      method: "POST",
+      body: JSON.stringify(params),
+    }, { success: false, error: "Falha ao criar conta" }),
+
+  accountActivate: (id: string) =>
+    safeJson<{ success: boolean; error?: string }>(`/accounts/${encodeURIComponent(id)}/activate`, {
+      method: "POST",
+    }, { success: false, error: "Falha ao ativar conta" }),
+
+  accountDelete: (id: string) =>
+    safeJson<{ success: boolean; error?: string }>(`/accounts/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }, { success: false, error: "Falha ao deletar conta" }),
 };
 
 export type Quote = NonNullable<Awaited<ReturnType<typeof api.quote>>>;

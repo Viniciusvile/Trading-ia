@@ -2505,6 +2505,118 @@ app.post('/api/micro-scalper/stop', (_req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
+// ─── Accounts Helper Functions ───────────────────────────────────────────────
+async function syncEnvWithActiveAccount() {
+  try {
+    const activeAcc = await db.getActiveAccount();
+    if (activeAcc) {
+      process.env.BINANCE_API_KEY = activeAcc.api_key;
+      process.env.BINANCE_SECRET_KEY = activeAcc.secret_key;
+      process.env.BINANCE_IS_TESTNET = activeAcc.is_testnet ? 'true' : 'false';
+      console.log(`🔑 Env configurado para a conta ativa: ${activeAcc.name} (${activeAcc.id})`);
+      return true;
+    }
+  } catch (e) {
+    console.error("❌ Erro ao sincronizar env com conta ativa:", e.message);
+  }
+  return false;
+}
+
+async function restartRunningBots() {
+  // Restart MasterBot if running
+  let masterPid = masterProcess?.pid;
+  if (!masterPid && existsSync(BOT_MASTER_PID)) {
+    try { masterPid = parseInt(readFileSync(BOT_MASTER_PID, 'utf8')); } catch {}
+  }
+  if (masterPid) {
+    console.log(`♻️ Reiniciando MasterBot com a nova conta...`);
+    try { process.kill(masterPid, 'SIGTERM'); } catch {}
+    masterProcess = null;
+    if (existsSync(BOT_MASTER_PID)) { try { unlinkSync(BOT_MASTER_PID); } catch {} }
+    
+    setTimeout(() => {
+      masterProcess = spawn('node', ['bot.js', '--master'], {
+        cwd: BOT_DIR,
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env }
+      });
+      if (masterProcess.pid) writeFileSync(BOT_MASTER_PID, masterProcess.pid.toString());
+      masterProcess.unref();
+      console.log(`✅ MasterBot reiniciado.`);
+    }, 2000);
+  }
+
+  // Restart Micro-Scalper if running
+  const microState = await db.readMicroHeartbeat();
+  if (microState.alive && microState.pid) {
+    console.log(`♻️ Reiniciando Micro-Scalper com a nova conta...`);
+    try { process.kill(microState.pid, 'SIGTERM'); } catch {}
+    if (microProcess) { try { microProcess.kill('SIGTERM'); } catch {} microProcess = null; }
+    if (existsSync(MICRO_PID)) { try { unlinkSync(MICRO_PID); } catch {} }
+
+    setTimeout(() => {
+      microProcess = spawn('node', [MICRO_SCRIPT], {
+        cwd: ROOT,
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env }
+      });
+      if (microProcess.pid) writeFileSync(MICRO_PID, microProcess.pid.toString());
+      microProcess.unref();
+      console.log(`✅ Micro-Scalper reiniciado.`);
+    }, 2000);
+  }
+}
+
+// ─── Accounts Endpoints ───────────────────────────────────────────────────────
+app.get('/api/accounts', async (req, res) => {
+  try {
+    const list = await db.listAccounts();
+    res.json({ success: true, accounts: list });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/accounts', async (req, res) => {
+  try {
+    const { name, apiKey, secretKey, isTestnet } = req.body || {};
+    if (!name || !apiKey || !secretKey) {
+      return res.status(400).json({ success: false, error: 'name, apiKey e secretKey são obrigatórios' });
+    }
+    const id = await db.createAccount(name, apiKey.trim(), secretKey.trim(), !!isTestnet);
+    await syncEnvWithActiveAccount();
+    res.json({ success: true, id });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/accounts/:id/activate', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.activateAccount(id);
+    await syncEnvWithActiveAccount();
+    await restartRunningBots();
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.delete('/api/accounts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.deleteAccount(id);
+    await syncEnvWithActiveAccount();
+    await restartRunningBots();
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 
 // ── FALLBACK ─────────────────────────────────────────────────────
 app.get('/*splat', (_req, res) => res.sendFile(join(__dirname, 'index.html')));
@@ -2512,7 +2624,10 @@ app.get('/*splat', (_req, res) => res.sendFile(join(__dirname, 'index.html')));
 // ── START ─────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3333;
 const server = createServer(app);
-db.initDb().catch(e => console.error('⚠️  PostgreSQL indisponível:', e.message));
+db.initDb()
+  .then(() => syncEnvWithActiveAccount())
+  .catch(e => console.error('⚠️  PostgreSQL indisponível:', e.message));
+
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n✅ Dashboard Server running on port ${PORT}\n`);
 });

@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Moon, Sun, Search, Bell } from "lucide-react";
+import { Moon, Sun, Search, Bell, ChevronDown, Check } from "lucide-react";
 import { navItems } from "@/config/navigation";
 import { Badge } from "@/components/ui";
 import { fmtUSD } from "@/lib/format";
@@ -20,11 +20,52 @@ export function Topbar() {
   const [balance, setBalance] = useState<{ spot: number; futures: number }>({ spot: 0, futures: 0 });
   const [loading, setLoading] = useState(true);
 
+  // Multi-account states
+  const [accounts, setAccounts] = useState<{ id: string; name: string; isActive: boolean; isTestnet: boolean }[]>([]);
+  const [activeAccount, setActiveAccount] = useState<{ id: string; name: string; isTestnet: boolean } | null>(null);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
   useEffect(() => {
     const saved = (localStorage.getItem("theme") as "light" | "dark" | null) ?? "light";
     setTheme(saved);
     document.documentElement.dataset.theme = saved;
   }, []);
+
+  useEffect(() => {
+    async function loadAccounts() {
+      try {
+        const res = await api.accountsList();
+        if (res.success && res.accounts) {
+          setAccounts(res.accounts);
+          const active = res.accounts.find(a => a.isActive);
+          if (active) {
+            setActiveAccount({ id: active.id, name: active.name, isTestnet: active.isTestnet });
+          } else if (res.accounts.length > 0) {
+            setActiveAccount({ id: res.accounts[0].id, name: res.accounts[0].name, isTestnet: res.accounts[0].isTestnet });
+          }
+        }
+      } catch (e) {
+        console.error("Erro ao carregar contas:", e);
+      }
+    }
+    loadAccounts();
+    window.addEventListener("accounts-updated", loadAccounts);
+    return () => {
+      window.removeEventListener("accounts-updated", loadAccounts);
+    };
+  }, []);
+
+  async function handleSwitchAccount(id: string) {
+    try {
+      const res = await api.accountActivate(id);
+      if (res.success) {
+        setIsDropdownOpen(false);
+        window.location.reload();
+      }
+    } catch (e) {
+      console.error("Erro ao alternar conta:", e);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -62,13 +103,66 @@ export function Topbar() {
   return (
     <header className="sticky top-0 z-20 bg-[var(--color-surface)]/85 backdrop-blur border-b border-[var(--color-border)]">
       <div className="h-16 flex items-center gap-3 px-4 sm:px-6">
-        <div className="min-w-0 flex-1">
-          <div className="text-[10px] uppercase tracking-wider text-muted">
-            {current?.description ?? "Painel de operações"}
+        <div className="min-w-0 flex-1 flex items-center gap-4">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-muted">
+              {current?.description ?? "Painel de operações"}
+            </div>
+            <div className="text-base font-semibold text-[var(--color-text)] truncate">
+              {current?.label ?? "Dashboard"}
+            </div>
           </div>
-          <div className="text-base font-semibold text-[var(--color-text)] truncate">
-            {current?.label ?? "Dashboard"}
-          </div>
+
+          {/* Account Switcher */}
+          {activeAccount && (
+            <div className="relative ml-2">
+              <button
+                type="button"
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)] text-xs text-[var(--color-text)] font-medium transition cursor-pointer"
+              >
+                <span className="max-w-[100px] sm:max-w-[150px] truncate">{activeAccount.name}</span>
+                {activeAccount.isTestnet && (
+                  <span className="px-1 py-0.5 text-[8px] font-bold uppercase rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                    Testnet
+                  </span>
+                )}
+                <ChevronDown size={14} className="opacity-60" />
+              </button>
+
+              {isDropdownOpen && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-30" 
+                    onClick={() => setIsDropdownOpen(false)}
+                  />
+                  <div className="absolute left-0 mt-1.5 w-56 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-lg py-1 z-40 max-h-60 overflow-y-auto">
+                    <div className="px-3 py-1.5 text-[10px] uppercase font-bold tracking-wider text-muted border-b border-[var(--color-border)]">
+                      Alternar Conta
+                    </div>
+                    {accounts.map((acc) => (
+                      <button
+                        key={acc.id}
+                        type="button"
+                        onClick={() => handleSwitchAccount(acc.id)}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition cursor-pointer"
+                      >
+                        <span className="flex-1 truncate font-medium">{acc.name}</span>
+                        {acc.isTestnet && (
+                          <span className="px-1 py-0.5 text-[8px] font-bold uppercase rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                            Testnet
+                          </span>
+                        )}
+                        {acc.id === activeAccount.id && (
+                          <Check size={14} className="text-emerald-500 ml-auto" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         <div

@@ -81,7 +81,44 @@ export async function initDb() {
         ts        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         pid       INTEGER
       );
+
+      CREATE TABLE IF NOT EXISTS accounts (
+        id VARCHAR(100) PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        api_key VARCHAR(255) NOT NULL,
+        secret_key VARCHAR(255) NOT NULL,
+        is_active BOOLEAN DEFAULT false,
+        is_testnet BOOLEAN DEFAULT false,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
     `);
+
+    // Migrações dinâmicas para adicionar account_id
+    await client.query(`
+      ALTER TABLE positions ADD COLUMN IF NOT EXISTS account_id VARCHAR(100) DEFAULT 'default';
+      ALTER TABLE trades ADD COLUMN IF NOT EXISTS account_id VARCHAR(100) DEFAULT 'default';
+      ALTER TABLE micro_sessions ADD COLUMN IF NOT EXISTS account_id VARCHAR(100) DEFAULT 'default';
+    `);
+
+    // Migração de constraint UNIQUE para micro_sessions
+    try {
+      await client.query(`
+        ALTER TABLE micro_sessions DROP CONSTRAINT IF EXISTS micro_sessions_session_start_symbol_key;
+        ALTER TABLE micro_sessions ADD CONSTRAINT micro_sessions_session_start_symbol_account_id_key UNIQUE (session_start, symbol, account_id);
+      `);
+    } catch (e) {
+      // Ignora se já existir
+    }
+
+    // Cria conta padrão se a tabela estiver vazia
+    const accCheck = await client.query('SELECT COUNT(*) FROM accounts');
+    if (parseInt(accCheck.rows[0].count, 10) === 0 && process.env.BINANCE_API_KEY && process.env.BINANCE_SECRET_KEY) {
+      await client.query(
+        `INSERT INTO accounts (id, name, api_key, secret_key, is_active, is_testnet)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        ['default', 'Conta Principal', process.env.BINANCE_API_KEY.trim(), process.env.BINANCE_SECRET_KEY.trim(), true, process.env.BINANCE_IS_TESTNET === 'true']
+      );
+    }
 
     // Rotina de limpeza (Retention Policy)
     // Exclui logs de scanner mais antigos que 15 dias, mantendo o que foi execução real
@@ -104,22 +141,26 @@ export async function initDb() {
 
 /** Retorna todas as posições ordenadas por data de abertura (mais antigas primeiro). */
 export async function loadPositions() {
+  const accId = await getActiveAccountId();
   const res = await getPool().query(
-    `SELECT data FROM positions ORDER BY (data->>'openedAt') ASC NULLS FIRST`
+    `SELECT data FROM positions WHERE account_id = $1 ORDER BY (data->>'openedAt') ASC NULLS FIRST`,
+    [accId]
   );
   return res.rows.map(r => r.data);
 }
 
 /** Salva (upsert) uma única posição — mais eficiente que savePositions para atualizações pontuais. */
 export async function savePosition(pos) {
+  const accId = await getActiveAccountId();
   await getPool().query(
-    `INSERT INTO positions (id, symbol, status, data)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO positions (id, symbol, status, data, account_id)
+     VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (id) DO UPDATE
        SET symbol = EXCLUDED.symbol,
            status = EXCLUDED.status,
-           data   = EXCLUDED.data`,
-    [pos.id, pos.symbol, pos.status, JSON.stringify(pos)]
+           data   = EXCLUDED.data,
+           account_id = EXCLUDED.account_id`,
+    [pos.id, pos.symbol, pos.status, JSON.stringify(pos), accId]
   );
 }
 
@@ -129,18 +170,20 @@ export async function savePosition(pos) {
  */
 export async function savePositions(positions) {
   if (!positions || positions.length === 0) return;
+  const accId = await getActiveAccountId();
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
     for (const pos of positions) {
       await client.query(
-        `INSERT INTO positions (id, symbol, status, data)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO positions (id, symbol, status, data, account_id)
+         VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (id) DO UPDATE
            SET symbol = EXCLUDED.symbol,
                status = EXCLUDED.status,
-               data   = EXCLUDED.data`,
-        [pos.id, pos.symbol, pos.status, JSON.stringify(pos)]
+               data   = EXCLUDED.data,
+               account_id = EXCLUDED.account_id`,
+        [pos.id, pos.symbol, pos.status, JSON.stringify(pos), accId]
       );
     }
     await client.query('COMMIT');
@@ -185,11 +228,12 @@ export async function addPosition(
     indicators,
   };
 
+  const accId = await getActiveAccountId();
   await getPool().query(
-    `INSERT INTO positions (id, symbol, status, data)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO positions (id, symbol, status, data, account_id)
+     VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (id) DO NOTHING`,
-    [pos.id, pos.symbol, pos.status, JSON.stringify(pos)]
+    [pos.id, pos.symbol, pos.status, JSON.stringify(pos), accId]
   );
 
   console.log(
@@ -206,35 +250,40 @@ export async function addPosition(
  * O objeto `entry` é o logEntry do runSymbolCycle.
  */
 export async function appendToLog(entry) {
+  const accId = await getActiveAccountId();
   await getPool().query(
-    `INSERT INTO trades (ts, data) VALUES ($1, $2)`,
-    [new Date(entry.timestamp), JSON.stringify(entry)]
+    `INSERT INTO trades (ts, data, account_id) VALUES ($1, $2, $3)`,
+    [new Date(entry.timestamp), JSON.stringify(entry), accId]
   );
 }
 
 /** Retorna as últimas `limit` entradas do log, em ordem cronológica (mais antigas primeiro). */
 export async function loadRecentLog(limit = 100) {
+  const accId = await getActiveAccountId();
   const res = await getPool().query(
-    `SELECT data FROM trades ORDER BY id DESC LIMIT $1`,
-    [limit]
+    `SELECT data FROM trades WHERE account_id = $1 ORDER BY id DESC LIMIT $2`,
+    [accId, limit]
   );
   return { trades: res.rows.map(r => r.data).reverse() };
 }
 
 /** Conta quantas trades com ordem colocada ocorreram hoje. */
 export async function countTodaysTrades() {
+  const accId = await getActiveAccountId();
   const today = new Date().toISOString().slice(0, 10);
   const res = await getPool().query(
     `SELECT COUNT(*) FROM trades
-     WHERE ts >= $1::date AND ts < ($1::date + INTERVAL '1 day')
+     WHERE account_id = $1
+       AND ts >= $2::date AND ts < ($2::date + INTERVAL '1 day')
        AND (data->>'orderPlaced')::boolean = true`,
-    [today]
+    [accId, today]
   );
   return parseInt(res.rows[0].count, 10);
 }
 
 /** Retorna resumo para o comando --tax-summary. */
 export async function generateTaxSummary() {
+  const accId = await getActiveAccountId();
   const res = await getPool().query(`
     SELECT
       COUNT(*)                                                        AS total,
@@ -248,7 +297,8 @@ export async function generateTaxSummary() {
              THEN (data->>'tradeSize')::decimal ELSE 0 END
       ), 0)                                                           AS total_volume
     FROM trades
-  `);
+    WHERE account_id = $1
+  `, [accId]);
   return res.rows[0];
 }
 
@@ -284,23 +334,26 @@ export async function loadFuturesStatus() {
 
 /** Salva (upsert) uma sessão do Micro-Scalper. */
 export async function saveMicroSession(sessionStart, symbol, trades) {
+  const accId = await getActiveAccountId();
   const ts = new Date(sessionStart);
   await getPool().query(
-    `INSERT INTO micro_sessions (session_start, symbol, trades)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (session_start, symbol) DO UPDATE SET trades = EXCLUDED.trades`,
-    [ts, symbol, JSON.stringify(trades)]
+    `INSERT INTO micro_sessions (session_start, symbol, trades, account_id)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (session_start, symbol, account_id) DO UPDATE SET trades = EXCLUDED.trades`,
+    [ts, symbol, JSON.stringify(trades), accId]
   );
 }
 
 /** Retorna as últimas sessões agrupadas (formato compatível com o dashboard). */
 export async function loadMicroSessions(limit = 200) {
+  const accId = await getActiveAccountId();
   const res = await getPool().query(
     `SELECT session_start, symbol, trades
      FROM micro_sessions
+     WHERE account_id = $1
      ORDER BY session_start DESC
-     LIMIT $1`,
-    [limit]
+     LIMIT $2`,
+    [accId, limit]
   );
   // Reagrupa por session_start (igual ao formato do JSON antigo)
   const map = new Map();
@@ -316,12 +369,13 @@ export async function loadMicroSessions(limit = 200) {
 
 /** Lê o log de um símbolo para verificar posição aberta (substitui leitura do JSON). */
 export async function loadMicroSymbolTrades(symbol) {
+  const accId = await getActiveAccountId();
   const res = await getPool().query(
     `SELECT trades FROM micro_sessions
-     WHERE symbol = $1
+     WHERE symbol = $1 AND account_id = $2
      ORDER BY session_start DESC
      LIMIT 10`,
-    [symbol]
+    [symbol, accId]
   );
   const all = [];
   for (const row of res.rows.reverse()) {
@@ -351,4 +405,91 @@ export async function readMicroHeartbeat(maxAgeMs = 120_000) {
   const { ts, pid } = res.rows[0];
   const age = Date.now() - new Date(ts).getTime();
   return { alive: age <= maxAgeMs, pid, lastSeen: ts };
+}
+
+// ─── Accounts Helper Functions ───────────────────────────────────────────────
+
+export async function getActiveAccountId() {
+  try {
+    const res = await getPool().query('SELECT id FROM accounts WHERE is_active = true LIMIT 1');
+    if (res.rows.length) return res.rows[0].id;
+  } catch (e) {}
+  return 'default';
+}
+
+export async function getActiveAccount() {
+  try {
+    const res = await getPool().query('SELECT * FROM accounts WHERE is_active = true LIMIT 1');
+    if (res.rows.length) return res.rows[0];
+  } catch (e) {}
+  return null;
+}
+
+export async function listAccounts() {
+  const res = await getPool().query('SELECT id, name, api_key, is_active, is_testnet, created_at FROM accounts ORDER BY created_at ASC');
+  return res.rows.map(row => ({
+    id: row.id,
+    name: row.name,
+    apiKey: row.api_key ? `${row.api_key.slice(0, 6)}...${row.api_key.slice(-6)}` : '',
+    isActive: row.is_active,
+    isTestnet: row.is_testnet,
+    createdAt: row.created_at
+  }));
+}
+
+export async function createAccount(name, apiKey, secretKey, isTestnet = false) {
+  const id = `ACC-${Date.now()}`;
+  
+  // Se for a única conta, marca como ativa
+  const countRes = await getPool().query('SELECT COUNT(*) FROM accounts');
+  const isFirst = parseInt(countRes.rows[0].count, 10) === 0;
+  
+  await getPool().query(
+    `INSERT INTO accounts (id, name, api_key, secret_key, is_active, is_testnet)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [id, name, apiKey, secretKey, isFirst, isTestnet]
+  );
+  return id;
+}
+
+export async function activateAccount(id) {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('UPDATE accounts SET is_active = false');
+    await client.query('UPDATE accounts SET is_active = true WHERE id = $1', [id]);
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteAccount(id) {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    
+    // Verifica se a conta deletada era ativa
+    const checkActive = await client.query('SELECT is_active FROM accounts WHERE id = $1', [id]);
+    const wasActive = checkActive.rows[0]?.is_active;
+    
+    await client.query('DELETE FROM accounts WHERE id = $1', [id]);
+    
+    // Se era ativa, ativa a primeira conta que sobrar
+    if (wasActive) {
+      const remaining = await client.query('SELECT id FROM accounts ORDER BY created_at ASC LIMIT 1');
+      if (remaining.rows.length) {
+        await client.query('UPDATE accounts SET is_active = true WHERE id = $1', [remaining.rows[0].id]);
+      }
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
 }
