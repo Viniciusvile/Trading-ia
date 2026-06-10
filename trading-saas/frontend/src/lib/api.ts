@@ -8,6 +8,53 @@
 
 const BASE = "/api/legacy";
 
+export interface BacktestStats {
+  totalTrades: number;
+  wins: number;
+  losses: number;
+  breakevens: number;
+  winRate: number;
+  profitFactor: number;
+  netProfitPct: number;
+  netProfitUsd: number;
+  expectancyPct: number;
+  avgWinPct: number;
+  avgLossPct: number;
+  maxDrawdownPct: number;
+  avgHoldBars: number;
+}
+
+export interface BacktestTrade {
+  entryTime: number;
+  exitTime: number;
+  side: "LONG" | "SHORT";
+  entryPrice: number;
+  exitPrice: number;
+  returnPct: number;
+  result: "win" | "loss" | "timeout";
+  symbol?: string;
+  timeframe?: string;
+}
+
+export interface BacktestResult {
+  ranAt: number;
+  combined: BacktestStats | null;
+  equityCurve: { time: number; equity: number }[];
+  winRateTarget: number | null;
+  approved: boolean | null;
+  warnings: string[];
+  results: {
+    symbol: string;
+    timeframe: string;
+    periodStart?: number;
+    periodEnd?: number;
+    error?: string;
+    stats: BacktestStats | null;
+    trades: BacktestTrade[];
+  }[];
+  recentTrades: BacktestTrade[];
+}
+
 async function safeJson<T>(path: string, init?: RequestInit, fallback?: T): Promise<T> {
   try {
     const headers: Record<string, string> = {
@@ -196,6 +243,9 @@ export const api = {
         filters: any;
         sl: any;
         tp: any;
+        statsSource: "real" | "backtest" | "sem-dados";
+        winRateTarget: number | null;
+        lastBacktest: BacktestResult | null;
       }[];
     }>("/bot/strategies", undefined, { success: false, strategies: [] }),
 
@@ -219,6 +269,12 @@ export const api = {
     safeJson<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}`, {
       method: "DELETE",
     }, { success: false }),
+
+  botBacktest: (plan: any) =>
+    safeJson<{ success: boolean; error?: string } & Partial<BacktestResult>>("/bot/backtest", {
+      method: "POST",
+      body: JSON.stringify(plan),
+    }, { success: false, error: "Falha ao executar análise" }),
 
   botForceTrade: (params: { symbol: string; timeframe: string; side: string; amount?: number; mode: string }) =>
     safeJson<{ success: boolean; exitCode?: number; stdout?: string; stderr?: string; error?: string }>("/bot/force-trade", {
