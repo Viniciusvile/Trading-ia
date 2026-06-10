@@ -11,7 +11,7 @@ dotenvConfig({ path: join(__dir, "..", "..", ".env") });
 
 import { fetchCandles } from "../bot.js";
 import { simulateTrades, computeStats } from "../lib/backtest-engine.js";
-import { createSignalFn } from "../lib/strategy-signals.js";
+import { createSignalFn, getPlanWarnings } from "../lib/strategy-signals.js";
 
 const PLANS = [
   {
@@ -24,12 +24,16 @@ const PLANS = [
   {
     name: "smoke_range",
     strategy: "range-v2",
+    mode: "futures", // garante que trades SHORT sejam exercitados no smoke
     sl: { type: "atr", multiplier: 1.5 },
     tp: { type: "boundary", multiplier: 1.0 },
     filters: { adx_max: 28, choppiness_min: 45 },
   },
 ];
 
+// Nota: o warmup default de 250 candles é consumido internamente pelo
+// backtest-engine para calcular indicadores como EMA200, então os primeiros
+// 250 candles da amostra de 1000 não geram trades — isso é esperado.
 const candles = await fetchCandles("BTCUSDT", "1H", 1000, false);
 console.log(`Candles: ${candles.length} (${new Date(candles[0].time).toISOString()} → ${new Date(candles.at(-1).time).toISOString()})`);
 
@@ -37,6 +41,7 @@ for (const plan of PLANS) {
   const trades = simulateTrades(candles, createSignalFn(plan));
   const s = computeStats(trades);
   console.log(`\n── ${plan.name} ──`);
+  for (const w of getPlanWarnings(plan)) console.log(`  ⚠️  ${w}`);
   if (!s) { console.log("  Nenhum trade no período."); continue; }
   console.log(`  Trades: ${s.totalTrades} | WR: ${(s.winRate * 100).toFixed(1)}% | PF: ${s.profitFactor.toFixed(2)} | PnL: ${s.netProfitPct.toFixed(2)}% ($${s.netProfitUsd.toFixed(2)} em $10k) | MaxDD: ${s.maxDrawdownPct.toFixed(2)}%`);
 }
