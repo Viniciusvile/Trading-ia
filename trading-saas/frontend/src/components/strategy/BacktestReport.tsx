@@ -1,11 +1,13 @@
 "use client";
 
+import { useId } from "react";
 import { TrendingUp, CheckCircle2, AlertCircle, AlertTriangle, Clock } from "lucide-react";
 import { Card, Badge, Stat } from "@/components/ui";
 import { fmtPct, fmtUSD } from "@/lib/format";
 import type { BacktestResult } from "@/lib/api";
 
 function EquityCurve({ points }: { points: { time: number; equity: number }[] }) {
+  const gid = useId();
   if (points.length < 2) {
     return (
       <div className="h-44 flex items-center justify-center text-xs text-muted bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)]">
@@ -21,18 +23,19 @@ function EquityCurve({ points }: { points: { time: number; equity: number }[] })
   const y = (e: number) => PAD + (1 - (e - min) / span) * (H - PAD * 2);
   const line = points.map((p, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(p.equity).toFixed(1)}`).join(" ");
   const area = `${line} L ${W} ${H} L 0 ${H} Z`;
-  const finalPct = ((eqs[eqs.length - 1] - eqs[0]) / eqs[0]) * 100;
+  const base = eqs[0] || 1;
+  const finalPct = ((eqs[eqs.length - 1] - base) / base) * 100;
 
   return (
     <div className="h-44 w-full bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] p-4 relative overflow-hidden">
-      <svg className="w-full h-full" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      <svg className="w-full h-full" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={`Curva de patrimônio, ${finalPct >= 0 ? "+" : ""}${finalPct.toFixed(1)}% no período`}>
         <defs>
-          <linearGradient id="btGrad" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="var(--color-brand-500)" stopOpacity="0.25" />
             <stop offset="100%" stopColor="var(--color-brand-500)" stopOpacity="0" />
           </linearGradient>
         </defs>
-        <path d={area} fill="url(#btGrad)" />
+        <path d={area} fill={`url(#${gid})`} />
         <path d={line} fill="none" stroke="var(--color-brand-500)" strokeWidth="2" />
       </svg>
       <span className="absolute top-2 left-3 text-[10px] text-muted">{fmtUSD(eqs[0])} inicial</span>
