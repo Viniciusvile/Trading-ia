@@ -7,17 +7,16 @@ import {
   Trash2,
   Play,
   Square,
-  TrendingUp,
   BarChart3,
   X,
-  SlidersHorizontal,
-  Info
 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, Badge, Stat, Button } from "@/components/ui";
 import { fmtPct, fmtUSD } from "@/lib/format";
 import { api } from "@/lib/api";
+import type { BacktestResult } from "@/lib/api";
 import { StrategyWizard } from "@/components/strategy/StrategyWizard";
+import { BacktestReport } from "@/components/strategy/BacktestReport";
 
 interface Strategy {
   name: string;
@@ -46,6 +45,7 @@ export default function EstrategiasPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null);
+  const [reanalyzing, setReanalyzing] = useState(false);
 
   const fetchStrategies = async () => {
     setLoading(true);
@@ -91,6 +91,31 @@ export default function EstrategiasPage() {
   const openStats = (strat: Strategy) => {
     setSelectedStrategy(strat);
     setShowStatsModal(true);
+  };
+
+  const handleReanalyze = async (strat: Strategy) => {
+    setReanalyzing(true);
+    try {
+      // Envia o name: o servidor persiste o lastBacktest no plano salvo
+      const res = await api.botBacktest({
+        name: strat.name,
+        strategy: strat.strategy,
+        symbols: strat.symbols,
+        timeframes: strat.timeframes,
+        mode: strat.mode,
+        sl: strat.sl,
+        tp: strat.tp,
+        filters: strat.filters,
+        winRateTarget: strat.winRateTarget,
+      });
+      if (res.success && res.equityCurve) {
+        // Atualiza o modal aberto e a lista
+        setSelectedStrategy({ ...strat, lastBacktest: res as BacktestResult, statsSource: "backtest" });
+        fetchStrategies();
+      }
+    } finally {
+      setReanalyzing(false);
+    }
   };
 
   return (
@@ -258,132 +283,35 @@ export default function EstrategiasPage() {
               </div>
               <div>
                 <h3 className="text-base font-semibold text-[var(--color-text)] flex items-center gap-2">
-                  Estatísticas de Backtests Passados: {selectedStrategy.name}
+                  Análise de Mercado: {selectedStrategy.name}
                 </h3>
-                <p className="text-xs text-muted">Desempenho da estratégia nos dados históricos de mercado.</p>
+                <p className="text-xs text-muted">Desempenho real da configuração nos dados históricos da Binance.</p>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6">
-              <Card><Stat label="Total Retorno" value={fmtUSD(selectedStrategy.netProfit)} className={selectedStrategy.netProfit >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"} /></Card>
-              <Card><Stat label="Win Rate" value={fmtPct(selectedStrategy.winRate * 100, { sign: false })} /></Card>
-              <Card><Stat label="Profit Factor" value={selectedStrategy.profitFactor.toFixed(2)} /></Card>
-              <Card><Stat label="Trades Totais" value={selectedStrategy.totalTrades.toString()} /></Card>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
-              {/* Simulated Equity Curve */}
-              <div className="md:col-span-2 space-y-2">
-                <span className="text-xs font-semibold text-[var(--color-text)] flex items-center gap-1.5">
-                  <TrendingUp size={14} className="text-[var(--color-brand-500)]" /> Curva de Patrimônio Simulada (30 dias)
-                </span>
-                <div className="h-44 w-full bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] flex items-end p-4 relative overflow-hidden">
-                  <svg className="w-full h-full" viewBox="0 0 300 100" preserveAspectRatio="none">
-                    <defs>
-                      <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="var(--color-brand-500)" stopOpacity="0.25"/>
-                        <stop offset="100%" stopColor="var(--color-brand-500)" stopOpacity="0.0"/>
-                      </linearGradient>
-                    </defs>
-                    {/* Grid Lines */}
-                    <line x1="0" y1="25" x2="300" y2="25" stroke="var(--color-border)" strokeWidth="0.5" strokeDasharray="3,3" />
-                    <line x1="0" y1="50" x2="300" y2="50" stroke="var(--color-border)" strokeWidth="0.5" strokeDasharray="3,3" />
-                    <line x1="0" y1="75" x2="300" y2="75" stroke="var(--color-border)" strokeWidth="0.5" strokeDasharray="3,3" />
-                    
-                    {/* Filled Area */}
-                    <path 
-                      d={`M 0 100 L 0 80 L 30 83 L 60 70 L 90 75 L 120 62 L 150 68 L 180 50 L 210 55 L 240 38 L 270 42 L 300 20 L 300 100 Z`} 
-                      fill="url(#chartGrad)" 
-                    />
-                    {/* Line path */}
-                    <path 
-                      d={`M 0 80 L 30 83 L 60 70 L 90 75 L 120 62 L 150 68 L 180 50 L 210 55 L 240 38 L 270 42 L 300 20`} 
-                      fill="none" 
-                      stroke="var(--color-brand-500)" 
-                      strokeWidth="2" 
-                    />
-                  </svg>
-                  <span className="absolute top-2 left-3 text-[10px] text-muted">$10,000 inicial</span>
-                  <span className="absolute bottom-2 right-3 text-[10px] text-[var(--color-text-up)] font-semibold">
-                    +{((selectedStrategy.netProfit / 1000) * 10).toFixed(1)}% retorno
-                  </span>
+            <div className="mt-6">
+              {reanalyzing ? (
+                <div className="flex flex-col items-center justify-center py-16 space-y-3">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-brand-500)]"></div>
+                  <span className="text-xs text-muted">Reanalisando com dados atuais da Binance...</span>
                 </div>
-              </div>
-
-              {/* Analysis/Parameters Report */}
-              <div className="space-y-3">
-                <span className="text-xs font-semibold text-[var(--color-text)] flex items-center gap-1.5">
-                  <SlidersHorizontal size={14} /> Parâmetros Ativos
-                </span>
-                <div className="bg-[var(--color-surface-3)] border border-[var(--color-border)] rounded-[var(--radius-sm)] p-3.5 space-y-2.5 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-muted">SL Técnico:</span>
-                    <span className="font-semibold text-[var(--color-text)]">{selectedStrategy.sl?.multiplier || 1.5}x ATR</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted">TP Técnico:</span>
-                    <span className="font-semibold text-[var(--color-text)]">{selectedStrategy.tp?.multiplier || 2.0}x ATR</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted">EMA Filtro:</span>
-                    <span className="font-semibold text-[var(--color-text)]">{selectedStrategy.filters?.ema_triple ? "Ativo (Bullish)" : "Nenhum"}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted">ADX Filtro:</span>
-                    <span className="font-semibold text-[var(--color-text)]">
-                      {selectedStrategy.filters?.adx_min ? `≥ ${selectedStrategy.filters.adx_min}` : selectedStrategy.filters?.adx_max ? `≤ ${selectedStrategy.filters.adx_max}` : "Desabilitado"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted">Timeframe Principal:</span>
-                    <span className="font-semibold text-[var(--color-text)]">{selectedStrategy.timeframes[0]}</span>
-                  </div>
+              ) : selectedStrategy.lastBacktest ? (
+                <BacktestReport data={selectedStrategy.lastBacktest} />
+              ) : (
+                <div className="text-center py-12 space-y-3">
+                  <BarChart3 size={36} className="mx-auto text-muted opacity-50" />
+                  <p className="text-sm font-semibold text-[var(--color-text)]">Esta estratégia ainda não foi analisada</p>
+                  <p className="text-xs text-muted max-w-sm mx-auto">
+                    Rode uma análise de mercado para ver como esta configuração teria performado nos dados históricos reais.
+                  </p>
                 </div>
-              </div>
-            </div>
-
-            {/* Simulated Past Trade Logs */}
-            <div className="mt-6 space-y-3">
-              <span className="text-xs font-semibold text-[var(--color-text)] flex items-center gap-1.5">
-                <Info size={14} /> Histórico Recente de Execuções Simulado
-              </span>
-              <div className="border border-[var(--color-border)] rounded-[var(--radius-sm)] overflow-hidden">
-                <table className="w-full text-xs text-left">
-                  <thead className="bg-[var(--color-surface-3)] text-muted font-medium border-b border-[var(--color-border)]">
-                    <tr>
-                      <th className="p-3">Data</th>
-                      <th className="p-3">Ativo</th>
-                      <th className="p-3">Lado</th>
-                      <th className="p-3">Preço Entrada</th>
-                      <th className="p-3 text-right">Resultado (PnL)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[var(--color-border)] text-[var(--color-text)]">
-                    {[
-                      { date: "Ontem, 18:42", symbol: selectedStrategy.symbols[0] || "BTCUSDT", side: "LONG", price: 68450.00, pnl: selectedStrategy.netProfit * 0.15 },
-                      { date: "08 Jun, 12:15", symbol: selectedStrategy.symbols[0] || "BTCUSDT", side: "SHORT", price: 69200.00, pnl: selectedStrategy.netProfit * 0.08 },
-                      { date: "07 Jun, 09:30", symbol: selectedStrategy.symbols[0] || "BTCUSDT", side: "LONG", price: 67100.00, pnl: -selectedStrategy.netProfit * 0.12 },
-                      { date: "05 Jun, 15:20", symbol: selectedStrategy.symbols[0] || "BTCUSDT", side: "LONG", price: 66800.00, pnl: selectedStrategy.netProfit * 0.22 },
-                      { date: "03 Jun, 21:05", symbol: selectedStrategy.symbols[0] || "BTCUSDT", side: "SHORT", price: 68150.00, pnl: selectedStrategy.netProfit * 0.05 },
-                    ].map((t, idx) => (
-                      <tr key={idx} className="hover:bg-[var(--color-surface-3)]/40 transition-colors">
-                        <td className="p-3 text-muted">{t.date}</td>
-                        <td className="p-3 font-semibold">{t.symbol}</td>
-                        <td className="p-3">
-                          <Badge tone={t.side === "LONG" ? "up" : "down"} size="sm">{t.side}</Badge>
-                        </td>
-                        <td className="p-3">{fmtUSD(t.price)}</td>
-                        <td className={`p-3 text-right font-bold ${t.pnl >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"}`}>
-                          {t.pnl >= 0 ? "+" : ""}{fmtUSD(t.pnl)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-3 border-t border-[var(--color-border)] pt-4 mt-6">
+              <Button variant="outline" disabled={reanalyzing} onClick={() => handleReanalyze(selectedStrategy)}>
+                {reanalyzing ? "Analisando..." : "Reanalisar agora"}
+              </Button>
               <Button variant="ghost" onClick={() => setShowStatsModal(false)}>Fechar Relatório</Button>
               <Button 
                 variant={selectedStrategy.active ? "danger" : "success"} 
