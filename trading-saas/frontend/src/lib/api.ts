@@ -10,12 +10,21 @@ const BASE = "/api/legacy";
 
 async function safeJson<T>(path: string, init?: RequestInit, fallback?: T): Promise<T> {
   try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(init?.headers as Record<string, string> ?? {}),
+    };
+
+    if (typeof window !== "undefined") {
+      const token = localStorage.getItem("token");
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+    }
+
     const res = await fetch(`${BASE}${path}`, {
       ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
-      },
+      headers,
       cache: "no-store",
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -272,6 +281,22 @@ export const api = {
     safeJson<{ success: boolean; error?: string }>(`/accounts/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }, { success: false, error: "Falha ao deletar conta" }),
+
+  // ─── Authentication Endpoints ───
+  login: (params: { email: string; password?: string }) =>
+    safeJson<{ success: boolean; token?: string; user?: any; error?: string }>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify(params),
+    }, { success: false, error: "Falha na autenticação" }),
+
+  register: (params: { email: string; password?: string }) =>
+    safeJson<{ success: boolean; token?: string; user?: any; error?: string }>("/auth/register", {
+      method: "POST",
+      body: JSON.stringify(params),
+    }, { success: false, error: "Falha no registro" }),
+
+  me: () =>
+    safeJson<{ success: boolean; user?: any }>("/auth/me", undefined, { success: false }),
 };
 
 export type Quote = NonNullable<Awaited<ReturnType<typeof api.quote>>>;

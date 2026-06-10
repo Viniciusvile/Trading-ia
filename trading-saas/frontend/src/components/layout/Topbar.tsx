@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Moon, Sun, Search, Bell, ChevronDown, Check } from "lucide-react";
+import { Moon, Sun, Search, Bell, ChevronDown, Check, LogOut } from "lucide-react";
 import { navItems } from "@/config/navigation";
 import { Badge } from "@/components/ui";
 import { fmtUSD } from "@/lib/format";
@@ -205,6 +205,19 @@ export function Topbar() {
           className="h-9 w-9 flex items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] transition"
         >
           {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            localStorage.removeItem("token");
+            localStorage.removeItem("user");
+            window.location.href = "/login";
+          }}
+          aria-label="Sair"
+          title="Sair"
+          className="h-9 w-9 flex items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-down-500)] hover:bg-[var(--color-down-50)] dark:hover:bg-[var(--color-down-500)]/10 transition"
+        >
+          <LogOut size={18} />
         </button>
       </div>
     </header>
