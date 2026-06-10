@@ -1,7 +1,7 @@
 "use client";
  
 import { useEffect, useState } from "react";
-import { Sun, Moon, Languages, ShieldCheck, KeyRound, BellRing, Sparkles, Plus, Trash2, Check } from "lucide-react";
+import { Sun, Moon, Languages, ShieldCheck, KeyRound, BellRing, Sparkles, Plus, Trash2, Check, HelpCircle, ExternalLink, Info } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardHeader, Button, Badge } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -265,6 +265,99 @@ export default function AjustesPage() {
               ))}
             </div>
           )}
+        </div>
+      </Card>
+ 
+      <Card padding="lg">
+        <CardHeader
+          icon={<HelpCircle size={18} className="text-[var(--color-brand-500)]" />}
+          title="Tutorial: Como obter suas chaves de API na Binance?"
+          subtitle="Siga o passo a passo para configurar suas credenciais com segurança."
+        />
+        
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-4 text-sm text-[var(--color-text-2)]">
+              <div className="flex gap-3">
+                <span className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-[var(--color-brand-500)]/10 text-[var(--color-brand-500)] font-bold text-xs">
+                  1
+                </span>
+                <div>
+                  <p className="font-semibold text-[var(--color-text)]">Acesse o Gerenciamento de API</p>
+                  <p className="text-xs text-muted mt-0.5">
+                    Faça login na Binance e vá para a página de gerenciamento de API ou{" "}
+                    <a
+                      href="https://www.binance.com/pt/my/settings/api-management"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[var(--color-brand-500)] hover:underline inline-flex items-center gap-1 font-semibold"
+                    >
+                      clique aqui para acessar diretamente <ExternalLink size={12} />
+                    </a>.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <span className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-[var(--color-brand-500)]/10 text-[var(--color-brand-500)] font-bold text-xs">
+                  2
+                </span>
+                <div>
+                  <p className="font-semibold text-[var(--color-text)]">Crie uma nova chave de API</p>
+                  <p className="text-xs text-muted mt-0.5">
+                    Selecione <strong>"Gerada pelo Sistema"</strong>, insira um nome de identificação (ex: "SaaS Bot") e conclua a verificação de segurança.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <span className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-[var(--color-brand-500)]/10 text-[var(--color-brand-500)] font-bold text-xs">
+                  3
+                </span>
+                <div>
+                  <p className="font-semibold text-[var(--color-text)]">Configure as permissões recomendadas</p>
+                  <p className="text-xs text-muted mt-0.5">
+                    Marque as opções conforme a imagem de exemplo ao lado. Ative <strong>"Ativar Leitura"</strong>, <strong>"Ativar Trading Spot e de Margem"</strong> e <strong>"Ativar Futuros"</strong> (se for operar futuros).
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <span className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-red-500/10 text-red-500 font-bold text-xs">
+                  !
+                </span>
+                <div>
+                  <p className="font-semibold text-red-500">Regra de Segurança Importante</p>
+                  <p className="text-xs text-muted mt-0.5">
+                    <strong>NUNCA ative a opção "Ativar levantamentos" (Saques).</strong> O sistema apenas executa ordens e lê saldos. Nenhum saque é necessário ou permitido.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-3 bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] flex gap-2">
+                <Info size={16} className="text-[var(--color-brand-500)] flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-muted leading-relaxed">
+                  <strong>Dica:</strong> Copie a <em>Secret Key</em> imediatamente após criá-la. A Binance oculta esse segredo permanentemente assim que você recarrega a página. Se perder, precisará criar uma nova API.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-xs font-semibold text-muted block">Imagem de Exemplo (Configurações Recomendadas):</span>
+              <div className="relative group border border-[var(--color-border)] rounded-[var(--radius-md)] overflow-hidden bg-[var(--color-surface-2)] transition hover:border-[var(--color-brand-500)]/50">
+                <img
+                  src="/images/binance-api-guide.png"
+                  alt="Configurações de API Binance de Exemplo"
+                  className="w-full h-auto object-cover max-h-[350px] transition-transform duration-300 group-hover:scale-[1.02]"
+                />
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center pointer-events-none">
+                  <span className="px-3 py-1.5 bg-black/80 text-white rounded text-xs font-semibold">
+                    Configurações de API recomendadas
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </Card>
 
