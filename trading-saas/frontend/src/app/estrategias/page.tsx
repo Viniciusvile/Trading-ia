@@ -1,23 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { 
-  Brain, 
-  ChevronRight, 
-  CircleCheck, 
-  Plus, 
-  Trash2, 
-  Play, 
-  Square, 
-  Settings, 
-  Activity, 
-  TrendingUp, 
-  BarChart3, 
-  X, 
-  Percent, 
-  DollarSign, 
-  AlertCircle, 
-  CheckCircle2, 
+import {
+  Brain,
+  Plus,
+  Trash2,
+  Play,
+  Square,
+  TrendingUp,
+  BarChart3,
+  X,
   SlidersHorizontal,
   Info
 } from "lucide-react";
@@ -25,6 +17,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Card, Badge, Stat, Button } from "@/components/ui";
 import { fmtPct, fmtUSD } from "@/lib/format";
 import { api } from "@/lib/api";
+import { StrategyWizard } from "@/components/strategy/StrategyWizard";
 
 interface Strategy {
   name: string;
@@ -42,6 +35,9 @@ interface Strategy {
   filters: any;
   sl: any;
   tp: any;
+  statsSource?: "real" | "backtest" | "sem-dados";
+  winRateTarget?: number | null;
+  lastBacktest?: import("@/lib/api").BacktestResult | null;
 }
 
 export default function EstrategiasPage() {
@@ -50,23 +46,6 @@ export default function EstrategiasPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null);
-
-  // Form states
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [mode, setMode] = useState("spot");
-  const [strategyType, setStrategyType] = useState("warrior");
-  const [symbols, setSymbols] = useState<string[]>(["BTCUSDT"]);
-  const [timeframes, setTimeframes] = useState<string[]>(["1H"]);
-  const [leverage, setLeverage] = useState(1);
-  const [slMultiplier, setSlMultiplier] = useState(1.5);
-  const [tpMultiplier, setTpMultiplier] = useState(2.0);
-  
-  // Filters checklist
-  const [emaTriple, setEmaTriple] = useState(true);
-  const [adxMin, setAdxMin] = useState(20);
-  const [volumeMult, setVolumeMult] = useState(1.3);
-  const [choppinessMin, setChoppinessMin] = useState(45);
 
   const fetchStrategies = async () => {
     setLoading(true);
@@ -109,71 +88,9 @@ export default function EstrategiasPage() {
     }
   };
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name) return;
-
-    const filters: any = {};
-    if (emaTriple) filters.ema_triple = true;
-    if (strategyType === "warrior") {
-      filters.adx_min = adxMin;
-      filters.volume_mult = volumeMult;
-    } else if (strategyType === "range-v2") {
-      filters.adx_max = 28;
-      filters.choppiness_min = choppinessMin;
-    }
-
-    const newStrat = {
-      name: name.replace(/\s+/g, "_"), // snake_case for plans
-      description,
-      symbols,
-      timeframes,
-      strategy: strategyType,
-      mode,
-      leverage: mode === "futures" ? leverage : 1,
-      sl: { type: "atr", multiplier: slMultiplier },
-      tp: { type: "atr", multiplier: tpMultiplier },
-      filters
-    };
-
-    try {
-      const res = await api.botStrategyCreate(newStrat);
-      if (res.success) {
-        setShowCreateModal(false);
-        // Reset form
-        setName("");
-        setDescription("");
-        setSymbols(["BTCUSDT"]);
-        setTimeframes(["1H"]);
-        setLeverage(1);
-        setSlMultiplier(1.5);
-        setTpMultiplier(2.0);
-        fetchStrategies();
-      }
-    } catch (e) {
-      console.error("Erro ao criar estratégia", e);
-    }
-  };
-
   const openStats = (strat: Strategy) => {
     setSelectedStrategy(strat);
     setShowStatsModal(true);
-  };
-
-  const handleSymbolToggle = (sym: string) => {
-    if (symbols.includes(sym)) {
-      if (symbols.length > 1) setSymbols(symbols.filter(s => s !== sym));
-    } else {
-      setSymbols([...symbols, sym]);
-    }
-  };
-
-  const handleTimeframeToggle = (tf: string) => {
-    if (timeframes.includes(tf)) {
-      if (timeframes.length > 1) setTimeframes(timeframes.filter(t => t !== tf));
-    } else {
-      setTimeframes([...timeframes, tf]);
-    }
   };
 
   return (
@@ -298,11 +215,18 @@ export default function EstrategiasPage() {
                 </div>
 
                 {/* Stats Block */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 sm:gap-10 border-t lg:border-t-0 pt-3 lg:pt-0 border-[var(--color-border)] w-full lg:w-auto shrink-0 justify-between lg:justify-end">
+                <div className="w-full lg:w-auto shrink-0 space-y-2">
+                <div className="flex items-center gap-2">
+                  {s.statsSource === "real" && <Badge tone="up" size="sm">Trades reais</Badge>}
+                  {s.statsSource === "backtest" && <Badge tone="neutral" size="sm">Backtest real</Badge>}
+                  {(!s.statsSource || s.statsSource === "sem-dados") && <Badge tone="neutral" size="sm">Sem análise</Badge>}
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 sm:gap-10 border-t lg:border-t-0 pt-3 lg:pt-0 border-[var(--color-border)] justify-between lg:justify-end">
                   <Stat label="Win Rate" value={fmtPct(s.winRate * 100, { sign: false })} size="sm" />
                   <Stat label="P. Factor" value={s.profitFactor.toFixed(2)} size="sm" />
                   <Stat label="Lucro" value={fmtUSD(s.netProfit)} size="sm" className={s.netProfit >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"} />
                   <Stat label="Trades" value={s.totalTrades.toString()} size="sm" />
+                </div>
                 </div>
               </div>
             </Card>
@@ -310,244 +234,11 @@ export default function EstrategiasPage() {
         </div>
       )}
 
-      {/* CREATE MODAL */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
-          <div className="relative w-full max-w-2xl bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-[var(--radius-md)] shadow-2xl p-6 my-8 max-h-[90vh] overflow-y-auto animate-in fade-in-50 zoom-in-95 duration-200">
-            <button 
-              onClick={() => setShowCreateModal(false)}
-              className="absolute top-4 right-4 p-1 rounded-full text-muted hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)]"
-            >
-              <X size={18} />
-            </button>
-
-            <h3 className="text-base font-semibold text-[var(--color-text)] flex items-center gap-2 mb-1">
-              <Brain className="text-[var(--color-brand-500)]" size={20} /> Criar Nova Estratégia
-            </h3>
-            <p className="text-xs text-muted mb-6">Defina as regras, ativos e limites de risco para execução do bot.</p>
-
-            <form onSubmit={handleCreate} className="space-y-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-[var(--color-text)]">Nome da Estratégia</label>
-                  <input 
-                    type="text" 
-                    placeholder="Ex: Alpha_TrendFlow" 
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                    className="w-full text-sm bg-[var(--color-surface-3)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-brand-500)]"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-[var(--color-text)]">Descrição Rápida</label>
-                  <input 
-                    type="text" 
-                    placeholder="Ex: Cruzamento triplo de médias e RSI" 
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    className="w-full text-sm bg-[var(--color-surface-3)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-brand-500)]"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-[var(--color-text)]">Modo de Operação</label>
-                  <select 
-                    value={mode}
-                    onChange={(e) => setMode(e.target.value)}
-                    className="w-full text-sm bg-[var(--color-surface-3)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-brand-500)]"
-                  >
-                    <option value="spot">Binance Spot</option>
-                    <option value="futures">Binance Futuros</option>
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-[var(--color-text)]">Lógica Central</label>
-                  <select 
-                    value={strategyType}
-                    onChange={(e) => setStrategyType(e.target.value)}
-                    className="w-full text-sm bg-[var(--color-surface-3)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-brand-500)]"
-                  >
-                    <option value="warrior">Warrior Trading (Seguidor de Tendência)</option>
-                    <option value="range-v2">Range-V2 (Reversão à Média)</option>
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-[var(--color-text)]">Alavancagem {mode === "spot" && "(Apenas Futuros)"}</label>
-                  <input 
-                    type="number" 
-                    min={1}
-                    max={20}
-                    disabled={mode === "spot"}
-                    value={leverage}
-                    onChange={(e) => setLeverage(parseInt(e.target.value))}
-                    className="w-full text-sm bg-[var(--color-surface-3)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-brand-500)] disabled:opacity-50"
-                  />
-                </div>
-              </div>
-
-              {/* Ativos Selector */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-[var(--color-text)] block">Ativos Cobertos</label>
-                <div className="flex flex-wrap gap-2">
-                  {["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "LTCUSDT", "AVAXUSDT"].map((sym) => {
-                    const active = symbols.includes(sym);
-                    return (
-                      <button
-                        key={sym}
-                        type="button"
-                        onClick={() => handleSymbolToggle(sym)}
-                        className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
-                          active 
-                            ? "bg-[var(--color-brand-500)] text-white border-[var(--color-brand-500)]" 
-                            : "bg-[var(--color-surface-3)] text-muted border-[var(--color-border)] hover:border-muted"
-                        }`}
-                      >
-                        {sym}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Timeframes Selector */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-[var(--color-text)] block">Timeframes de Análise</label>
-                <div className="flex flex-wrap gap-2">
-                  {["1m", "5m", "15m", "1H", "4H", "1D"].map((tf) => {
-                    const active = timeframes.includes(tf);
-                    return (
-                      <button
-                        key={tf}
-                        type="button"
-                        onClick={() => handleTimeframeToggle(tf)}
-                        className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
-                          active 
-                            ? "bg-[var(--color-brand-500)] text-white border-[var(--color-brand-500)]" 
-                            : "bg-[var(--color-surface-3)] text-muted border-[var(--color-border)] hover:border-muted"
-                        }`}
-                      >
-                        {tf}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* SL / TP Multipliers */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-[var(--color-border)] pt-4">
-                <div className="space-y-1">
-                  <div className="flex justify-between text-xs font-medium">
-                    <span className="text-[var(--color-text)]">Distância do Stop Loss (ATR)</span>
-                    <span className="text-[var(--color-brand-500)]">{slMultiplier}x ATR</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min={0.5}
-                    max={4.0}
-                    step={0.1}
-                    value={slMultiplier}
-                    onChange={(e) => setSlMultiplier(parseFloat(e.target.value))}
-                    className="w-full accent-[var(--color-brand-500)] bg-[var(--color-surface-3)]"
-                  />
-                  <span className="text-[10px] text-muted">Abaixo ou acima do suporte/resistência recente</span>
-                </div>
-                <div className="space-y-1">
-                  <div className="flex justify-between text-xs font-medium">
-                    <span className="text-[var(--color-text)]">Distância do Take Profit (ATR)</span>
-                    <span className="text-[var(--color-brand-500)]">{tpMultiplier}x ATR</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min={0.5}
-                    max={6.0}
-                    step={0.1}
-                    value={tpMultiplier}
-                    onChange={(e) => setTpMultiplier(parseFloat(e.target.value))}
-                    className="w-full accent-[var(--color-brand-500)] bg-[var(--color-surface-3)]"
-                  />
-                  <span className="text-[10px] text-muted">Alvo da operação baseada na volatilidade recente</span>
-                </div>
-              </div>
-
-              {/* Technical Filters */}
-              <div className="space-y-3 border-t border-[var(--color-border)] pt-4">
-                <label className="text-xs font-medium text-[var(--color-text)] block">Gatilhos e Filtros Técnicos</label>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label className="flex items-start gap-3 p-3 bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] cursor-pointer hover:border-muted">
-                    <input 
-                      type="checkbox" 
-                      checked={emaTriple}
-                      onChange={(e) => setEmaTriple(e.target.checked)}
-                      className="mt-0.5 accent-[var(--color-brand-500)]"
-                    />
-                    <div>
-                      <span className="text-xs font-semibold text-[var(--color-text)] block">Filtro de Tendência EMA Tripla</span>
-                      <span className="text-[10px] text-muted">Só compra com EMA9 &gt; EMA21 &gt; EMA55 &gt; EMA200</span>
-                    </div>
-                  </label>
-
-                  {strategyType === "warrior" ? (
-                    <>
-                      <div className="p-3 bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] space-y-2">
-                        <span className="text-xs font-semibold text-[var(--color-text)] block">Força de Tendência (ADX mínimo)</span>
-                        <div className="flex items-center gap-2">
-                          <input 
-                            type="range" 
-                            min={10}
-                            max={35}
-                            value={adxMin}
-                            onChange={(e) => setAdxMin(parseInt(e.target.value))}
-                            className="flex-1 accent-[var(--color-brand-500)]"
-                          />
-                          <span className="text-xs font-bold text-[var(--color-brand-500)] w-8 text-right">{adxMin}</span>
-                        </div>
-                      </div>
-                      <div className="p-3 bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] space-y-2">
-                        <span className="text-xs font-semibold text-[var(--color-text)] block">Volume Relativo Mínimo</span>
-                        <div className="flex items-center gap-2">
-                          <input 
-                            type="range" 
-                            min={1.0}
-                            max={2.5}
-                            step={0.1}
-                            value={volumeMult}
-                            onChange={(e) => setVolumeMult(parseFloat(e.target.value))}
-                            className="flex-1 accent-[var(--color-brand-500)]"
-                          />
-                          <span className="text-xs font-bold text-[var(--color-brand-500)] w-8 text-right">{volumeMult}x</span>
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="p-3 bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] space-y-2">
-                      <span className="text-xs font-semibold text-[var(--color-text)] block">Choppiness Index Mínimo (Lateralização)</span>
-                      <div className="flex items-center gap-2">
-                        <input 
-                          type="range" 
-                          min={30}
-                          max={60}
-                          value={choppinessMin}
-                          onChange={(e) => setChoppinessMin(parseInt(e.target.value))}
-                          className="flex-1 accent-[var(--color-brand-500)]"
-                        />
-                        <span className="text-xs font-bold text-[var(--color-brand-500)] w-8 text-right">{choppinessMin}</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-3 border-t border-[var(--color-border)] pt-4">
-                <Button type="button" variant="ghost" onClick={() => setShowCreateModal(false)}>Cancelar</Button>
-                <Button type="submit" variant="primary">Criar Estratégia</Button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <StrategyWizard
+          onClose={() => setShowCreateModal(false)}
+          onSaved={fetchStrategies}
+        />
       )}
 
       {/* STATS & BACKTEST REPORT MODAL */}
