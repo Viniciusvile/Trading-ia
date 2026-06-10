@@ -88,3 +88,41 @@ test("buildEquityCurve começa no capital inicial e compõe retornos", () => {
   assert.equal(curve[1].equity, 11000);
   assert.ok(Math.abs(curve[2].equity - 9900) < 1e-6); // 11000 * 0.9
 });
+
+test("computeStats: breakeven não é win nem loss", () => {
+  const trades = [
+    { returnPct: 2, holdBars: 1 },
+    { returnPct: 0, holdBars: 1 },
+    { returnPct: -2, holdBars: 1 },
+  ];
+  const s = computeStats(trades);
+  assert.equal(s.wins, 1);
+  assert.equal(s.losses, 1);
+  assert.equal(s.breakevens, 1);
+  assert.ok(Math.abs(s.winRate - 1 / 3) < 1e-9);
+  assert.ok(Math.abs(s.avgLossPct - (-2)) < 1e-9); // breakeven não dilui a perda média
+  assert.ok(Math.abs(s.expectancyPct - 0) < 1e-9); // (2 + 0 - 2) / 3
+});
+
+test("simulateTrades: candles vazios ou warmup além do array → sem trades", () => {
+  assert.deepEqual(simulateTrades([], () => null, { warmup: 5, maxHold: 10 }), []);
+  const few = [
+    { time: 1, open: 100, high: 101, low: 99, close: 100, volume: 1 },
+    { time: 2, open: 100, high: 101, low: 99, close: 100, volume: 1 },
+  ];
+  assert.deepEqual(simulateTrades(few, () => ({ side: "LONG", stop: 90, tp: 110 }), { warmup: 5, maxHold: 10 }), []);
+});
+
+test("simulateTrades: SL e TP no mesmo candle → pior caso (loss)", () => {
+  const candles = Array.from({ length: 20 }, (_, i) => ({
+    time: 1700000000000 + i * 3600000,
+    open: 100, high: 101, low: 99, close: 100, volume: 1000,
+  }));
+  candles[7].high = 110; // toca o TP 105
+  candles[7].low = 90;   // e também o SL 95 no MESMO candle
+  const signalFn = (w) => (w.length === 7 ? { side: "LONG", stop: 95, tp: 105 } : null);
+  const trades = simulateTrades(candles, signalFn, { warmup: 5, maxHold: 10 });
+  assert.equal(trades.length, 1);
+  assert.equal(trades[0].result, "loss");
+  assert.equal(trades[0].exitPrice, 95);
+});

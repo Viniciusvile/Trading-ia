@@ -32,6 +32,10 @@ export function simulateTrades(candles, signalFn, opts = {}) {
     let exitPrice = null, exitIdx = null, result = "timeout";
     const lastIdx = Math.min(candles.length - 1, i + maxHold);
 
+    // Premissa de execução idealizada: preenchimento exato no nível do stop/tp (sem
+    // slippage). Em candle com gap, assume-se que o preço foi atingido exatamente no
+    // nível declarado. Quando SL e TP são tocados no mesmo candle, assume-se o pior
+    // caso (SL primeiro).
     for (let j = i + 1; j <= lastIdx; j++) {
       const b = candles[j];
       if (side === "LONG") {
@@ -71,11 +75,25 @@ export function simulateTrades(candles, signalFn, opts = {}) {
   return trades;
 }
 
+/**
+ * Calcula estatísticas agregadas de uma lista de trades.
+ *
+ * Critério de classificação win/loss:
+ *   - wins:      returnPct  > 0
+ *   - losses:    returnPct  < 0
+ *   - breakevens: returnPct === 0  (saída no preço de entrada, ex.: timeout em mercado flat)
+ *
+ * ATENÇÃO: a classificação usa o SINAL de returnPct, NÃO o campo `result` dos trades.
+ * O campo `result` ("win"/"loss"/"timeout") indica qual nível foi tocado (tp, stop ou
+ * expiração do maxHold) e é apenas informacional — um timeout pode fechar com lucro ou
+ * prejuízo dependendo do preço de saída. Breakevens não contam como win nem como loss,
+ * mas entram no denominador do winRate (total de trades).
+ */
 export function computeStats(trades, initialCapital = 10000) {
   if (!trades || !trades.length) return null;
 
   const wins = trades.filter((t) => t.returnPct > 0);
-  const losses = trades.filter((t) => t.returnPct <= 0);
+  const losses = trades.filter((t) => t.returnPct < 0);
   const totalGains = wins.reduce((a, t) => a + t.returnPct, 0);
   const totalLosses = Math.abs(losses.reduce((a, t) => a + t.returnPct, 0));
 
@@ -92,16 +110,18 @@ export function computeStats(trades, initialCapital = 10000) {
   const n = trades.length;
   const avgWin = wins.length ? totalGains / wins.length : 0;
   const avgLoss = losses.length ? -totalLosses / losses.length : 0;
+  const totalPct = trades.reduce((a, t) => a + t.returnPct, 0);
 
   return {
     totalTrades: n,
     wins: wins.length,
     losses: losses.length,
+    breakevens: n - wins.length - losses.length,
     winRate: wins.length / n,
     profitFactor: totalLosses > 0 ? totalGains / totalLosses : (totalGains > 0 ? 99 : 0),
-    netProfitPct: trades.reduce((a, t) => a + t.returnPct, 0),
+    netProfitPct: totalPct,
     netProfitUsd: equity - initialCapital,
-    expectancyPct: (wins.length / n) * avgWin + (losses.length / n) * avgLoss,
+    expectancyPct: totalPct / n,
     avgWinPct: avgWin,
     avgLossPct: avgLoss,
     maxDrawdownPct,
