@@ -22,6 +22,8 @@ import { createBinanceClient } from '../src/exchange/binance.js';
 import dotenv from 'dotenv';
 import * as pine from '../src/core/pine.js';
 import { evaluate } from '../src/connection.js';
+import { simulateTrades, computeStats, buildEquityCurve } from '../masterbot/lib/backtest-engine.js';
+import { createSignalFn, getPlanWarnings } from '../masterbot/lib/strategy-signals.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -1136,6 +1138,119 @@ app.delete('/api/bot/strategies/:name', (req, res) => {
     
     writeFileSync(BOT_RULES, JSON.stringify(rules, null, 2));
     res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ── BACKTEST ────────────────────────────────────────────────────
+// Cache de candles em memória (evita martelar a API pública da Binance)
+const candleCache = new Map(); // `${symbol}:${tf}` → { candles, fetchedAt }
+const CANDLE_TTL_MS = 10 * 60 * 1000;
+
+const BINANCE_INTERVALS = { '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m', '1H': '1h', '4H': '4h', '1D': '1d' };
+
+async function fetchHistoricalCandles(symbol, timeframe, total = 1400) {
+  const key = `${symbol}:${timeframe}`;
+  const cached = candleCache.get(key);
+  if (cached && Date.now() - cached.fetchedAt < CANDLE_TTL_MS) return cached.candles;
+
+  const interval = BINANCE_INTERVALS[timeframe] || '1h';
+  let candles = [];
+  let endTime;
+  // Pagina para trás (máx. 1000 por request da Binance)
+  while (candles.length < total) {
+    const limit = Math.min(1000, total - candles.length);
+    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`
+      + (endTime ? `&endTime=${endTime}` : '');
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`Binance ${r.status} para ${symbol} ${timeframe}`);
+    const data = await r.json();
+    if (!Array.isArray(data) || !data.length) break;
+    const page = data.map(k => ({
+      time: k[0], open: parseFloat(k[1]), high: parseFloat(k[2]),
+      low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
+    }));
+    candles = [...page, ...candles];
+    endTime = page[0].time - 1;
+    if (data.length < limit) break;
+  }
+  candleCache.set(key, { candles, fetchedAt: Date.now() });
+  return candles;
+}
+
+app.post('/api/bot/backtest', async (req, res) => {
+  try {
+    const plan = req.body || {};
+    if (!Array.isArray(plan.symbols) || !plan.symbols.length ||
+        !Array.isArray(plan.timeframes) || !plan.timeframes.length) {
+      return res.status(400).json({ success: false, error: 'symbols e timeframes são obrigatórios' });
+    }
+    // Limite de carga: máx. 6 combinações símbolo×timeframe por análise
+    const combos = [];
+    for (const symbol of plan.symbols) {
+      for (const timeframe of plan.timeframes) combos.push({ symbol, timeframe });
+    }
+    if (combos.length > 6) {
+      return res.status(400).json({ success: false, error: 'Máximo de 6 combinações ativo×timeframe por análise' });
+    }
+
+    const signalFn = createSignalFn(plan);
+    const results = [];
+    let allTrades = [];
+
+    for (const { symbol, timeframe } of combos) {
+      const candles = await fetchHistoricalCandles(symbol, timeframe);
+      if (candles.length < 300) {
+        results.push({ symbol, timeframe, error: 'Histórico insuficiente', stats: null, trades: [] });
+        continue;
+      }
+      const trades = simulateTrades(candles, signalFn)
+        .map(t => ({ ...t, symbol, timeframe }));
+      allTrades = allTrades.concat(trades);
+      results.push({
+        symbol,
+        timeframe,
+        periodStart: candles[0].time,
+        periodEnd: candles[candles.length - 1].time,
+        stats: computeStats(trades),
+        trades: trades.slice(-10),
+      });
+    }
+
+    allTrades.sort((a, b) => a.entryTime - b.entryTime);
+    const combined = computeStats(allTrades);
+    const equityCurve = buildEquityCurve(allTrades);
+    const winRateTarget = plan.winRateTarget != null ? Number(plan.winRateTarget) : null;
+    const approved = combined && winRateTarget != null
+      ? combined.winRate * 100 >= winRateTarget
+      : null;
+
+    const lastBacktest = {
+      ranAt: Date.now(),
+      combined,
+      equityCurve,
+      winRateTarget,
+      approved,
+      warnings: getPlanWarnings(plan),
+      results,
+      recentTrades: allTrades.slice(-20),
+    };
+
+    // Persiste no plano salvo, se existir
+    if (plan.name) {
+      try {
+        const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
+        const saved = (rules.group_plans || []).find(p => p.name === plan.name);
+        if (saved) {
+          saved.lastBacktest = lastBacktest;
+          if (winRateTarget != null) saved.winRateTarget = winRateTarget;
+          writeFileSync(BOT_RULES, JSON.stringify(rules, null, 2));
+        }
+      } catch { /* rules.json indisponível não bloqueia a resposta */ }
+    }
+
+    res.json({ success: true, ...lastBacktest });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
