@@ -1151,7 +1151,7 @@ const CANDLE_TTL_MS = 10 * 60 * 1000;
 const BINANCE_INTERVALS = { '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m', '1H': '1h', '4H': '4h', '1D': '1d' };
 
 async function fetchHistoricalCandles(symbol, timeframe, total = 1400) {
-  const key = `${symbol}:${timeframe}`;
+  const key = `${symbol}:${timeframe}:${total}`;
   const cached = candleCache.get(key);
   if (cached && Date.now() - cached.fetchedAt < CANDLE_TTL_MS) return cached.candles;
 
@@ -1175,7 +1175,11 @@ async function fetchHistoricalCandles(symbol, timeframe, total = 1400) {
     endTime = page[0].time - 1;
     if (data.length < limit) break;
   }
-  candleCache.set(key, { candles, fetchedAt: Date.now() });
+  // Só cacheia histórico completo — resultado curto (falha transitória da
+  // Binance) não pode ficar 10 min envenenando o cache
+  if (candles.length >= total) {
+    candleCache.set(key, { candles, fetchedAt: Date.now() });
+  }
   return candles;
 }
 
@@ -1200,22 +1204,28 @@ app.post('/api/bot/backtest', async (req, res) => {
     let allTrades = [];
 
     for (const { symbol, timeframe } of combos) {
-      const candles = await fetchHistoricalCandles(symbol, timeframe);
-      if (candles.length < 300) {
-        results.push({ symbol, timeframe, error: 'Histórico insuficiente', stats: null, trades: [] });
-        continue;
+      // Cede o event loop entre combos para não congelar os demais endpoints
+      await new Promise(r => setImmediate(r));
+      try {
+        const candles = await fetchHistoricalCandles(symbol, timeframe);
+        if (candles.length < 300) {
+          results.push({ symbol, timeframe, error: 'Histórico insuficiente', stats: null, trades: [] });
+          continue;
+        }
+        const trades = simulateTrades(candles, signalFn)
+          .map(t => ({ ...t, symbol, timeframe }));
+        allTrades = allTrades.concat(trades);
+        results.push({
+          symbol,
+          timeframe,
+          periodStart: candles[0].time,
+          periodEnd: candles[candles.length - 1].time,
+          stats: computeStats(trades),
+          trades: trades.slice(-10),
+        });
+      } catch (comboErr) {
+        results.push({ symbol, timeframe, error: comboErr.message, stats: null, trades: [] });
       }
-      const trades = simulateTrades(candles, signalFn)
-        .map(t => ({ ...t, symbol, timeframe }));
-      allTrades = allTrades.concat(trades);
-      results.push({
-        symbol,
-        timeframe,
-        periodStart: candles[0].time,
-        periodEnd: candles[candles.length - 1].time,
-        stats: computeStats(trades),
-        trades: trades.slice(-10),
-      });
     }
 
     allTrades.sort((a, b) => a.entryTime - b.entryTime);
