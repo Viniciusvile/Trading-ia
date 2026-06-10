@@ -21,3 +21,4 @@ tests/
 # SaaS build folders
 .next/
 dist/
+rules.json
