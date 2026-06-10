@@ -142,11 +142,15 @@ export const api = {
 
   botConfig: () =>
     safeJson<{
-      mode: string;
+      success: boolean;
+      strategyKey: string;
       symbol: string;
       timeframe: string;
+      portfolio: number;
+      maxTrade: number;
       paperTrading: boolean;
-      maxTradeSize: number;
+      activePlan: string | null;
+      groupPlans: { name: string; description?: string; symbols: string[] }[];
     } | null>("/bot/config", undefined, null),
 
   botLog: () =>

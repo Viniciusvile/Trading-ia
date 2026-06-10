@@ -187,8 +187,9 @@ export default function BotsPage() {
 
     try {
       if (botId === "masterbot" || botId === "futures") {
-        const configData = await fetch("/api/legacy/bot/config").then(r => r.json());
-        if (configData.success) {
+        // api.botConfig envia o token JWT — fetch direto recebia 401 e o modal ficava nos defaults
+        const configData = await api.botConfig();
+        if (configData?.success) {
           setMasterConfig({
             symbol: configData.symbol || "BTCUSDT",
             timeframe: configData.timeframe || "4H",
