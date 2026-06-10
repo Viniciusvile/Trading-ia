@@ -976,8 +976,17 @@ app.get('/api/bot/strategies', async (req, res) => {
   try {
     const rules = getRules();
     const plans = rules.group_plans || [];
-    
-    const strategies = await Promise.all(plans.map(async (p) => {
+
+    // Uma única consulta ao log de trades para todos os planos
+    let allRealTrades = [];
+    try {
+      const dbRes = await db.loadRecentLog(1000);
+      allRealTrades = dbRes.trades || [];
+    } catch (err) {
+      // banco indisponível: estratégias caem para backtest/sem-dados
+    }
+
+    const strategies = plans.map((p) => {
       const active = rules.active_plan === p.name;
 
       // Sem dados até provar o contrário (fim das estatísticas fake por seed)
@@ -995,27 +1004,21 @@ app.get('/api/bot/strategies', async (req, res) => {
       }
 
       // Prioridade 1: trades reais executados pelo bot (≥5 com PnL)
-      try {
-        const dbRes = await db.loadRecentLog(1000);
-        const allTrades = dbRes.trades || [];
-        const planTrades = allTrades.filter(t =>
-          (t.plan === p.name ||
-           (t.strategy === p.strategy && (p.symbols || []).includes(t.symbol))
-          ) && t.orderPlaced
-        );
-        const tradesWithPnl = planTrades.filter(t => t.pnl != null && t.pnl !== 0);
-        if (tradesWithPnl.length >= 5) {
-          totalTrades = tradesWithPnl.length;
-          const wins = tradesWithPnl.filter(t => t.pnl > 0);
-          winRate = wins.length / totalTrades;
-          netProfit = tradesWithPnl.reduce((acc, t) => acc + (t.pnl || 0), 0);
-          const totalLosses = Math.abs(tradesWithPnl.filter(t => t.pnl < 0).reduce((acc, t) => acc + (t.pnl || 0), 0));
-          const totalGains = wins.reduce((acc, t) => acc + (t.pnl || 0), 0);
-          profitFactor = totalLosses > 0 ? totalGains / totalLosses : 1.0;
-          statsSource = 'real';
-        }
-      } catch (err) {
-        // mantém backtest/sem-dados
+      const planTrades = allRealTrades.filter(t =>
+        (t.plan === p.name ||
+         (t.strategy === p.strategy && (p.symbols || []).includes(t.symbol))
+        ) && t.orderPlaced
+      );
+      const tradesWithPnl = planTrades.filter(t => t.pnl != null && t.pnl !== 0);
+      if (tradesWithPnl.length >= 5) {
+        totalTrades = tradesWithPnl.length;
+        const wins = tradesWithPnl.filter(t => t.pnl > 0);
+        winRate = wins.length / totalTrades;
+        netProfit = tradesWithPnl.reduce((acc, t) => acc + (t.pnl || 0), 0);
+        const totalLosses = Math.abs(tradesWithPnl.filter(t => t.pnl < 0).reduce((acc, t) => acc + (t.pnl || 0), 0));
+        const totalGains = wins.reduce((acc, t) => acc + (t.pnl || 0), 0);
+        profitFactor = totalLosses > 0 ? totalGains / totalLosses : 1.0;
+        statsSource = 'real';
       }
 
       return {
@@ -1038,7 +1041,7 @@ app.get('/api/bot/strategies', async (req, res) => {
         sl: p.sl || { type: 'atr', multiplier: 1.5 },
         tp: p.tp || { type: 'atr', multiplier: 2.0 }
       };
-    }));
+    });
 
     res.json({ success: true, strategies });
   } catch (e) {
