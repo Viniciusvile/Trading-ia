@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Brain, X, TrendingUp, Repeat, ChevronLeft, ChevronRight, FlaskConical, Target } from "lucide-react";
 import { Button } from "@/components/ui";
 import { api, type BacktestResult } from "@/lib/api";
@@ -58,6 +58,7 @@ export function StrategyWizard({ onClose, onSaved }: Props) {
   const [rsiShortMin, setRsiShortMin] = useState(58);
 
   // Passo 3
+  const reqIdRef = useRef(0);
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -93,21 +94,24 @@ export function StrategyWizard({ onClose, onSaved }: Props) {
   };
 
   const runAnalysis = async () => {
+    const myId = ++reqIdRef.current;
     setAnalyzing(true);
     setError(null);
     setResult(null);
     try {
       // name: undefined → análise pré-salvamento não grava lastBacktest no servidor
       const res = await api.botBacktest({ ...buildPlan(), name: undefined });
+      if (myId !== reqIdRef.current) return; // resposta de análise antiga: ignora
       if (res.success && res.equityCurve) {
         setResult(res as BacktestResult);
       } else {
         setError(res.error || "Falha ao executar a análise");
       }
     } catch {
+      if (myId !== reqIdRef.current) return;
       setError("Falha de conexão com o servidor de análise");
     } finally {
-      setAnalyzing(false);
+      if (myId === reqIdRef.current) setAnalyzing(false);
     }
   };
 
@@ -117,13 +121,20 @@ export function StrategyWizard({ onClose, onSaved }: Props) {
     try {
       const plan = { ...buildPlan(), lastBacktest: result };
       const res = await api.botStrategyCreate(plan);
-      if (res.success) {
-        if (activate) await api.botStrategyActivate(plan.name);
-        onSaved();
-        onClose();
-      } else {
+      if (!res.success) {
         setError("Falha ao salvar a estratégia");
+        return;
       }
+      if (activate) {
+        const act = await api.botStrategyActivate(plan.name);
+        if (!act.success) {
+          setError("Estratégia salva, mas falhou ao ativar no bot. Ative manualmente pela lista.");
+          onSaved(); // a lista precisa refletir a estratégia salva
+          return;
+        }
+      }
+      onSaved();
+      onClose();
     } finally {
       setSaving(false);
     }
