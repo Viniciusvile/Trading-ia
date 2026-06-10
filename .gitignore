@@ -17,3 +17,7 @@ masterbot/*.csv
 scratch/
 scratch_*.cjs
 tests/
+
+# SaaS build folders
+.next/
+dist/

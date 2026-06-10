@@ -219,9 +219,32 @@ async function main() {
           openedAt: openedAt, maxHoldMs: cfg.max_hold_ms || mainConfig.max_hold_ms || 3600000
         });
         
+        const dbId = logEntry?.id || `POS-SCALPER-${openedAt}`;
+        pos.dbId = dbId;
+
+        const dbPos = {
+          id: dbId,
+          symbol,
+          status: "open",
+          plan: "Micro-Scalper",
+          side: "LONG",
+          orderId: logEntry?.orderId || `MS-RECOVERY-${openedAt}`,
+          openedAt: new Date(openedAt).toISOString(),
+          quantity: finalQty,
+          strategy: cfg.strategy_mode || "micro-dip",
+          stopPrice: pos.slPrice,
+          takeProfitPrice: pos.tpPrice,
+          entryPrice: entryPriceToUse,
+          ocoOrderListId: pos.ocoId ? Number(pos.ocoId) : null,
+          timeframe: "5m"
+        };
+        await db.savePosition(dbPos).catch(() => {});
+        
         if (logOcoId) {
           pos.ocoId = logOcoId;
           console.log(`  ✅ [SYNC-OCO] Recuperado OCO ID ativo: ${pos.ocoId}`);
+          dbPos.ocoOrderListId = Number(pos.ocoId);
+          await db.savePosition(dbPos).catch(() => {});
         } else if (freeQty * lastPrice > 5) {
           // Tenta colocar OCO para posição sincronizada recém descoberta sem OCO
           try {
@@ -234,6 +257,8 @@ async function main() {
               if (oco.ok) {
                 pos.ocoId = oco.data.orderListId;
                 console.log(`  ✅ [SYNC-OCO] Ativo: ID ${pos.ocoId}`);
+                dbPos.ocoOrderListId = Number(pos.ocoId);
+                await db.savePosition(dbPos).catch(() => {});
               } else {
                 console.error(`  ❌ [SYNC-OCO] Falha: ${oco.data?.msg || JSON.stringify(oco.data)}`);
               }
@@ -447,6 +472,32 @@ async function main() {
               `📊 Sessão ${symbol}: ${(s.cumPnlPct * 100) >= 0 ? '+' : ''}${(s.cumPnlPct * 100).toFixed(2)}%`
             );
             
+            if (s.pos && s.pos.dbId) {
+              try {
+                const dbPos = {
+                  id: s.pos.dbId,
+                  symbol,
+                  status: "closed",
+                  plan: "Micro-Scalper",
+                  side: "LONG",
+                  orderId: s.pos.orderId || `MS-${s.pos.openedAt}`,
+                  openedAt: new Date(s.pos.openedAt).toISOString(),
+                  quantity: s.pos.qty,
+                  strategy: cfg.strategy_mode || "micro-dip",
+                  stopPrice: s.pos.slPrice,
+                  takeProfitPrice: s.pos.tpPrice,
+                  entryPrice: s.pos.entryPrice,
+                  exitPrice: exitPx,
+                  pnl: pnlUsdt,
+                  ocoOrderListId: s.pos.ocoId ? Number(s.pos.ocoId) : null,
+                  timeframe: "5m",
+                  closedAt: new Date(now).toISOString()
+                };
+                await db.savePosition(dbPos);
+              } catch (e) {
+                console.error("  ❌ Erro ao fechar posição do scalper no banco:", e.message);
+              }
+            }
             s.pos = null;
             // Cooldown maior após loss para evitar revenge trade no mesmo movimento
             const baseCooldown = mainConfig.cooldown_ms || 5000;
@@ -510,6 +561,28 @@ async function main() {
                   openedAt: now, maxHoldMs: cfg.max_hold_ms || mainConfig.max_hold_ms || 3600000,
                 });
                 
+                const dbId = `POS-SCALPER-${now}`;
+                s.pos.dbId = dbId;
+                const dbPos = {
+                  id: dbId,
+                  symbol,
+                  status: "open",
+                  plan: "Micro-Scalper",
+                  side: "LONG",
+                  orderId: open.res?.data?.orderId ? String(open.res.data.orderId) : `MS-${now}`,
+                  openedAt: new Date(now).toISOString(),
+                  quantity: open.qty,
+                  strategy: cfg.strategy_mode || "micro-dip",
+                  stopPrice: s.pos.slPrice,
+                  takeProfitPrice: s.pos.tpPrice,
+                  entryPrice: entryPrice,
+                  ocoOrderListId: null,
+                  timeframe: "5m"
+                };
+                await db.savePosition(dbPos).catch(err => {
+                  console.error("  ❌ Erro ao salvar posição no banco:", err.message);
+                });
+                
                 try {
                   const ocoQty = fmtQty(symbol, open.qty * 0.999, cfg);
                   // Validação: se a quantidade ficou zerada, qty_decimals está errado para esse ativo
@@ -523,6 +596,8 @@ async function main() {
                     if (oco.ok) {
                       s.pos.ocoId = oco.data.orderListId;
                       console.log(`  ✅ [OCO] Ativo: ID ${s.pos.ocoId}`);
+                      dbPos.ocoOrderListId = Number(s.pos.ocoId);
+                      await db.savePosition(dbPos).catch(() => {});
                     } else {
                       const errMsg = oco.data?.msg || JSON.stringify(oco.data);
                       console.error(`  ❌ [OCO] Falha da API Binance: ${errMsg}`);
@@ -533,7 +608,7 @@ async function main() {
                   console.error(`  ❌ [OCO] Erro de rede/sintaxe: ${e.message}`);
                   sendTelegram(`⚠️ [SCALPER] Exception OCO ${symbol}: ${e.message}`);
                 }
-
+ 
                 s.log.push({ 
                   t: new Date(now).toISOString(), 
                   event: "entry", 

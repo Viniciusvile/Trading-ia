@@ -1537,7 +1537,7 @@ async function runSymbolCycle(symbol, timeframe, rulesInput, runMode = 'master')
   // Removido da varredura constante para evitar popups de "Premium" no TradingView
   /* 
   try {
-    await fetch("http://localhost:3333/api/symbol", {
+    await fetch(`http://localhost:${process.env.PORT || 3334}/api/symbol`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ symbol: symbol })
@@ -1842,7 +1842,7 @@ async function runSymbolCycle(symbol, timeframe, rulesInput, runMode = 'master')
       const stratKey = process.env.BOT_STRATEGY || "warrior";
       const emoji = side === "LONG" ? "🟢" : "🔴";
       const modeTag = localConfig.paperTrading ? "[PAPER]" : "[LIVE]";
-      await fetch("http://localhost:3333/api/alerts", {
+      await fetch(`http://localhost:${process.env.PORT || 3334}/api/alerts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
