@@ -57,9 +57,10 @@ function authenticateToken(req, res, next) {
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { name, email, password } = req.body || {};
-    if (!name || !email || !password) {
-      return res.status(400).json({ success: false, error: 'Nome, email e senha são obrigatórios' });
+    if (!email || !password) {
+      return res.status(400).json({ success: false, error: 'Email e senha são obrigatórios' });
     }
+    const userName = name || email.split('@')[0];
 
     const existingUser = await db.getUserByEmail(email);
     if (existingUser) {
@@ -67,7 +68,7 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     const passwordHash = bcrypt.hashSync(password, 10);
-    const newUser = await db.createUser(name, email, passwordHash);
+    const newUser = await db.createUser(userName, email, passwordHash);
 
     const token = jwt.sign(
       { id: newUser.id, name: newUser.name, email: newUser.email },
