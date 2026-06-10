@@ -4,6 +4,8 @@
 import express from 'express';
 import { createServer } from 'node:http';
 import * as db from '../masterbot/db.js';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, openSync } from 'node:fs';
@@ -30,6 +32,105 @@ dotenv.config({ path: join(ROOT, '.env') });
 
 const app = express();
 app.use(express.json());
+
+const JWT_SECRET = process.env.JWT_SECRET || 'trading-saas-super-secret-key-2026';
+
+// Middleware de Autenticação JWT
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+
+  if (!token) {
+    return res.status(401).json({ success: false, error: 'Token de autenticação ausente' });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ success: false, error: 'Token inválido ou expirado' });
+    }
+    req.user = user;
+    next();
+  });
+}
+
+// Rota de Cadastro (Register)
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { name, email, password } = req.body || {};
+    if (!name || !email || !password) {
+      return res.status(400).json({ success: false, error: 'Nome, email e senha são obrigatórios' });
+    }
+
+    const existingUser = await db.getUserByEmail(email);
+    if (existingUser) {
+      return res.status(400).json({ success: false, error: 'Este e-mail já está cadastrado' });
+    }
+
+    const passwordHash = bcrypt.hashSync(password, 10);
+    const newUser = await db.createUser(name, email, passwordHash);
+
+    const token = jwt.sign(
+      { id: newUser.id, name: newUser.name, email: newUser.email },
+      JWT_SECRET,
+      { expiresIn: '30d' }
+    );
+
+    res.json({ success: true, token, user: newUser });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Rota de Login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ success: false, error: 'Email e senha são obrigatórios' });
+    }
+
+    const user = await db.getUserByEmail(email);
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'E-mail ou senha incorretos' });
+    }
+
+    const isMatch = bcrypt.compareSync(password, user.password_hash);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, error: 'E-mail ou senha incorretos' });
+    }
+
+    const token = jwt.sign(
+      { id: user.id, name: user.name, email: user.email },
+      JWT_SECRET,
+      { expiresIn: '30d' }
+    );
+
+    res.json({
+      success: true,
+      token,
+      user: { id: user.id, name: user.name, email: user.email }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Rota Perfil (Me)
+app.get('/api/auth/me', authenticateToken, async (req, res) => {
+  try {
+    const user = await db.getUserById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'Usuário não encontrado' });
+    }
+    res.json({
+      success: true,
+      user: { id: user.id, name: user.name, email: user.email }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // No Vercel, o static pode ser resolvido pelo vercel.json, 
 // mas mantemos aqui para compatibilidade local.
 app.use(express.static(__dirname));
@@ -795,9 +896,20 @@ function parseEnv(txt) {
 }
 
 // Retorna env mesclado: process.env (Railway vars) + .env local quando existir.
-function getBotEnv() {
+async function getBotEnv(userId = null) {
   const fileEnv = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : {};
   const merged = { ...process.env, ...fileEnv };
+  if (userId) {
+    const activeAcc = await db.getActiveAccount(userId);
+    if (activeAcc) {
+      merged.BINANCE_API_KEY = activeAcc.api_key;
+      merged.BINANCE_SECRET_KEY = activeAcc.secret_key;
+      merged.BINANCE_IS_TESTNET = activeAcc.is_testnet ? 'true' : 'false';
+    } else {
+      merged.BINANCE_API_KEY = '';
+      merged.BINANCE_SECRET_KEY = '';
+    }
+  }
   // Garantir trim nas chaves críticas de API
   if (merged.BINANCE_API_KEY) merged.BINANCE_API_KEY = merged.BINANCE_API_KEY.trim();
   if (merged.BINANCE_SECRET_KEY) merged.BINANCE_SECRET_KEY = merged.BINANCE_SECRET_KEY.trim();
@@ -828,10 +940,10 @@ app.post('/api/bot/futures/config', (req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.get('/api/bot/config', (_req, res) => {
+app.get('/api/bot/config', authenticateToken, async (req, res) => {
   try {
     if (!existsSync(BOT_DIR)) return res.status(404).json({ success: false, error: 'Pasta do bot não encontrada', dir: BOT_DIR });
-    const env = getBotEnv();
+    const env = await getBotEnv(req.user.id);
     const rules = existsSync(BOT_RULES) ? JSON.parse(readFileSync(BOT_RULES, 'utf8')) : null;
     const hasRealKeys = (env.BINANCE_API_KEY && !/your_api_key_here|^$/.test(env.BINANCE_API_KEY)) ||
                         (env.BITGET_API_KEY && !/your_api_key_here|^$/.test(env.BITGET_API_KEY));
@@ -1214,9 +1326,9 @@ app.post('/api/bot/emergency-sell', async (req, res) => {
   }
 });
 
-app.get('/api/bot/log', async (_req, res) => {
+app.get('/api/bot/log', authenticateToken, async (req, res) => {
   try {
-    const { trades } = await db.loadRecentLog(100);
+    const { trades } = await db.loadRecentLog(100, req.user.id);
     res.json({ success: true, trades });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -1629,12 +1741,12 @@ app.post('/api/bot/futures/stop', async (req, res) => {
 
 // ── POSITIONS ────────────────────────────────────────────────────
 
-async function syncPositionsWithBinance(env) {
+async function syncPositionsWithBinance(env, userId = null) {
   const apiKey = env.BINANCE_API_KEY || env.BITGET_API_KEY;
   const secretKey = env.BINANCE_SECRET_KEY || env.BITGET_SECRET_KEY;
   if (!apiKey || !secretKey || env.PAPER_TRADING === 'true') return { synced: 0, details: [] };
 
-  const positions = await db.loadPositions();
+  const positions = await db.loadPositions(userId);
   if (positions.length === 0) return { synced: 0, details: [] };
   let synced = 0;
   const details = [];
@@ -1743,25 +1855,27 @@ async function syncPositionsWithBinance(env) {
     }
   }
 
-  if (synced > 0) await db.savePositions(positions);
+  if (synced > 0) await db.savePositions(positions, userId);
   return { synced, details };
 }
 
-app.get('/api/bot/positions', async (_req, res) => {
+app.get('/api/bot/positions', authenticateToken, async (req, res) => {
   try {
-    const positions = await db.loadPositions();
+    const positions = await db.loadPositions(req.user.id);
     res.json({ success: true, positions });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post('/api/bot/positions/sync', async (_req, res) => {
+app.post('/api/bot/positions/sync', authenticateToken, async (req, res) => {
   try {
-    const apiKey = process.env.BINANCE_API_KEY;
-    const secretKey = process.env.BINANCE_SECRET_KEY;
-    if (!apiKey || !secretKey) return res.status(400).json({ success: false, error: 'Credenciais Binance não configuradas' });
+    const activeAcc = await db.getActiveAccount(req.user.id);
+    if (!activeAcc) return res.status(400).json({ success: false, error: 'Nenhuma conta ativa configurada' });
+
+    const apiKey = activeAcc.api_key;
+    const secretKey = activeAcc.secret_key;
 
     // Se não há posições no banco, cria do zero a partir dos saldos reais da Binance
-    const existingPositions = await db.loadPositions();
+    const existingPositions = await db.loadPositions(req.user.id);
     if (existingPositions.length === 0) {
       const ts = (await (await fetch('https://api.binance.com/api/v3/time')).json()).serverTime;
       const qs = `timestamp=${ts}&recvWindow=10000`;
@@ -1802,13 +1916,13 @@ app.post('/api/bot/positions/sync', async (_req, res) => {
         } catch {}
       }
 
-      await db.savePositions(newPositions);
+      await db.savePositions(newPositions, req.user.id);
       return res.json({ success: true, synced: newPositions.length, created: newPositions.length, details: newPositions.map(p => p.symbol) });
     }
 
     // Posições existem: atualiza status
     const env = existsSync(BOT_ENV) ? parseEnv(readFileSync(BOT_ENV, 'utf8')) : { BINANCE_API_KEY: apiKey, BINANCE_SECRET_KEY: secretKey };
-    const result = await syncPositionsWithBinance({ ...env, BINANCE_API_KEY: apiKey, BINANCE_SECRET_KEY: secretKey });
+    const result = await syncPositionsWithBinance({ ...env, BINANCE_API_KEY: apiKey, BINANCE_SECRET_KEY: secretKey }, req.user.id);
     res.json({ success: true, synced: result.synced, details: result.details });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -1856,13 +1970,13 @@ function isFuturesPosition(pos) {
   return false;
 }
 
-app.post('/api/bot/positions/:id/close', async (req, res) => {
+app.post('/api/bot/positions/:id/close', authenticateToken, async (req, res) => {
   try {
-    const positions = await db.loadPositions();
+    const positions = await db.loadPositions(req.user.id);
     const pos = positions.find(p => p.id === req.params.id && p.status === 'open');
     if (!pos) return res.status(404).json({ success: false, error: 'Posição não encontrada ou já fechada' });
 
-    const env = getBotEnv();
+    const env = await getBotEnv(req.user.id);
     const apiKey = env.BINANCE_API_KEY || env.BITGET_API_KEY;
     const secretKey = env.BINANCE_SECRET_KEY || env.BITGET_SECRET_KEY;
     const paperTrading = env.PAPER_TRADING !== 'false';
@@ -1899,7 +2013,7 @@ app.post('/api/bot/positions/:id/close', async (req, res) => {
 
         const qtyRounded = parseFloat(pos.quantity.toFixed(pQty));
         const timeRes = await fetch('https://fapi.binance.com/fapi/v1/time');
-        const timestamp = (await timeRes.json()).serverTime;
+        const timestamp = (timeRes.ok) ? (await timeRes.json()).serverTime : Date.now();
         const closeSide = pos.side === 'LONG' ? 'SELL' : 'BUY';
         const qs = `symbol=${pos.symbol}&side=${closeSide}&type=MARKET&quantity=${qtyRounded}&recvWindow=10000&timestamp=${timestamp}`;
         const sig = crypto.createHmac('sha256', secretKey).update(qs).digest('hex');
@@ -1975,19 +2089,19 @@ app.post('/api/bot/positions/:id/close', async (req, res) => {
     pos.exitOrderId = exitOrderId;
     pos.pnl = exitPrice ? parseFloat(((exitPrice - pos.entryPrice) * (pos.side === 'SHORT' ? -1 : 1) * pos.quantity).toFixed(4)) : null;
 
-    await db.savePosition(pos);
+    await db.savePosition(pos, req.user.id);
     res.json({ success: true, position: pos });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 // ── PLACE OCO / STOP FOR EXISTING POSITION ─────────────────────────────
-app.post('/api/bot/positions/:id/oco', async (req, res) => {
+app.post('/api/bot/positions/:id/oco', authenticateToken, async (req, res) => {
   try {
-    const positions = await db.loadPositions();
+    const positions = await db.loadPositions(req.user.id);
     const pos = positions.find(p => p.id === req.params.id && p.status === 'open');
     if (!pos) return res.status(404).json({ success: false, error: 'Posição não encontrada' });
 
-    const env = getBotEnv();
+    const env = await getBotEnv(req.user.id);
     const apiKey = env.BINANCE_API_KEY || env.BITGET_API_KEY;
     const secretKey = env.BINANCE_SECRET_KEY || env.BITGET_SECRET_KEY;
     if (!apiKey || !secretKey) return res.status(400).json({ success: false, error: 'Sem credenciais da Binance' });
@@ -2043,7 +2157,7 @@ app.post('/api/bot/positions/:id/oco', async (req, res) => {
       pos.ocoOrderListId = `FUT-TP-${dataTP.orderId || Date.now()}`;
       pos.ocoManual = true;
       pos.slManagedLocally = true; // Ativa o monitoramento local no bot.js para contornar erro -4120
-      await db.savePosition(pos);
+      await db.savePosition(pos, req.user.id);
       return res.json({ success: true, orderListId: pos.ocoOrderListId, message: 'Take Profit enviado para Binance. Stop Loss monitorado localmente pelo robô.' });
     }
 
@@ -2101,15 +2215,15 @@ app.post('/api/bot/positions/:id/oco', async (req, res) => {
     pos.ocoPlaced = true;
     pos.ocoOrderListId = ocoData.orderListId;
     pos.ocoManual = false;
-    await db.savePosition(pos);
+    await db.savePosition(pos, req.user.id);
     res.json({ success: true, orderListId: ocoData.orderListId });
   } catch(e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 // ── BALANCE ───────────────────────────────────────────────────────
-app.get('/api/bot/balance', async (_req, res) => {
+app.get('/api/bot/balance', authenticateToken, async (req, res) => {
   try {
-    const env = getBotEnv();
+    const env = await getBotEnv(req.user.id);
     const apiKey = env.BINANCE_API_KEY || env.BITGET_API_KEY;
     const secretKey = env.BINANCE_SECRET_KEY || env.BITGET_SECRET_KEY;
     if (!apiKey || !secretKey) return res.json({ success: false, error: 'Sem credenciais' });
@@ -2158,9 +2272,9 @@ app.get('/api/bot/balance', async (_req, res) => {
 });
 
 // ── PORTFOLIO ─────────────────────────────────────────────────────
-app.get('/api/bot/portfolio', async (_req, res) => {
+app.get('/api/bot/portfolio', authenticateToken, async (req, res) => {
   try {
-    const env = getBotEnv();
+    const env = await getBotEnv(req.user.id);
     const apiKey = env.BINANCE_API_KEY || env.BITGET_API_KEY;
     const secretKey = env.BINANCE_SECRET_KEY || env.BITGET_SECRET_KEY;
     if (!apiKey || !secretKey) return res.json({ success: false, error: 'Sem credenciais' });
@@ -2343,11 +2457,11 @@ app.post('/api/micro-scalper/trade', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.get('/api/micro-scalper/status', async (_req, res) => {
+app.get('/api/micro-scalper/status', authenticateToken, async (req, res) => {
   try {
     const [hb, sessions] = await Promise.all([
       db.readMicroHeartbeat(120_000),
-      db.loadMicroSessions(5),
+      db.loadMicroSessions(5, req.user.id),
     ]);
     // Heartbeat é a fonte de verdade; PID local como fallback
     const localLiveness = microIsAlive();
@@ -2358,10 +2472,10 @@ app.get('/api/micro-scalper/status', async (_req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.get('/api/micro-scalper/log', async (req, res) => {
+app.get('/api/micro-scalper/log', authenticateToken, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
-    const all = await db.loadMicroSessions(200);
+    const all = await db.loadMicroSessions(200, req.user.id);
     if (!all.length) return res.json({ success: true, sessions: 0, trades: [], daily: { trades: 0, pnl: 0 }, weekly: {} });
 
     const flat = [];
@@ -2506,9 +2620,9 @@ app.post('/api/micro-scalper/stop', (_req, res) => {
 });
 
 // ─── Accounts Helper Functions ───────────────────────────────────────────────
-async function syncEnvWithActiveAccount() {
+async function syncEnvWithActiveAccount(userId = null) {
   try {
-    const activeAcc = await db.getActiveAccount();
+    const activeAcc = await db.getActiveAccount(userId);
     if (activeAcc) {
       process.env.BINANCE_API_KEY = activeAcc.api_key;
       process.env.BINANCE_SECRET_KEY = activeAcc.secret_key;
@@ -2570,34 +2684,34 @@ async function restartRunningBots() {
 }
 
 // ─── Accounts Endpoints ───────────────────────────────────────────────────────
-app.get('/api/accounts', async (req, res) => {
+app.get('/api/accounts', authenticateToken, async (req, res) => {
   try {
-    const list = await db.listAccounts();
+    const list = await db.listAccounts(req.user.id);
     res.json({ success: true, accounts: list });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
 });
 
-app.post('/api/accounts', async (req, res) => {
+app.post('/api/accounts', authenticateToken, async (req, res) => {
   try {
     const { name, apiKey, secretKey, isTestnet } = req.body || {};
     if (!name || !apiKey || !secretKey) {
       return res.status(400).json({ success: false, error: 'name, apiKey e secretKey são obrigatórios' });
     }
-    const id = await db.createAccount(name, apiKey.trim(), secretKey.trim(), !!isTestnet);
-    await syncEnvWithActiveAccount();
+    const id = await db.createAccount(req.user.id, name, apiKey.trim(), secretKey.trim(), !!isTestnet);
+    await syncEnvWithActiveAccount(req.user.id);
     res.json({ success: true, id });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
 });
 
-app.post('/api/accounts/:id/activate', async (req, res) => {
+app.post('/api/accounts/:id/activate', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    await db.activateAccount(id);
-    await syncEnvWithActiveAccount();
+    await db.activateAccount(req.user.id, id);
+    await syncEnvWithActiveAccount(req.user.id);
     await restartRunningBots();
     res.json({ success: true });
   } catch (e) {
@@ -2605,11 +2719,11 @@ app.post('/api/accounts/:id/activate', async (req, res) => {
   }
 });
 
-app.delete('/api/accounts/:id', async (req, res) => {
+app.delete('/api/accounts/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    await db.deleteAccount(id);
-    await syncEnvWithActiveAccount();
+    await db.deleteAccount(req.user.id, id);
+    await syncEnvWithActiveAccount(req.user.id);
     await restartRunningBots();
     res.json({ success: true });
   } catch (e) {

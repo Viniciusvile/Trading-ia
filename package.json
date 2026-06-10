@@ -27,9 +27,11 @@
   "dependencies": {
     "@google/generative-ai": "^0.1.0",
     "@modelcontextprotocol/sdk": "^1.12.1",
+    "bcryptjs": "^3.0.3",
     "chrome-remote-interface": "^0.33.2",
     "dotenv": "^17.4.1",
     "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
     "node-fetch": "^3.3.1",
     "pg": "^8.20.0"
   }
