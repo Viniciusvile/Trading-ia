@@ -978,44 +978,31 @@ app.get('/api/bot/strategies', async (req, res) => {
     const plans = rules.group_plans || [];
     
     const strategies = await Promise.all(plans.map(async (p) => {
-      let totalTrades = 0;
-      let winRate = 0.58;
-      let profitFactor = 1.65;
-      let netProfit = 850.00;
-      let active = rules.active_plan === p.name;
+      const active = rules.active_plan === p.name;
 
-      // Deterministic stats based on strategy config - seeded by plan name hash
-      const nameHash = p.name.split('').reduce((h, c) => ((h << 5) - h) + c.charCodeAt(0), 0);
-      const seed = Math.abs(nameHash) % 1000;
-      
-      if (p.strategy === 'warrior') {
-        totalTrades = 30 + (seed % 20);
-        winRate = 0.58 + (seed % 10) / 100;
-        profitFactor = 1.65 + (seed % 30) / 100;
-        netProfit = 800 + (seed % 600);
-      } else if (p.strategy === 'range-v2') {
-        totalTrades = 22 + (seed % 15);
-        winRate = 0.48 + (seed % 8) / 100;
-        profitFactor = 1.35 + (seed % 25) / 100;
-        netProfit = 500 + (seed % 500);
-      } else {
-        totalTrades = 25 + (seed % 18);
-        winRate = 0.52 + (seed % 9) / 100;
-        profitFactor = 1.40 + (seed % 20) / 100;
-        netProfit = 350 + (seed % 400);
+      // Sem dados até provar o contrário (fim das estatísticas fake por seed)
+      let totalTrades = 0, winRate = 0, profitFactor = 0, netProfit = 0;
+      let statsSource = 'sem-dados';
+
+      // Prioridade 2: último backtest real persistido
+      if (p.lastBacktest?.combined) {
+        const c = p.lastBacktest.combined;
+        totalTrades = c.totalTrades;
+        winRate = c.winRate;
+        profitFactor = c.profitFactor;
+        netProfit = c.netProfitUsd;
+        statsSource = 'backtest';
       }
 
-      // Try to load real trade data if available
+      // Prioridade 1: trades reais executados pelo bot (≥5 com PnL)
       try {
         const dbRes = await db.loadRecentLog(1000);
         const allTrades = dbRes.trades || [];
-        // Match trades by plan name or by strategy+symbol combination
-        const planTrades = allTrades.filter(t => 
-          (t.plan === p.name || 
-           (t.strategy === p.strategy && p.symbols.includes(t.symbol))
+        const planTrades = allTrades.filter(t =>
+          (t.plan === p.name ||
+           (t.strategy === p.strategy && (p.symbols || []).includes(t.symbol))
           ) && t.orderPlaced
         );
-        // Only use real data if we have trades WITH pnl data
         const tradesWithPnl = planTrades.filter(t => t.pnl != null && t.pnl !== 0);
         if (tradesWithPnl.length >= 5) {
           totalTrades = tradesWithPnl.length;
@@ -1025,9 +1012,10 @@ app.get('/api/bot/strategies', async (req, res) => {
           const totalLosses = Math.abs(tradesWithPnl.filter(t => t.pnl < 0).reduce((acc, t) => acc + (t.pnl || 0), 0));
           const totalGains = wins.reduce((acc, t) => acc + (t.pnl || 0), 0);
           profitFactor = totalLosses > 0 ? totalGains / totalLosses : 1.0;
+          statsSource = 'real';
         }
       } catch (err) {
-        // Keep deterministic fallback values
+        // mantém backtest/sem-dados
       }
 
       return {
@@ -1043,6 +1031,9 @@ app.get('/api/bot/strategies', async (req, res) => {
         profitFactor,
         netProfit,
         totalTrades,
+        statsSource,
+        winRateTarget: p.winRateTarget ?? null,
+        lastBacktest: p.lastBacktest ?? null,
         filters: p.filters || {},
         sl: p.sl || { type: 'atr', multiplier: 1.5 },
         tp: p.tp || { type: 'atr', multiplier: 2.0 }
@@ -1057,7 +1048,7 @@ app.get('/api/bot/strategies', async (req, res) => {
 
 app.post('/api/bot/strategies', (req, res) => {
   try {
-    const { name, description, symbols, timeframes, strategy, mode, leverage, sl, tp, filters } = req.body;
+    const { name, description, symbols, timeframes, strategy, mode, leverage, sl, tp, filters, winRateTarget, lastBacktest } = req.body;
     if (!name) return res.status(400).json({ success: false, error: 'Nome da estratégia é obrigatório' });
 
     const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
@@ -1074,7 +1065,9 @@ app.post('/api/bot/strategies', (req, res) => {
       leverage: leverage ? parseInt(leverage) : 1,
       sl: sl || { type: 'atr', multiplier: 1.5 },
       tp: tp || { type: 'atr', multiplier: 2.0 },
-      filters: filters || {}
+      filters: filters || {},
+      winRateTarget: winRateTarget != null ? Number(winRateTarget) : null,
+      lastBacktest: lastBacktest || null
     };
 
     if (existingIndex >= 0) {
