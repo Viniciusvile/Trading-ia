@@ -46,6 +46,7 @@ export default function EstrategiasPage() {
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null);
   const [reanalyzing, setReanalyzing] = useState(false);
+  const [reanalyzeError, setReanalyzeError] = useState<string | null>(null);
 
   const fetchStrategies = async () => {
     setLoading(true);
@@ -90,11 +91,13 @@ export default function EstrategiasPage() {
 
   const openStats = (strat: Strategy) => {
     setSelectedStrategy(strat);
+    setReanalyzeError(null);
     setShowStatsModal(true);
   };
 
   const handleReanalyze = async (strat: Strategy) => {
     setReanalyzing(true);
+    setReanalyzeError(null);
     try {
       // Envia o name: o servidor persiste o lastBacktest no plano salvo
       const res = await api.botBacktest({
@@ -112,6 +115,8 @@ export default function EstrategiasPage() {
         // Atualiza o modal aberto e a lista
         setSelectedStrategy({ ...strat, lastBacktest: res as BacktestResult, statsSource: "backtest" });
         fetchStrategies();
+      } else {
+        setReanalyzeError(res.error || "Falha ao executar a análise. Tente novamente.");
       }
     } finally {
       setReanalyzing(false);
@@ -290,6 +295,9 @@ export default function EstrategiasPage() {
             </div>
 
             <div className="mt-6">
+              {reanalyzeError && !reanalyzing && (
+                <p className="text-xs text-[var(--color-text-down)] text-center mb-4">{reanalyzeError}</p>
+              )}
               {reanalyzing ? (
                 <div className="flex flex-col items-center justify-center py-16 space-y-3">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-brand-500)]"></div>
