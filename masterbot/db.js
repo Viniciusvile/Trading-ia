@@ -123,6 +123,15 @@ export async function initDb() {
         data       JSONB NOT NULL,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      -- Estado dos robôs por usuário (flags ligar/desligar + config do
+      -- MasterBot). Os processos REAIS são únicos e pertencem ao dono;
+      -- outros usuários têm apenas o próprio estado lógico aqui.
+      CREATE TABLE IF NOT EXISTS user_bot_state (
+        user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        data       JSONB NOT NULL DEFAULT '{}'::jsonb,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
     `);
 
     // Migrações dinâmicas para adicionar account_id e user_id
@@ -752,6 +761,27 @@ export async function seedMicroConfigForUser(userId, cfg) {
     [userId, JSON.stringify(cfg)]
   );
   return res.rowCount > 0;
+}
+
+// ─── Estado dos robôs por usuário ────────────────────────────────────────────
+
+/** Estado dos robôs do usuário (flags + config do MasterBot), ou {}. */
+export async function getUserBotState(userId) {
+  if (!userId) return {};
+  const res = await getPool().query(
+    'SELECT data FROM user_bot_state WHERE user_id = $1', [userId]
+  );
+  return res.rows[0]?.data || {};
+}
+
+/** Salva (upsert) o estado dos robôs do usuário. */
+export async function saveUserBotState(userId, state) {
+  if (!userId) throw new Error('userId obrigatório');
+  await getPool().query(
+    `INSERT INTO user_bot_state (user_id, data) VALUES ($1, $2)
+     ON CONFLICT (user_id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
+    [userId, JSON.stringify(state)]
+  );
 }
 
 /** Resolve o user_id dono da conta default (a que o bot usa via .env). */

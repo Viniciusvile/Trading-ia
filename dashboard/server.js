@@ -198,6 +198,13 @@ async function syncMicroRulesFromOwner(ownerUserId) {
   }
 }
 
+/** Atualiza uma flag (liga/desliga lógico) no estado de robôs do usuário. */
+async function setUserBotFlag(userId, key, value) {
+  const st = await db.getUserBotState(userId);
+  st[key] = value;
+  await db.saveUserBotState(userId, st);
+}
+
 /** Reinicia o Micro Scalper (lê rules.json só no startup). Retorna true se reiniciou. */
 function restartMicroScalperIfRunning() {
   const liveness = microIsAlive();
@@ -1047,20 +1054,27 @@ app.get('/api/bot/config', authenticateToken, async (req, res) => {
     // rules.json global (que vazava as estratégias do dono para todos).
     const userPlans = await db.listStrategies(req.user.id);
     const userActivePlan = await db.getActiveStrategyName(req.user.id);
+
+    // Config do MasterBot: dono lê do .env (fonte do robô real); demais
+    // usuários leem a PRÓPRIA cópia salva no banco (não a do dono).
+    const isOwner = await isOwnerUser(req.user.id);
+    const mc = isOwner ? {} : ((await db.getUserBotState(req.user.id)).master_config || {});
+
     res.json({
       success: true,
       dir: BOT_DIR,
-      strategyKey: env.BOT_STRATEGY || rules?.strategy?.key || 'warrior',
-      strategy: { stormer: '123 Stormer — Alexandre Wolwacz', warrior: 'Warrior Trading — Ross Cameron', both: 'Ambas (Warrior + Stormer)' }[env.BOT_STRATEGY || rules?.strategy?.key || 'warrior'] || 'Warrior Trading — Ross Cameron',
-      symbol: env.SYMBOL || 'BTCUSDT',
-      timeframe: env.TIMEFRAME || '4H',
-      portfolio: Number(env.PORTFOLIO_VALUE_USD || 0),
-      maxTrade: Number(env.MAX_TRADE_SIZE_USD || 0),
+      strategyKey: (!isOwner && mc.strategy) || env.BOT_STRATEGY || rules?.strategy?.key || 'warrior',
+      strategy: { stormer: '123 Stormer — Alexandre Wolwacz', warrior: 'Warrior Trading — Ross Cameron', both: 'Ambas (Warrior + Stormer)' }[(!isOwner && mc.strategy) || env.BOT_STRATEGY || rules?.strategy?.key || 'warrior'] || 'Warrior Trading — Ross Cameron',
+      symbol: (!isOwner && mc.symbol) || env.SYMBOL || 'BTCUSDT',
+      timeframe: (!isOwner && mc.timeframe) || env.TIMEFRAME || '4H',
+      portfolio: !isOwner ? Number(mc.portfolio || 0) : Number(env.PORTFOLIO_VALUE_USD || 0),
+      maxTrade: !isOwner ? Number(mc.maxTrade || 0) : Number(env.MAX_TRADE_SIZE_USD || 0),
       maxPerDay: Number(env.MAX_TRADES_PER_DAY || 0),
-      paperTrading: env.PAPER_TRADING !== 'false',
-      dailyMaxLoss: Number(rules?.risk?.daily_max_loss_usd || 0),
+      paperTrading: !isOwner ? (mc.paperTrading !== false) : (env.PAPER_TRADING !== 'false'),
+      dailyMaxLoss: !isOwner ? Number(mc.dailyMaxLoss || 0) : Number(rules?.risk?.daily_max_loss_usd || 0),
       hasRealKeys,
-      rules,
+      // rules.json inteiro só para o dono — contém dados do robô real
+      rules: isOwner ? rules : null,
       activePlan: userActivePlan || null,
       groupPlans: userPlans.map(p => ({ name: p.name, description: p.description, symbols: p.symbols })),
       watchlist: rules?.watchlist || [],
@@ -1400,6 +1414,38 @@ app.patch('/api/bot/watchlist', (req, res) => {
 
 app.patch('/api/bot/config', authenticateToken, async (req, res) => {
   try {
+    const { symbol, timeframe, strategy, portfolio, maxTrade, trailingEnabled, trailingMult, paperTrading, activePlan, dailyMaxLoss } = req.body || {};
+
+    // Validations
+    const allowedTf = ['1m','5m','15m','30m','1H','4H','1D','1W'];
+    const allowedStrat = ['stormer', 'warrior', 'both', 'auto'];
+    if (symbol && !/^[A-Z0-9]{3,20}$/.test(symbol)) return res.status(400).json({ success: false, error: 'Símbolo inválido' });
+    if (timeframe && !allowedTf.includes(timeframe)) return res.status(400).json({ success: false, error: 'Timeframe inválido' });
+    if (strategy && !allowedStrat.includes(strategy)) return res.status(400).json({ success: false, error: 'Estratégia inválida' });
+
+    // O plano ativo é PER-USUÁRIO (vive no banco)
+    if (activePlan !== undefined) {
+      await db.setActiveStrategy(req.user.id, activePlan || null);
+    }
+
+    // Persiste a config do MasterBot NA VISÃO DO USUÁRIO (banco). Para o
+    // dono ela também vai para .env/rules abaixo (o robô real é dele).
+    const st = await db.getUserBotState(req.user.id);
+    st.master_config = { ...(st.master_config || {}) };
+    if (symbol) st.master_config.symbol = symbol;
+    if (timeframe) st.master_config.timeframe = timeframe;
+    if (strategy) st.master_config.strategy = strategy;
+    if (portfolio !== undefined) st.master_config.portfolio = Number(portfolio);
+    if (maxTrade !== undefined) st.master_config.maxTrade = Number(maxTrade);
+    if (paperTrading !== undefined) st.master_config.paperTrading = !!paperTrading;
+    if (dailyMaxLoss !== undefined) st.master_config.dailyMaxLoss = Number(dailyMaxLoss) || 0;
+    await db.saveUserBotState(req.user.id, st);
+
+    // Não-dono: nunca toca .env/rules.json nem reinicia o robô real
+    if (!(await isOwnerUser(req.user.id))) {
+      return res.json({ success: true, symbol, timeframe, strategy, portfolio, maxTrade, paperTrading, simulated: true });
+    }
+
     // Se .env não existe (Railway), cria um a partir das variáveis de ambiente
     if (!existsSync(BOT_ENV)) {
       const envVars = ['BINANCE_API_KEY','BINANCE_SECRET_KEY','TELEGRAM_BOT_TOKEN','TELEGRAM_CHAT_ID',
@@ -1408,14 +1454,6 @@ app.patch('/api/bot/config', authenticateToken, async (req, res) => {
       const content = envVars.filter(k => process.env[k]).map(k => `${k}=${process.env[k]}`).join('\n') + '\n';
       writeFileSync(BOT_ENV, content);
     }
-    const { symbol, timeframe, strategy, portfolio, maxTrade, trailingEnabled, trailingMult, paperTrading, activePlan, dailyMaxLoss } = req.body || {};
-    
-    // Validations
-    const allowedTf = ['1m','5m','15m','30m','1H','4H','1D','1W'];
-    const allowedStrat = ['stormer', 'warrior', 'both', 'auto'];
-    if (symbol && !/^[A-Z0-9]{3,20}$/.test(symbol)) return res.status(400).json({ success: false, error: 'Símbolo inválido' });
-    if (timeframe && !allowedTf.includes(timeframe)) return res.status(400).json({ success: false, error: 'Timeframe inválido' });
-    if (strategy && !allowedStrat.includes(strategy)) return res.status(400).json({ success: false, error: 'Estratégia inválida' });
 
     // Update .env
     let txt = readFileSync(BOT_ENV, 'utf8');
@@ -1431,12 +1469,6 @@ app.patch('/api/bot/config', authenticateToken, async (req, res) => {
     if (maxTrade !== undefined) upsert('MAX_TRADE_SIZE_USD', maxTrade);
     if (paperTrading !== undefined) upsert('PAPER_TRADING', paperTrading ? 'true' : 'false');
     writeFileSync(BOT_ENV, txt);
-
-    // O plano ativo é PER-USUÁRIO (vive no banco). Grava a escolha do usuário
-    // logado; o espelhamento no rules.json acontece abaixo só se ele for o dono.
-    if (activePlan !== undefined) {
-      await db.setActiveStrategy(req.user.id, activePlan || null);
-    }
 
     // Update rules.json if trailing params, strategy or risk changed.
     // NOTA: maxTrade aqui é exclusivo do MasterBot (MAX_TRADE_SIZE_USD acima).
@@ -1497,63 +1529,89 @@ app.patch('/api/bot/config', authenticateToken, async (req, res) => {
 });
 
 // ── EMERGENCY SELL ──────────────────────────────────────────────
-app.post('/api/bot/emergency-sell', async (req, res) => {
-  const { symbol } = req.body;
-  if (!symbol) return res.status(400).json({ success: false, error: 'Símbolo obrigatório' });
+/** Liquida todo o saldo spot de um símbolo (cancela ordens + venda a mercado). */
+async function liquidateSymbol(client, symbol) {
+  try {
+    console.log(`  🧹 [${symbol}] Cancelando ordens abertas...`);
+    await client.cancelOpenOrders(symbol);
+  } catch (e) {
+    console.warn(`  ⚠️ [${symbol}] Erro ao cancelar ordens (talvez nenhuma aberta):`, e.message);
+  }
 
-  console.log(`🚨 [EMERGENCY] Iniciando liquidação total de ${symbol}...`);
+  const asset = symbol.replace('USDT', '');
+  const account = await client.getAccountInfo();
+  const balance = account.balances.find(b => b.asset === asset);
+  const qty = parseFloat(balance?.free || 0);
+
+  if (qty <= 0) {
+    return { symbol, success: true, msg: `Saldo de ${asset} já está zerado.` };
+  }
+
+  // Precisão de quantidade (LOT_SIZE)
+  const exInfo = await fetch(`https://api.binance.com/api/v3/exchangeInfo?symbol=${symbol}`).then(r => r.json());
+  const filter = exInfo.symbols?.[0]?.filters?.find(f => f.filterType === 'LOT_SIZE');
+  const stepSize = parseFloat(filter?.stepSize || '0.00000001');
+  const countDecimals = (n) => {
+    if (Math.floor(n) === n) return 0;
+    const s = n.toString();
+    if (s.includes('e-')) return parseInt(s.split('e-')[1]);
+    return s.split(".")[1].length || 0;
+  };
+  const qtyRounded = qty.toFixed(countDecimals(stepSize));
+
+  console.log(`  💰 [${symbol}] Vendendo saldo total: ${qtyRounded} ${asset}`);
+  const sellRes = await client.placeMarketSellQty(symbol, qtyRounded);
+  if (sellRes.ok) return { symbol, success: true, qty: qtyRounded };
+  return { symbol, success: false, error: sellRes.data?.msg || 'Erro na venda da Binance' };
+}
+
+app.post('/api/bot/emergency-sell', authenticateToken, async (req, res) => {
+  const { symbol } = req.body || {};
 
   try {
+    // Liquida na corretora da CONTA DE QUEM CLICOU — sem auth e com as
+    // chaves do .env, qualquer um podia vender a carteira do dono.
+    const env = await getBotEnv(req.user.id);
+    if (!env.BINANCE_API_KEY || !env.BINANCE_SECRET_KEY) {
+      return res.status(400).json({ success: false, error: 'Sua conta ativa não tem chaves de API configuradas' });
+    }
     const client = createBinanceClient({
-      apiKey: process.env.BINANCE_API_KEY,
-      secretKey: process.env.BINANCE_SECRET_KEY,
+      apiKey: env.BINANCE_API_KEY,
+      secretKey: env.BINANCE_SECRET_KEY,
     });
     await client.syncTime();
 
-    // 1. Cancelar Ordens Abertas
-    try {
-      console.log(`  🧹 [${symbol}] Cancelando ordens abertas...`);
-      await client.cancelOpenOrders(symbol);
-    } catch (e) {
-      console.warn(`  ⚠️ [${symbol}] Erro ao cancelar ordens (talvez nenhuma aberta):`, e.message);
-    }
-
-    // 2. Pegar Saldo Real (da moeda base, ex: BONK)
-    const asset = symbol.replace('USDT', '');
-    const account = await client.getAccountInfo();
-    const balance = account.balances.find(b => b.asset === asset);
-    const qty = parseFloat(balance?.free || 0);
-
-    if (qty <= 0) {
-      return res.json({ success: true, msg: `Saldo de ${asset} já está zerado.` });
-    }
-
-    // 3. Pegar precisão de quantidade (LOT_SIZE)
-    const exInfo = await fetch(`https://api.binance.com/api/v3/exchangeInfo?symbol=${symbol}`).then(r => r.json());
-    const filter = exInfo.symbols?.[0]?.filters?.find(f => f.filterType === 'LOT_SIZE');
-    const stepSize = parseFloat(filter?.stepSize || '0.00000001');
-    
-    const countDecimals = (n) => {
-      if (Math.floor(n) === n) return 0;
-      const s = n.toString();
-      if (s.includes('e-')) return parseInt(s.split('e-')[1]);
-      return s.split(".")[1].length || 0;
-    };
-    const precision = countDecimals(stepSize);
-    const qtyRounded = qty.toFixed(precision);
-
-    console.log(`  💰 [${symbol}] Vendendo saldo total: ${qtyRounded} ${asset}`);
-
-    // 4. Executar Venda a Mercado
-    const sellRes = await client.placeMarketSellQty(symbol, qtyRounded);
-    
-    if (sellRes.ok) {
-      res.json({ success: true, symbol, qty: qtyRounded, data: sellRes.data });
+    // Sem símbolo ("Vender tudo agora"): liquida os símbolos de TODAS as
+    // posições abertas da conta do usuário. Antes retornava 400 e o botão
+    // de pânico nunca funcionou.
+    let symbols;
+    if (symbol) {
+      symbols = [symbol];
     } else {
-      res.status(400).json({ success: false, error: sellRes.data?.msg || 'Erro na venda da Binance' });
+      const positions = await db.loadPositions(req.user.id);
+      symbols = [...new Set(positions.filter(p => p.status === 'open').map(p => p.symbol))];
+      if (symbols.length === 0) {
+        return res.json({ success: true, message: 'Nenhuma posição aberta para liquidar.' });
+      }
     }
+
+    console.log(`🚨 [EMERGENCY] Liquidação solicitada: ${symbols.join(', ')}`);
+    const results = [];
+    for (const sym of symbols) {
+      try { results.push(await liquidateSymbol(client, sym)); }
+      catch (e) { results.push({ symbol: sym, success: false, error: e.message }); }
+    }
+
+    const failed = results.filter(r => !r.success);
+    res.json({
+      success: failed.length === 0,
+      message: failed.length === 0
+        ? `Liquidação enviada para: ${symbols.join(', ')}`
+        : `Falhas em: ${failed.map(f => f.symbol).join(', ')}`,
+      results,
+    });
   } catch (e) {
-    console.error(`❌ [EMERGENCY] Falha crítica ao liquidar ${symbol}:`, e.message);
+    console.error(`❌ [EMERGENCY] Falha crítica na liquidação:`, e.message);
     res.status(500).json({ success: false, error: e.message });
   }
 });
@@ -1566,8 +1624,12 @@ app.get('/api/bot/log', authenticateToken, async (req, res) => {
 });
 
 // Diagnóstico: retorna últimas linhas do masterbot.log (texto cru)
-app.get('/api/bot/master/raw-log', (_req, res) => {
+app.get('/api/bot/master/raw-log', authenticateToken, async (req, res) => {
   try {
+    // Log do processo real é do dono — outras contas não têm robô próprio
+    if (!(await isOwnerUser(req.user.id))) {
+      return res.json({ success: true, lines: [], message: 'Logs do robô disponíveis apenas na conta operadora.' });
+    }
     const logFile = join(BOT_DIR, 'masterbot.log');
     if (!existsSync(logFile)) return res.json({ success: true, lines: [], message: 'Log ainda não existe — bot nunca rodou' });
     const text = readFileSync(logFile, 'utf8');
@@ -1633,10 +1695,25 @@ app.post('/api/bot/force-trade', (req, res) => {
 
 // ── MasterBot Loop Management ────────────────────────────────────
 
-app.get('/api/bot/master/status', async (req, res) => {
+app.get('/api/bot/master/status', authenticateToken, async (req, res) => {
   try {
+    // O processo real do MasterBot é único e pertence ao DONO. Outros
+    // usuários veem apenas o próprio estado lógico (flag no banco).
+    if (!(await isOwnerUser(req.user.id))) {
+      const st = await db.getUserBotState(req.user.id);
+      const enabled = !!st.master_enabled;
+      return res.json({
+        success: true,
+        status: enabled ? 'waiting' : 'stopped',
+        watchlist: [],
+        timeframes: [],
+        lastResults: [],
+        isAlive: enabled,
+      });
+    }
+
     let loopState = await db.loadMasterStatus();
-    
+
     // Check if process is actually alive via PID file or memory
     let isAlive = isProcessAlive(masterProcess);
     
@@ -1690,8 +1767,14 @@ app.post('/api/bot/master/config', async (req, res) => {
   }
 });
 
-app.post('/api/bot/master/start', (req, res) => {
+app.post('/api/bot/master/start', authenticateToken, async (req, res) => {
   try {
+    // Não-dono: liga apenas o estado lógico DELE — nunca o processo real
+    if (!(await isOwnerUser(req.user.id))) {
+      await setUserBotFlag(req.user.id, 'master_enabled', true);
+      return res.json({ success: true, simulated: true });
+    }
+
     const { interval } = req.body || {};
     const allowedIntervals = ['10m', '30m', '1h', '4h'];
     const safeInterval = allowedIntervals.includes(interval) ? interval : '1h';
@@ -1749,10 +1832,16 @@ app.post('/api/bot/master/start', (req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post('/api/bot/master/stop', async (req, res) => {
+app.post('/api/bot/master/stop', authenticateToken, async (req, res) => {
   try {
+    // Não-dono: desliga apenas o estado lógico DELE — nunca o processo real
+    if (!(await isOwnerUser(req.user.id))) {
+      await setUserBotFlag(req.user.id, 'master_enabled', false);
+      return res.json({ success: true, simulated: true });
+    }
+
     let pidToKill = masterProcess?.pid;
-    
+
     if (!pidToKill && existsSync(BOT_MASTER_PID)) {
       pidToKill = parseInt(readFileSync(BOT_MASTER_PID, 'utf8'));
     }
@@ -1779,10 +1868,24 @@ app.post('/api/bot/master/stop', async (req, res) => {
 
 // ── FuturesBot Loop Management ───────────────────────────────────
 
-app.get('/api/bot/futures/status', async (req, res) => {
+app.get('/api/bot/futures/status', authenticateToken, async (req, res) => {
   try {
+    // Processo real é único (do dono); demais usuários veem o próprio flag
+    if (!(await isOwnerUser(req.user.id))) {
+      const st = await db.getUserBotState(req.user.id);
+      const enabled = !!st.futures_enabled;
+      return res.json({
+        success: true,
+        status: enabled ? 'waiting' : 'stopped',
+        watchlist: [],
+        timeframes: [],
+        lastResults: [],
+        isAlive: enabled,
+      });
+    }
+
     let loopState = await db.loadFuturesStatus();
-    
+
     let isAlive = isProcessAlive(futuresProcess);
     
     if (!isAlive && existsSync(BOT_FUTURES_PID)) {
@@ -1900,8 +2003,14 @@ setInterval(async () => {
   } catch (err) {}
 }, 30000);
 
-app.post('/api/bot/futures/start', (req, res) => {
+app.post('/api/bot/futures/start', authenticateToken, async (req, res) => {
   try {
+    // Não-dono: liga apenas o estado lógico DELE — nunca o processo real
+    if (!(await isOwnerUser(req.user.id))) {
+      await setUserBotFlag(req.user.id, 'futures_enabled', true);
+      return res.json({ success: true, simulated: true });
+    }
+
     if (existsSync(BOT_FUTURES_PID)) {
       const oldPid = parseInt(readFileSync(BOT_FUTURES_PID, 'utf8'));
       if (oldPid) {
@@ -1944,10 +2053,16 @@ app.post('/api/bot/futures/start', (req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post('/api/bot/futures/stop', async (req, res) => {
+app.post('/api/bot/futures/stop', authenticateToken, async (req, res) => {
   try {
+    // Não-dono: desliga apenas o estado lógico DELE — nunca o processo real
+    if (!(await isOwnerUser(req.user.id))) {
+      await setUserBotFlag(req.user.id, 'futures_enabled', false);
+      return res.json({ success: true, simulated: true });
+    }
+
     let pidToKill = futuresProcess?.pid;
-    
+
     if (!pidToKill && existsSync(BOT_FUTURES_PID)) {
       pidToKill = parseInt(readFileSync(BOT_FUTURES_PID, 'utf8'));
     }
@@ -2745,10 +2860,17 @@ app.get('/api/micro-scalper/status', authenticateToken, async (req, res) => {
       db.readMicroHeartbeat(120_000),
       db.loadMicroSessions(5, req.user.id),
     ]);
-    // Heartbeat é a fonte de verdade; PID local como fallback
+    // Heartbeat é a fonte de verdade; PID local como fallback.
+    // Para não-donos o processo real não conta: vale o flag lógico DELES.
+    const isOwner = await isOwnerUser(req.user.id);
     const localLiveness = microIsAlive();
-    const running = hb.alive || localLiveness.alive;
-    const pid = hb.pid ?? localLiveness.pid;
+    let running = hb.alive || localLiveness.alive;
+    let pid = hb.pid ?? localLiveness.pid;
+    if (!isOwner) {
+      const st = await db.getUserBotState(req.user.id);
+      running = !!st.micro_enabled;
+      pid = null;
+    }
     const lastSession = sessions.length ? sessions[sessions.length - 1] : null;
     // Ativos ativos NA VISÃO DO USUÁRIO (config dele no banco)
     const activeSymbols = (await getMergedMicroConfig(req.user.id))?.active_symbols || [];
@@ -2864,8 +2986,14 @@ app.get('/api/micro-scalper/ai-review', async (_req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post('/api/micro-scalper/start', (_req, res) => {
+app.post('/api/micro-scalper/start', authenticateToken, async (req, res) => {
   try {
+    // Não-dono: liga apenas o estado lógico DELE — nunca o processo real
+    if (!(await isOwnerUser(req.user.id))) {
+      await setUserBotFlag(req.user.id, 'micro_enabled', true);
+      return res.json({ success: true, simulated: true });
+    }
+
     const liveness = microIsAlive();
     if (liveness.alive) return res.json({ success: false, error: 'already running', pid: liveness.pid });
 
@@ -2889,8 +3017,14 @@ app.post('/api/micro-scalper/start', (_req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post('/api/micro-scalper/stop', (_req, res) => {
+app.post('/api/micro-scalper/stop', authenticateToken, async (req, res) => {
   try {
+    // Não-dono: desliga apenas o estado lógico DELE — nunca o processo real
+    if (!(await isOwnerUser(req.user.id))) {
+      await setUserBotFlag(req.user.id, 'micro_enabled', false);
+      return res.json({ success: true, simulated: true });
+    }
+
     let pidToKill = microProcess?.pid;
     if (!pidToKill && existsSync(MICRO_PID)) pidToKill = parseInt(readFileSync(MICRO_PID, 'utf8'));
     if (!pidToKill) return res.json({ success: false, error: 'not running' });
