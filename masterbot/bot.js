@@ -1246,6 +1246,18 @@ async function closePositionMarket(pos) {
     return { orderId: String(data.orderId) };
   } else {
     // FECHAMENTO SPOT
+    // Cancela ordens abertas do par (OCO TP/SL) antes da venda — saldo travado
+    // em OCO faz a ordem a mercado falhar com "insufficient balance"
+    try {
+      const cTs = Date.now();
+      const cQs = `symbol=${symbol}&timestamp=${cTs}`;
+      const cSig = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(cQs).digest("hex");
+      await fetch(`https://api.binance.com/api/v3/openOrders?${cQs}&signature=${cSig}`, {
+        method: "DELETE",
+        headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey },
+      });
+    } catch (cancelErr) { /* sem ordens abertas: segue para a venda */ }
+
     const queryString = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qty}&recvWindow=10000&timestamp=${timestamp}`;
     const signature = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(queryString).digest("hex");
     const url = `https://api.binance.com/api/v3/order?${queryString}&signature=${signature}`;
