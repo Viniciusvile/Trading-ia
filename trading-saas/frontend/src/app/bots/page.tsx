@@ -94,6 +94,12 @@ export default function BotsPage() {
   // Decision history state
   const [decisionHistory, setDecisionHistory] = useState<any[]>([]);
 
+  // Headers com JWT para os fetch diretos (endpoints exigem login)
+  const legacyAuthHeaders = (): Record<string, string> => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   // Function to load all bot statuses
   const refreshStatuses = async () => {
     try {
@@ -101,7 +107,7 @@ export default function BotsPage() {
         api.botMasterStatus(),
         api.microScalperStatus(),
         api.botFuturesStatus(),
-        fetch("/api/legacy/micro-scalper/log?limit=5").then(r => r.json()).catch(() => null),
+        fetch("/api/legacy/micro-scalper/log?limit=5", { headers: legacyAuthHeaders() }).then(r => r.json()).catch(() => null),
       ]);
 
       setBots(prev => prev.map(bot => {
@@ -225,7 +231,8 @@ export default function BotsPage() {
           });
         }
       } else if (botId === "micro-scalper") {
-        const configData = await fetch("/api/legacy/micro-scalper/config").then(r => r.json());
+        // api.* envia o token JWT — o endpoint agora é por usuário e exige login
+        const configData = await api.microScalperConfig();
         if (configData.success && configData.config) {
           setMicroConfig({
             max_trade_usdt: configData.config.max_trade_usdt || 20,
@@ -296,7 +303,7 @@ export default function BotsPage() {
 
     try {
       if (botId === "micro-scalper") {
-        const logData = await fetch("/api/legacy/micro-scalper/log?limit=25").then(r => r.json());
+        const logData = await fetch("/api/legacy/micro-scalper/log?limit=25", { headers: legacyAuthHeaders() }).then(r => r.json());
         if (logData.success && logData.trades) {
           const lines = logData.trades.map((tr: any) => {
             const timeStr = new Date(tr.t).toLocaleTimeString();

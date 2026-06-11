@@ -173,6 +173,48 @@ async function syncRulesFromOwner(ownerUserId) {
     console.error('⚠️  Falha ao sincronizar rules.json a partir do dono:', e.message);
   }
 }
+
+/**
+ * Config do Micro Scalper visível para um usuário: o que ele salvou no banco
+ * por cima dos defaults globais do rules.json (campos não editáveis pela UI,
+ * como cooldowns, continuam vindo do arquivo).
+ */
+async function getMergedMicroConfig(userId) {
+  const globalCfg = getRules().micro_scalper || {};
+  const userCfg = await db.getUserMicroConfig(userId);
+  return { ...globalCfg, ...(userCfg || {}) };
+}
+
+/** Espelha a config do Micro Scalper do DONO no rules.json (o robô real lê de lá). */
+async function syncMicroRulesFromOwner(ownerUserId) {
+  try {
+    const userCfg = await db.getUserMicroConfig(ownerUserId);
+    if (!userCfg || !existsSync(BOT_RULES)) return;
+    const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
+    rules.micro_scalper = { ...(rules.micro_scalper || {}), ...userCfg };
+    writeFileSync(BOT_RULES, JSON.stringify(rules, null, 2));
+  } catch (e) {
+    console.error('⚠️  Falha ao sincronizar micro_scalper do dono:', e.message);
+  }
+}
+
+/** Reinicia o Micro Scalper (lê rules.json só no startup). Retorna true se reiniciou. */
+function restartMicroScalperIfRunning() {
+  const liveness = microIsAlive();
+  if (!liveness.alive) return false;
+  try { process.kill(liveness.pid, 'SIGTERM'); } catch {}
+  if (microProcess) { try { microProcess.kill('SIGTERM'); } catch {} microProcess = null; }
+  if (existsSync(MICRO_PID)) { try { unlinkSync(MICRO_PID); } catch {} }
+  setTimeout(() => {
+    try {
+      microProcess = spawn('node', [MICRO_SCRIPT], { cwd: ROOT, detached: true, stdio: 'ignore', env: { ...process.env } });
+      if (microProcess.pid) writeFileSync(MICRO_PID, microProcess.pid.toString());
+      microProcess.unref();
+      console.log(`♻️ Micro-Scalper reiniciado para aplicar nova config (PID ${microProcess.pid})`);
+    } catch (e) { console.error('Falha ao reiniciar micro-scalper:', e.message); }
+  }, 2000);
+  return true;
+}
 function loadJournal() {
   if (!existsSync(JOURNAL_FILE)) return [];
   try { return JSON.parse(readFileSync(JOURNAL_FILE, 'utf8')); } catch { return []; }
@@ -204,9 +246,10 @@ app.get('/api/health', async (req, res) => {
 });
 
 // ── MICRO-SCALPER LIVE SIGNAL ────────────────────────────────────
-app.get('/api/micro-scalper/signal', async (req, res) => {
+app.get('/api/micro-scalper/signal', authenticateToken, async (req, res) => {
   try {
-    const rules = getRules().micro_scalper;
+    // Sinais calculados com os planos do PRÓPRIO usuário
+    const rules = await getMergedMicroConfig(req.user.id);
     if (!rules) return res.status(404).json({ success: false, error: 'Config micro_scalper missing' });
 
     const active = rules.active_symbols || [];
@@ -315,71 +358,56 @@ const PLAN_PRESETS = {
 };
 
 
-app.patch('/api/micro-scalper/config', (req, res) => {
+app.patch('/api/micro-scalper/config', authenticateToken, async (req, res) => {
   try {
-    const mainRules = JSON.parse(readFileSync(join(ROOT, 'rules.json'), 'utf8'));
-    if (!mainRules.micro_scalper) mainRules.micro_scalper = { active_symbols: [], plans: {} };
-
     const { plan, action, max_trade_usdt } = req.body; // action: 'add' | 'remove' | 'toggle'
 
-    // Limite financeiro por trade do Micro Scalper (isolado do MasterBot).
-    // Tratado aqui pois esta é a rota que o Express resolve primeiro.
+    // Estado do PRÓPRIO usuário (banco por cima dos defaults globais) — cada
+    // conta edita só a sua config; o robô real segue a config do DONO.
+    const merged = await getMergedMicroConfig(req.user.id);
+    const userCfg = {
+      active_symbols: [...(merged.active_symbols || [])],
+      plans: { ...(merged.plans || {}) },
+      ...(merged.max_trade_usdt !== undefined ? { max_trade_usdt: merged.max_trade_usdt } : {}),
+      ...(merged.min_trade_usdt !== undefined ? { min_trade_usdt: merged.min_trade_usdt } : {}),
+    };
+
     if (max_trade_usdt !== undefined) {
+      // Limite financeiro por trade do Micro Scalper (isolado do MasterBot)
       const val = parseFloat(max_trade_usdt);
       if (!Number.isFinite(val) || val <= 0) {
         return res.status(400).json({ success: false, error: 'max_trade_usdt inválido' });
       }
-      mainRules.micro_scalper.max_trade_usdt = val;
-      mainRules.micro_scalper.min_trade_usdt = parseFloat((val * 0.6).toFixed(2)); // 60% do max
-      writeFileSync(join(ROOT, 'rules.json'), JSON.stringify(mainRules, null, 2));
-
-      res.json({ success: true, max_trade_usdt: val });
-
-      // O Micro Scalper lê rules.json só no startup — reinicia se estiver rodando
-      setTimeout(() => {
-        const liveness = microIsAlive();
-        if (liveness.alive) {
-          console.log(`♻️ Reiniciando Micro-Scalper para aplicar novo max_trade_usdt=${val}...`);
-          try { process.kill(liveness.pid, 'SIGTERM'); } catch {}
-          if (microProcess) { try { microProcess.kill('SIGTERM'); } catch {} microProcess = null; }
-          if (existsSync(MICRO_PID)) { try { unlinkSync(MICRO_PID); } catch {} }
-
-          setTimeout(() => {
-            microProcess = spawn('node', [MICRO_SCRIPT], { cwd: ROOT, detached: true, stdio: 'ignore', env: { ...process.env } });
-            if (microProcess.pid) writeFileSync(MICRO_PID, microProcess.pid.toString());
-            microProcess.unref();
-            console.log(`✅ Micro-Scalper reiniciado com max_trade_usdt=${val}.`);
-          }, 2000);
-        }
-      }, 1000);
-      return;
+      userCfg.max_trade_usdt = val;
+      userCfg.min_trade_usdt = parseFloat((val * 0.6).toFixed(2)); // 60% do max
     }
 
     if (plan && PLAN_PRESETS[plan]) {
       const symbol = PLAN_PRESETS[plan].symbol;
-      if (!mainRules.micro_scalper.plans) mainRules.micro_scalper.plans = {};
-      if (!mainRules.micro_scalper.active_symbols) mainRules.micro_scalper.active_symbols = [];
+      userCfg.plans[symbol] = { ...PLAN_PRESETS[plan] };
 
-      mainRules.micro_scalper.plans[symbol] = { ...PLAN_PRESETS[plan] };
-      
-      const is_active = mainRules.micro_scalper.active_symbols.includes(symbol);
-      
+      const isActive = userCfg.active_symbols.includes(symbol);
       if (action === 'add') {
-        if (!is_active) mainRules.micro_scalper.active_symbols.push(symbol);
+        if (!isActive) userCfg.active_symbols.push(symbol);
       } else if (action === 'remove') {
-        mainRules.micro_scalper.active_symbols = mainRules.micro_scalper.active_symbols.filter(s => s !== symbol);
+        userCfg.active_symbols = userCfg.active_symbols.filter(s => s !== symbol);
       } else if (action === 'toggle') {
-        if (is_active) mainRules.micro_scalper.active_symbols = mainRules.micro_scalper.active_symbols.filter(s => s !== symbol);
-        else mainRules.micro_scalper.active_symbols.push(symbol);
+        if (isActive) userCfg.active_symbols = userCfg.active_symbols.filter(s => s !== symbol);
+        else userCfg.active_symbols.push(symbol);
       }
-      
-      // Remove duplicatas
-      mainRules.micro_scalper.active_symbols = [...new Set(mainRules.micro_scalper.active_symbols)];
+      userCfg.active_symbols = [...new Set(userCfg.active_symbols)];
     }
-    
-    console.log(`📝 Updated active_symbols: [${mainRules.micro_scalper.active_symbols.join(', ')}]`);
-    writeFileSync(join(ROOT, 'rules.json'), JSON.stringify(mainRules, null, 2));
-    res.json({ success: true, config: mainRules.micro_scalper, restart_required: true });
+
+    await db.saveUserMicroConfig(req.user.id, userCfg);
+
+    // Só o DONO reflete no rules.json e reinicia o robô real
+    let restarted = false;
+    if (await isOwnerUser(req.user.id)) {
+      await syncMicroRulesFromOwner(req.user.id);
+      restarted = restartMicroScalperIfRunning();
+    }
+
+    res.json({ success: true, config: userCfg, max_trade_usdt: userCfg.max_trade_usdt, restart_required: restarted });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
@@ -2664,61 +2692,16 @@ function microIsAlive() {
   return { alive: false, pid: null };
 }
 
-app.get('/api/micro-scalper/config', (_req, res) => {
+app.get('/api/micro-scalper/config', authenticateToken, async (req, res) => {
   try {
-    const cfg = getRules().micro_scalper || null;
+    // Config do PRÓPRIO usuário (banco) sobre os defaults globais
+    const cfg = await getMergedMicroConfig(req.user.id);
     res.json({ success: true, config: cfg });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.get('/api/micro-scalper/signal', async (_req, res) => {
-  try {
-    const rules = getRules();
-    const microCfg = rules.micro_scalper || {};
-    const activeSymbols = microCfg.active_symbols || ['XRPUSDT', 'SOLUSDT'];
-    const plans = microCfg.plans || {};
-    const { turboReversionSignal, microScalpSignal } = await import('../src/scalper/signals.js');
-
-    const signals = await Promise.all(activeSymbols.map(async (symbol) => {
-      try {
-        const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=5m&limit=50`);
-        const klines = await r.json();
-        if (!Array.isArray(klines)) return { symbol, success: false, error: 'Falha na API Binance' };
-
-        const candles = klines.map(k => ({
-          close: parseFloat(k[4]),
-          high: parseFloat(k[2]),
-          low: parseFloat(k[3]),
-          vol: parseFloat(k[5])
-        }));
-
-        const cfg = plans[symbol] || {};
-        let sig;
-        if (cfg.strategy_mode === 'turbo-reversion') {
-          sig = turboReversionSignal(candles, {
-            bbLen: cfg.bb_length || 20, bbMult: cfg.bb_mult || 1.8,
-            rsiLen: cfg.rsi_period || 14, rsiLimit: cfg.rsi_limit || 45, volMult: cfg.vol_mult || 1.2,
-            trendEmaPeriod: cfg.trend_ema_period || 0, trendSlopeBars: cfg.trend_slope_bars || 5,
-            trendMaxDownPct: cfg.trend_max_down_pct || 0, minAtrPct: cfg.min_atr_pct || 0
-          });
-        } else {
-          sig = microScalpSignal(candles, {
-            emaPeriod: cfg.ema_period || 20, rsiPeriod: cfg.rsi_period || 3,
-            minDip: cfg.min_dip_pct || 0.0005, minRsi: cfg.min_rsi || 20, maxRsi: cfg.max_rsi || 75,
-            trendEmaPeriod: cfg.trend_ema_period || 0, trendSlopeBars: cfg.trend_slope_bars || 5,
-            trendMaxDownPct: cfg.trend_max_down_pct || 0, minAtrPct: cfg.min_atr_pct || 0
-          });
-        }
-
-        return { symbol, success: true, signal: sig };
-      } catch (e) {
-        return { symbol, success: false, error: e.message };
-      }
-    }));
-
-    res.json({ success: true, signals });
-  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
-});
+// NOTA: a rota GET /api/micro-scalper/signal vive no topo do arquivo (a
+// primeira registrada vence no Express) — duplicata removida daqui.
 
 app.post('/api/micro-scalper/trade', async (req, res) => {
   try {
@@ -2767,8 +2750,8 @@ app.get('/api/micro-scalper/status', authenticateToken, async (req, res) => {
     const running = hb.alive || localLiveness.alive;
     const pid = hb.pid ?? localLiveness.pid;
     const lastSession = sessions.length ? sessions[sessions.length - 1] : null;
-    // Ativos que o scalper realmente opera (para o card não mostrar só 1 símbolo)
-    const activeSymbols = getRules().micro_scalper?.active_symbols || [];
+    // Ativos ativos NA VISÃO DO USUÁRIO (config dele no banco)
+    const activeSymbols = (await getMergedMicroConfig(req.user.id))?.active_symbols || [];
     res.json({ success: true, running, pid, lastSeen: hb.lastSeen, lastSession, activeSymbols });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -2923,48 +2906,42 @@ app.post('/api/micro-scalper/stop', (_req, res) => {
 // ── Estratégia do Micro-Scalper (planos por símbolo) ────────────────────────
 // Atualiza rules.micro_scalper (plano do símbolo, ativação e parâmetros globais)
 // e reinicia o scalper se estiver rodando — ele só lê a config na inicialização.
-app.patch('/api/micro-scalper/strategy', (req, res) => {
+app.patch('/api/micro-scalper/strategy', authenticateToken, async (req, res) => {
   try {
     const { symbol, plan, active, global } = req.body || {};
-    const rules = JSON.parse(readFileSync(join(ROOT, 'rules.json'), 'utf8'));
-    if (!rules.micro_scalper) rules.micro_scalper = { active_symbols: [], plans: {} };
-    const ms = rules.micro_scalper;
-    if (!ms.plans) ms.plans = {};
-    if (!Array.isArray(ms.active_symbols)) ms.active_symbols = [];
+
+    // Ativar/pausar/personalizar opera SÓ na config do próprio usuário —
+    // antes gravava no rules.json global e vazava para todas as contas.
+    const merged = await getMergedMicroConfig(req.user.id);
+    const userCfg = {
+      ...merged,
+      active_symbols: Array.isArray(merged.active_symbols) ? [...merged.active_symbols] : [],
+      plans: { ...(merged.plans || {}) },
+    };
 
     if (symbol && plan && typeof plan === 'object') {
-      ms.plans[symbol] = { ...(ms.plans[symbol] || {}), ...plan };
+      userCfg.plans[symbol] = { ...(userCfg.plans[symbol] || {}), ...plan };
     }
     if (symbol && active !== undefined) {
-      ms.active_symbols = ms.active_symbols.filter(s => s !== symbol);
-      if (active) ms.active_symbols.push(symbol);
+      userCfg.active_symbols = userCfg.active_symbols.filter(s => s !== symbol);
+      if (active) userCfg.active_symbols.push(symbol);
     }
     if (global && typeof global === 'object') {
       for (const k of ['max_trade_usdt', 'min_trade_usdt', 'daily_profit_target_usdt', 'loop_interval_ms', 'cooldown_ms', 'max_trades']) {
-        if (global[k] !== undefined) ms[k] = Number(global[k]);
+        if (global[k] !== undefined) userCfg[k] = Number(global[k]);
       }
     }
-    writeFileSync(join(ROOT, 'rules.json'), JSON.stringify(rules, null, 2));
 
-    // Reinicia o scalper para aplicar a nova estratégia, se estiver rodando
+    await db.saveUserMicroConfig(req.user.id, userCfg);
+
+    // Só o DONO espelha no rules.json e reinicia o robô real
     let restarted = false;
-    const liveness = microIsAlive();
-    if (liveness.alive) {
-      try { process.kill(liveness.pid, 'SIGTERM'); } catch {}
-      if (microProcess) { try { microProcess.kill('SIGTERM'); } catch {} microProcess = null; }
-      if (existsSync(MICRO_PID)) { try { unlinkSync(MICRO_PID); } catch {} }
-      setTimeout(() => {
-        try {
-          microProcess = spawn('node', [MICRO_SCRIPT], { cwd: ROOT, detached: true, stdio: 'ignore', env: { ...process.env } });
-          if (microProcess.pid) writeFileSync(MICRO_PID, microProcess.pid.toString());
-          microProcess.unref();
-          console.log(`♻️ Micro-Scalper reiniciado com nova estratégia (PID ${microProcess.pid})`);
-        } catch (e) { console.error('Falha ao reiniciar micro-scalper:', e.message); }
-      }, 1500);
-      restarted = true;
+    if (await isOwnerUser(req.user.id)) {
+      await syncMicroRulesFromOwner(req.user.id);
+      restarted = restartMicroScalperIfRunning();
     }
 
-    res.json({ success: true, micro_scalper: ms, restarted });
+    res.json({ success: true, micro_scalper: userCfg, restarted });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
@@ -3118,6 +3095,18 @@ async function migrateStrategiesToDb() {
     const n = await db.seedStrategiesForUser(ownerId, plans, rules.active_plan || null);
     if (n > 0) {
       console.log(`📦 Migradas ${n} estratégia(s) do rules.json para o dono (isolamento por usuário).`);
+    }
+
+    // Config do Micro Scalper (active_symbols + plans) também vira por-usuário
+    const ms = rules.micro_scalper;
+    if (ms) {
+      const seeded = await db.seedMicroConfigForUser(ownerId, {
+        active_symbols: ms.active_symbols || [],
+        plans: ms.plans || {},
+        ...(ms.max_trade_usdt !== undefined ? { max_trade_usdt: ms.max_trade_usdt } : {}),
+        ...(ms.min_trade_usdt !== undefined ? { min_trade_usdt: ms.min_trade_usdt } : {}),
+      });
+      if (seeded) console.log('📦 Config do Micro Scalper migrada para o dono (isolamento por usuário).');
     }
   } catch (e) {
     console.error('⚠️  Falha na migração de estratégias:', e.message);

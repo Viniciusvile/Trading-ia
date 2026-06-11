@@ -114,6 +114,15 @@ export async function initDb() {
         UNIQUE (user_id, name)
       );
       CREATE INDEX IF NOT EXISTS idx_strategies_user ON strategies(user_id);
+
+      -- Config do Micro Scalper (active_symbols + plans por ativo) isolada
+      -- por usuário. Antes vivia só no rules.json global: ativar/personalizar
+      -- numa conta mudava para todas as outras.
+      CREATE TABLE IF NOT EXISTS user_micro_config (
+        user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        data       JSONB NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
     `);
 
     // Migrações dinâmicas para adicionar account_id e user_id
@@ -711,6 +720,38 @@ export async function seedStrategiesForUser(userId, plans, activePlanName = null
     client.release();
   }
   return inserted;
+}
+
+// ─── Micro Scalper config por usuário ────────────────────────────────────────
+
+/** Config do Micro Scalper do usuário (active_symbols, plans, limites), ou null. */
+export async function getUserMicroConfig(userId) {
+  if (!userId) return null;
+  const res = await getPool().query(
+    'SELECT data FROM user_micro_config WHERE user_id = $1', [userId]
+  );
+  return res.rows[0]?.data || null;
+}
+
+/** Salva (upsert) a config do Micro Scalper do usuário. */
+export async function saveUserMicroConfig(userId, cfg) {
+  if (!userId) throw new Error('userId obrigatório');
+  await getPool().query(
+    `INSERT INTO user_micro_config (user_id, data) VALUES ($1, $2)
+     ON CONFLICT (user_id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
+    [userId, JSON.stringify(cfg)]
+  );
+}
+
+/** Migração one-time: semeia a config do usuário (não sobrescreve se já existir). */
+export async function seedMicroConfigForUser(userId, cfg) {
+  if (!userId || !cfg) return false;
+  const res = await getPool().query(
+    `INSERT INTO user_micro_config (user_id, data) VALUES ($1, $2)
+     ON CONFLICT (user_id) DO NOTHING`,
+    [userId, JSON.stringify(cfg)]
+  );
+  return res.rowCount > 0;
 }
 
 /** Resolve o user_id dono da conta default (a que o bot usa via .env). */

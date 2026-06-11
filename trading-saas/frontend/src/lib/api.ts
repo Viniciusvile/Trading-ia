@@ -268,6 +268,7 @@ export const api = {
         max_trade_usdt?: number;
         min_trade_usdt?: number;
         daily_profit_target_usdt?: number;
+        loop_interval_ms?: number;
         plans: Record<string, ScalperPlan>;
       } | null;
     }>("/micro-scalper/config", undefined, { success: false, config: null }),
