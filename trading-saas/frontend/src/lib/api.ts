@@ -67,6 +67,12 @@ export interface BacktestResult {
   equityCurve: { time: number; equity: number }[];
   winRateTarget: number | null;
   approved: boolean | null;
+  feePctPerSide?: number;
+  walkForward?: {
+    splitTime: number;
+    inSample: BacktestStats | null;
+    outOfSample: BacktestStats | null;
+  } | null;
   warnings: string[];
   results: {
     symbol: string;

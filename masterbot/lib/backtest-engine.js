@@ -12,6 +12,11 @@
 export function simulateTrades(candles, signalFn, opts = {}) {
   const warmup = opts.warmup ?? 250;
   const maxHold = opts.maxHold ?? 96;
+  // Custo real de execução: taxa spot da Binance (0.1% por lado = 0.2% por
+  // trade ida-e-volta), descontada do retorno de CADA trade. Crítico para não
+  // inflar resultados em alvos curtos (scalper). Passe feePctPerSide: 0 para
+  // simular sem custos.
+  const feePctPerSide = opts.feePctPerSide ?? 0.1;
   const trades = [];
   let i = warmup;
 
@@ -53,9 +58,10 @@ export function simulateTrades(candles, signalFn, opts = {}) {
       result = "timeout";
     }
 
-    const returnPct = side === "LONG"
+    const grossPct = side === "LONG"
       ? ((exitPrice - entryPrice) / entryPrice) * 100
       : ((entryPrice - exitPrice) / entryPrice) * 100;
+    const returnPct = grossPct - feePctPerSide * 2;
 
     trades.push({
       entryTime: bar.time,

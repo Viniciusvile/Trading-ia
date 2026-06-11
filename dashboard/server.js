@@ -1232,12 +1232,29 @@ app.post('/api/bot/backtest', async (req, res) => {
       ? combined.winRate * 100 >= winRateTarget
       : null;
 
+    // Walk-forward 70/30: compara o desempenho dos 70% iniciais do período com
+    // os 30% finais. Divergência grande sugere overfitting ou mudança de regime.
+    let walkForward = null;
+    const periods = results.filter(r => r.periodStart && r.periodEnd);
+    if (allTrades.length >= 8 && periods.length) {
+      const t0 = Math.min(...periods.map(r => r.periodStart));
+      const t1 = Math.max(...periods.map(r => r.periodEnd));
+      const splitTime = t0 + (t1 - t0) * 0.7;
+      walkForward = {
+        splitTime,
+        inSample: computeStats(allTrades.filter(t => t.entryTime < splitTime)),
+        outOfSample: computeStats(allTrades.filter(t => t.entryTime >= splitTime)),
+      };
+    }
+
     const lastBacktest = {
       ranAt: Date.now(),
       combined,
       equityCurve,
       winRateTarget,
       approved,
+      feePctPerSide: 0.1,
+      walkForward,
       warnings: getPlanWarnings(plan),
       results,
       recentTrades: allTrades.slice(-20),

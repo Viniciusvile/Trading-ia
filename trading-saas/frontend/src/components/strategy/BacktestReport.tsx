@@ -123,6 +123,32 @@ export function BacktestReport({ data }: { data: BacktestResult }) {
         <EquityCurve points={data.equityCurve} />
       </div>
 
+      {/* Consistência temporal (walk-forward 70/30) */}
+      {data.walkForward?.inSample && data.walkForward?.outOfSample && (() => {
+        const ws = data.walkForward!;
+        const wrIn = ws.inSample!.winRate * 100;
+        const wrOut = ws.outOfSample!.winRate * 100;
+        const divergent = wrIn - wrOut > 15;
+        return (
+          <div className={`p-3 rounded-[var(--radius-sm)] border space-y-1.5 ${
+            divergent
+              ? "border-[var(--color-text-down)]/40 bg-[var(--color-text-down)]/5"
+              : "border-[var(--color-border)] bg-[var(--color-surface-3)]"
+          }`}>
+            <p className="text-xs font-semibold text-[var(--color-text)]">Consistência temporal (70% iniciais × 30% finais)</p>
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-muted">
+              <span>Início: <strong className="text-[var(--color-text)]">{wrIn.toFixed(1)}% WR</strong> ({ws.inSample!.totalTrades} trades, {ws.inSample!.netProfitPct >= 0 ? "+" : ""}{ws.inSample!.netProfitPct.toFixed(2)}%)</span>
+              <span>Final: <strong className="text-[var(--color-text)]">{wrOut.toFixed(1)}% WR</strong> ({ws.outOfSample!.totalTrades} trades, {ws.outOfSample!.netProfitPct >= 0 ? "+" : ""}{ws.outOfSample!.netProfitPct.toFixed(2)}%)</span>
+            </div>
+            {divergent && (
+              <p className="text-[10px] text-[var(--color-text-down)]">
+                O desempenho caiu bastante no trecho final do período — pode ser ajuste excessivo ao passado ou mudança de regime do mercado. Considere relaxar os filtros e reanalisar.
+              </p>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Por ativo × timeframe */}
       {data.results.length > 1 && (
         <div className="border border-[var(--color-border)] rounded-[var(--radius-sm)] overflow-hidden">
@@ -191,7 +217,8 @@ export function BacktestReport({ data }: { data: BacktestResult }) {
       )}
 
       <p className="text-[10px] text-muted">
-        Análise executada em {new Date(data.ranAt).toLocaleString("pt-BR")} sobre candles públicos da Binance.
+        Análise executada em {new Date(data.ranAt).toLocaleString("pt-BR")} sobre candles públicos da Binance
+        {data.feePctPerSide != null ? `, com taxas de ${data.feePctPerSide}% por lado incluídas` : ""}.
         Desempenho passado não garante resultados futuros.
       </p>
     </div>
