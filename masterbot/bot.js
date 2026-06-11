@@ -1221,6 +1221,11 @@ async function checkOCOStatus(symbol, orderListId) {
 
 // ─── Sell Order ──────────────────────────────────────────────────────────────
 
+// Posições gravam mode: 'spot' | 'futures' na abertura (ver registro da posição)
+function isFuturesPosition(pos) {
+  return pos?.mode === 'futures';
+}
+
 async function closePositionMarket(pos) {
   const symbol = pos.symbol;
   const isFut = isFuturesPosition(pos);
@@ -1650,7 +1655,7 @@ async function runSymbolCycle(symbol, timeframe, rulesInput, runMode = 'master')
         stopPrice = sltp.stop;
         takeProfitPrice = sltp.tp;
       }
-      console.log(`  📐 [${plan.name}] SL: $${stopPrice.toFixed(6)} | TP: $${takeProfitPrice.toFixed(6)} (break-even alvo: ${plan.breakeven_pct}%)`);
+      console.log(`  📐 [${plan.name}] SL: $${stopPrice.toFixed(6)} | TP: $${takeProfitPrice.toFixed(6)} (break-even alvo: ${plan.breakeven_pct != null ? plan.breakeven_pct + '%' : 'desativado'})`);
     }
 
     // Filtro Dual Timeframe (ADX 4H) para Range v2

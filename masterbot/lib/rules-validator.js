@@ -13,7 +13,9 @@ export function validateRules(rules) {
     if (!Array.isArray(p.symbols) || p.symbols.length === 0) {
       warnings.push(`Plano "${p.name}" sem símbolos atribuídos (plano morto).`);
     }
-    if (typeof p.breakeven_pct !== 'number' || p.breakeven_pct < 0 || p.breakeven_pct > 100) {
+    // breakeven_pct é opcional (planos criados pelo wizard de Estratégias não o definem);
+    // só é erro fatal quando definido com valor inválido.
+    if (p.breakeven_pct != null && (typeof p.breakeven_pct !== 'number' || p.breakeven_pct < 0 || p.breakeven_pct > 100)) {
       errors.push(`Plano "${p.name}" com breakeven_pct inválido: ${p.breakeven_pct}`);
     }
   }
