@@ -99,6 +99,21 @@ export async function initDb() {
         is_testnet BOOLEAN DEFAULT false,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      -- Estratégias (group_plans) isoladas por usuário. Antes viviam num
+      -- único rules.json global, o que vazava as estratégias de um usuário
+      -- para todos os outros logins.
+      CREATE TABLE IF NOT EXISTS strategies (
+        id         BIGSERIAL PRIMARY KEY,
+        user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name       VARCHAR(120) NOT NULL,
+        data       JSONB NOT NULL,
+        is_active  BOOLEAN DEFAULT false,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (user_id, name)
+      );
+      CREATE INDEX IF NOT EXISTS idx_strategies_user ON strategies(user_id);
     `);
 
     // Migrações dinâmicas para adicionar account_id e user_id
@@ -585,6 +600,128 @@ export async function deleteAccount(userId, id) {
     throw e;
   } finally {
     client.release();
+  }
+}
+
+// ─── Strategies (group_plans por usuário) ────────────────────────────────────
+
+/** Lista as estratégias de um usuário. Cada item é o objeto do plano + flag active. */
+export async function listStrategies(userId) {
+  if (!userId) return [];
+  const res = await getPool().query(
+    'SELECT name, data, is_active FROM strategies WHERE user_id = $1 ORDER BY created_at ASC',
+    [userId]
+  );
+  return res.rows.map(r => ({ ...r.data, name: r.name, _active: r.is_active }));
+}
+
+/** Cria ou atualiza (upsert) uma estratégia do usuário, casando por nome. */
+export async function upsertStrategy(userId, name, plan) {
+  if (!userId) throw new Error('userId obrigatório');
+  await getPool().query(
+    `INSERT INTO strategies (user_id, name, data)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (user_id, name) DO UPDATE
+       SET data = EXCLUDED.data, updated_at = NOW()`,
+    [userId, name, JSON.stringify(plan)]
+  );
+}
+
+/** Remove uma estratégia do usuário. */
+export async function deleteStrategy(userId, name) {
+  if (!userId) return;
+  await getPool().query(
+    'DELETE FROM strategies WHERE user_id = $1 AND name = $2',
+    [userId, name]
+  );
+}
+
+/**
+ * Define qual estratégia do usuário está ativa (no máximo uma).
+ * Passar name = null desativa todas.
+ */
+export async function setActiveStrategy(userId, name) {
+  if (!userId) return;
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('UPDATE strategies SET is_active = false WHERE user_id = $1', [userId]);
+    if (name) {
+      await client.query(
+        'UPDATE strategies SET is_active = true WHERE user_id = $1 AND name = $2',
+        [userId, name]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/** Retorna o nome da estratégia ativa do usuário, ou null. */
+export async function getActiveStrategyName(userId) {
+  if (!userId) return null;
+  const res = await getPool().query(
+    'SELECT name FROM strategies WHERE user_id = $1 AND is_active = true LIMIT 1',
+    [userId]
+  );
+  return res.rows[0]?.name || null;
+}
+
+/**
+ * Migração one-time: semeia a tabela strategies com os group_plans vindos do
+ * rules.json global, atribuindo-os ao usuário dono. Idempotente — só roda se o
+ * usuário ainda não tiver nenhuma estratégia.
+ */
+export async function seedStrategiesForUser(userId, plans, activePlanName = null) {
+  if (!userId || !Array.isArray(plans) || plans.length === 0) return 0;
+  const countRes = await getPool().query(
+    'SELECT COUNT(*) FROM strategies WHERE user_id = $1', [userId]
+  );
+  if (parseInt(countRes.rows[0].count, 10) > 0) return 0;
+  const client = await getPool().connect();
+  let inserted = 0;
+  try {
+    await client.query('BEGIN');
+    for (const plan of plans) {
+      if (!plan?.name) continue;
+      await client.query(
+        `INSERT INTO strategies (user_id, name, data, is_active)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (user_id, name) DO NOTHING`,
+        [userId, plan.name, JSON.stringify(plan), plan.name === activePlanName]
+      );
+      inserted++;
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+  return inserted;
+}
+
+/** Resolve o user_id dono da conta default (a que o bot usa via .env). */
+export async function getOwnerUserId() {
+  try {
+    const envKey = process.env.BINANCE_API_KEY;
+    if (envKey) {
+      const byKey = await getPool().query(
+        'SELECT user_id FROM accounts WHERE api_key = $1 AND user_id IS NOT NULL LIMIT 1',
+        [envKey]
+      );
+      if (byKey.rows.length) return byKey.rows[0].user_id;
+    }
+    // Fallback: primeiro usuário criado (admin/dono histórico)
+    const first = await getPool().query('SELECT id FROM users ORDER BY created_at ASC LIMIT 1');
+    return first.rows[0]?.id || null;
+  } catch (e) {
+    return null;
   }
 }
 

@@ -142,6 +142,37 @@ app.use(express.static(__dirname));
 function getRules() {
   try { return JSON.parse(readFileSync(join(ROOT, 'rules.json'), 'utf8')); } catch { return {}; }
 }
+
+/**
+ * As estratégias (group_plans) agora vivem por usuário no Postgres, mas o BOT
+ * real ainda opera lendo group_plans/active_plan do rules.json global. Para o
+ * bot refletir as estratégias do dono da conta (a que ele usa via .env), só o
+ * usuário DONO espelha suas alterações no rules.json. Outros usuários editam
+ * apenas o próprio conjunto no banco e não tocam no bot.
+ */
+async function isOwnerUser(userId) {
+  if (!userId) return false;
+  try {
+    const ownerId = await db.getOwnerUserId();
+    return ownerId && String(ownerId) === String(userId);
+  } catch { return false; }
+}
+
+/** Reescreve group_plans/active_plan do rules.json a partir do banco do dono. */
+async function syncRulesFromOwner(ownerUserId) {
+  try {
+    const plans = await db.listStrategies(ownerUserId);
+    const activeName = await db.getActiveStrategyName(ownerUserId);
+    if (!existsSync(BOT_RULES)) return;
+    const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
+    // Remove a chave interna _active antes de persistir no arquivo do bot
+    rules.group_plans = plans.map(({ _active, ...p }) => p);
+    rules.active_plan = activeName || null;
+    writeFileSync(BOT_RULES, JSON.stringify(rules, null, 2));
+  } catch (e) {
+    console.error('⚠️  Falha ao sincronizar rules.json a partir do dono:', e.message);
+  }
+}
 function loadJournal() {
   if (!existsSync(JOURNAL_FILE)) return [];
   try { return JSON.parse(readFileSync(JOURNAL_FILE, 'utf8')); } catch { return []; }
@@ -950,6 +981,11 @@ app.get('/api/bot/config', authenticateToken, async (req, res) => {
     const rules = existsSync(BOT_RULES) ? JSON.parse(readFileSync(BOT_RULES, 'utf8')) : null;
     const hasRealKeys = (env.BINANCE_API_KEY && !/your_api_key_here|^$/.test(env.BINANCE_API_KEY)) ||
                         (env.BITGET_API_KEY && !/your_api_key_here|^$/.test(env.BITGET_API_KEY));
+
+    // Estratégias e plano ativo vêm do banco do PRÓPRIO usuário — nunca do
+    // rules.json global (que vazava as estratégias do dono para todos).
+    const userPlans = await db.listStrategies(req.user.id);
+    const userActivePlan = await db.getActiveStrategyName(req.user.id);
     res.json({
       success: true,
       dir: BOT_DIR,
@@ -964,8 +1000,8 @@ app.get('/api/bot/config', authenticateToken, async (req, res) => {
       dailyMaxLoss: Number(rules?.risk?.daily_max_loss_usd || 0),
       hasRealKeys,
       rules,
-      activePlan: rules?.active_plan || null,
-      groupPlans: (rules?.group_plans || []).map(p => ({ name: p.name, description: p.description, symbols: p.symbols })),
+      activePlan: userActivePlan || null,
+      groupPlans: userPlans.map(p => ({ name: p.name, description: p.description, symbols: p.symbols })),
       watchlist: rules?.watchlist || [],
       watchlistPreset: ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','LTCUSDT','AVAXUSDT','TRXUSDT'],
     });
@@ -973,22 +1009,22 @@ app.get('/api/bot/config', authenticateToken, async (req, res) => {
 });
 
 // ── STRATEGY ENDPOINTS ──────────────────────────────────────────
-app.get('/api/bot/strategies', async (req, res) => {
+app.get('/api/bot/strategies', authenticateToken, async (req, res) => {
   try {
-    const rules = getRules();
-    const plans = rules.group_plans || [];
+    // Estratégias isoladas por usuário (antes vazavam via rules.json global)
+    const plans = await db.listStrategies(req.user.id);
 
-    // Uma única consulta ao log de trades para todos os planos
+    // Uma única consulta ao log de trades do próprio usuário para todos os planos
     let allRealTrades = [];
     try {
-      const dbRes = await db.loadRecentLog(1000);
+      const dbRes = await db.loadRecentLog(1000, req.user.id);
       allRealTrades = dbRes.trades || [];
     } catch (err) {
       // banco indisponível: estratégias caem para backtest/sem-dados
     }
 
     const strategies = plans.map((p) => {
-      const active = rules.active_plan === p.name;
+      const active = !!p._active;
 
       // Sem dados até provar o contrário (fim das estatísticas fake por seed)
       let totalTrades = 0, winRate = 0, profitFactor = 0, netProfit = 0;
@@ -1065,15 +1101,11 @@ app.get('/api/bot/strategies', async (req, res) => {
   }
 });
 
-app.post('/api/bot/strategies', (req, res) => {
+app.post('/api/bot/strategies', authenticateToken, async (req, res) => {
   try {
     const { name, description, symbols, timeframes, strategy, mode, leverage, sl, tp, filters, winRateTarget, lastBacktest } = req.body;
     if (!name) return res.status(400).json({ success: false, error: 'Nome da estratégia é obrigatório' });
 
-    const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
-    if (!rules.group_plans) rules.group_plans = [];
-
-    const existingIndex = rules.group_plans.findIndex(p => p.name.toLowerCase() === name.toLowerCase());
     const newPlan = {
       name,
       description: description || `Estratégia personalizada para ${symbols?.join(', ')}`,
@@ -1089,66 +1121,56 @@ app.post('/api/bot/strategies', (req, res) => {
       lastBacktest: lastBacktest || null
     };
 
-    if (existingIndex >= 0) {
-      rules.group_plans[existingIndex] = newPlan;
-    } else {
-      rules.group_plans.push(newPlan);
-    }
+    await db.upsertStrategy(req.user.id, name, newPlan);
 
-    writeFileSync(BOT_RULES, JSON.stringify(rules, null, 2));
+    // Só o dono da conta do bot espelha no rules.json (o bot opera por ele)
+    if (await isOwnerUser(req.user.id)) await syncRulesFromOwner(req.user.id);
+
     res.json({ success: true, strategy: newPlan });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
 });
 
-app.post('/api/bot/strategies/:name/activate', (req, res) => {
+app.post('/api/bot/strategies/:name/activate', authenticateToken, async (req, res) => {
   try {
     const { name } = req.params;
-    const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
-    
-    const plan = (rules.group_plans || []).find(p => p.name === name);
-    if (!plan) return res.status(404).json({ success: false, error: 'Estratégia não encontrada' });
+    const plans = await db.listStrategies(req.user.id);
+    if (!plans.find(p => p.name === name)) {
+      return res.status(404).json({ success: false, error: 'Estratégia não encontrada' });
+    }
 
-    rules.active_plan = name;
-    writeFileSync(BOT_RULES, JSON.stringify(rules, null, 2));
+    await db.setActiveStrategy(req.user.id, name);
+    if (await isOwnerUser(req.user.id)) await syncRulesFromOwner(req.user.id);
+
     res.json({ success: true, activePlan: name });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
 });
 
-app.post('/api/bot/strategies/:name/deactivate', (req, res) => {
+app.post('/api/bot/strategies/:name/deactivate', authenticateToken, async (req, res) => {
   try {
-    const { name } = req.params;
-    const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
+    await db.setActiveStrategy(req.user.id, null);
+    if (await isOwnerUser(req.user.id)) await syncRulesFromOwner(req.user.id);
 
-    if (rules.active_plan === name) {
-      rules.active_plan = null;
-      writeFileSync(BOT_RULES, JSON.stringify(rules, null, 2));
-    }
     res.json({ success: true, activePlan: null });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
 });
 
-app.delete('/api/bot/strategies/:name', (req, res) => {
+app.delete('/api/bot/strategies/:name', authenticateToken, async (req, res) => {
   try {
     const { name } = req.params;
-    const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
-    
-    if (!rules.group_plans) rules.group_plans = [];
-    const index = rules.group_plans.findIndex(p => p.name === name);
-    
-    if (index === -1) return res.status(404).json({ success: false, error: 'Estratégia não encontrada' });
-    
-    rules.group_plans.splice(index, 1);
-    if (rules.active_plan === name) {
-      rules.active_plan = null;
+    const plans = await db.listStrategies(req.user.id);
+    if (!plans.find(p => p.name === name)) {
+      return res.status(404).json({ success: false, error: 'Estratégia não encontrada' });
     }
-    
-    writeFileSync(BOT_RULES, JSON.stringify(rules, null, 2));
+
+    await db.deleteStrategy(req.user.id, name);
+    if (await isOwnerUser(req.user.id)) await syncRulesFromOwner(req.user.id);
+
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
@@ -1195,7 +1217,7 @@ async function fetchHistoricalCandles(symbol, timeframe, total = 1400) {
   return candles;
 }
 
-app.post('/api/bot/backtest', async (req, res) => {
+app.post('/api/bot/backtest', authenticateToken, async (req, res) => {
   try {
     const plan = req.body || {};
     if (!Array.isArray(plan.symbols) || !plan.symbols.length ||
@@ -1276,17 +1298,20 @@ app.post('/api/bot/backtest', async (req, res) => {
       recentTrades: allTrades.slice(-20),
     };
 
-    // Persiste no plano salvo, se existir
+    // Persiste o backtest na estratégia DO USUÁRIO (no banco), se ela existir
     if (plan.name) {
       try {
-        const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
-        const saved = (rules.group_plans || []).find(p => p.name === plan.name);
+        const userPlans = await db.listStrategies(req.user.id);
+        const saved = userPlans.find(p => p.name === plan.name);
         if (saved) {
-          saved.lastBacktest = lastBacktest;
-          if (winRateTarget != null) saved.winRateTarget = winRateTarget;
-          writeFileSync(BOT_RULES, JSON.stringify(rules, null, 2));
+          const { _active, ...planData } = saved;
+          planData.lastBacktest = lastBacktest;
+          if (winRateTarget != null) planData.winRateTarget = winRateTarget;
+          await db.upsertStrategy(req.user.id, plan.name, planData);
+          // Reflete no rules.json só se for o dono da conta do bot
+          if (await isOwnerUser(req.user.id)) await syncRulesFromOwner(req.user.id);
         }
-      } catch { /* rules.json indisponível não bloqueia a resposta */ }
+      } catch { /* persistência best-effort não bloqueia a resposta */ }
     }
 
     res.json({ success: true, ...lastBacktest });
@@ -1312,7 +1337,7 @@ app.patch('/api/bot/watchlist', (req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.patch('/api/bot/config', (req, res) => {
+app.patch('/api/bot/config', authenticateToken, async (req, res) => {
   try {
     // Se .env não existe (Railway), cria um a partir das variáveis de ambiente
     if (!existsSync(BOT_ENV)) {
@@ -1346,10 +1371,16 @@ app.patch('/api/bot/config', (req, res) => {
     if (paperTrading !== undefined) upsert('PAPER_TRADING', paperTrading ? 'true' : 'false');
     writeFileSync(BOT_ENV, txt);
 
-    // Update rules.json if trailing params, strategy, activePlan or risk changed
+    // O plano ativo é PER-USUÁRIO (vive no banco). Grava a escolha do usuário
+    // logado; o espelhamento no rules.json acontece abaixo só se ele for o dono.
+    if (activePlan !== undefined) {
+      await db.setActiveStrategy(req.user.id, activePlan || null);
+    }
+
+    // Update rules.json if trailing params, strategy or risk changed.
     // NOTA: maxTrade aqui é exclusivo do MasterBot (MAX_TRADE_SIZE_USD acima).
     // O max_trade_usdt do Micro Scalper tem endpoint próprio (/api/micro-scalper/config).
-    if (trailingEnabled !== undefined || trailingMult !== undefined || strategy || activePlan !== undefined || dailyMaxLoss !== undefined) {
+    if (trailingEnabled !== undefined || trailingMult !== undefined || strategy || dailyMaxLoss !== undefined) {
       if (existsSync(BOT_RULES)) {
         const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
         if (trailingEnabled !== undefined || trailingMult !== undefined) {
@@ -1362,13 +1393,18 @@ app.patch('/api/bot/config', (req, res) => {
           if (!rules.strategy) rules.strategy = {};
           rules.strategy.key = strategy;
         }
-        if (activePlan !== undefined) rules.active_plan = activePlan || null;
         if (dailyMaxLoss !== undefined) {
           if (!rules.risk) rules.risk = {};
           rules.risk.daily_max_loss_usd = parseFloat(dailyMaxLoss) || 0; // 0 = desligado
         }
         writeFileSync(BOT_RULES, JSON.stringify(rules, null, 2));
       }
+    }
+
+    // Se quem editou é o dono da conta do bot, reflete group_plans/active_plan
+    // do banco no rules.json para o MasterBot real operar a estratégia certa.
+    if (activePlan !== undefined && await isOwnerUser(req.user.id)) {
+      await syncRulesFromOwner(req.user.id);
     }
 
     res.json({ success: true, symbol, timeframe, strategy, portfolio, maxTrade, paperTrading });
@@ -3025,7 +3061,28 @@ const PORT = process.env.PORT || 3333;
 const server = createServer(app);
 db.initDb()
   .then(() => syncEnvWithActiveAccount())
+  .then(() => migrateStrategiesToDb())
   .catch(e => console.error('⚠️  PostgreSQL indisponível:', e.message));
+
+/**
+ * Migração one-time: move os group_plans do rules.json global para a tabela
+ * strategies, atribuindo-os ao usuário DONO da conta do bot. Idempotente —
+ * seedStrategiesForUser só insere se o dono ainda não tiver estratégias.
+ */
+async function migrateStrategiesToDb() {
+  try {
+    const ownerId = await db.getOwnerUserId();
+    if (!ownerId) return;
+    const rules = getRules();
+    const plans = rules.group_plans || [];
+    const n = await db.seedStrategiesForUser(ownerId, plans, rules.active_plan || null);
+    if (n > 0) {
+      console.log(`📦 Migradas ${n} estratégia(s) do rules.json para o dono (isolamento por usuário).`);
+    }
+  } catch (e) {
+    console.error('⚠️  Falha na migração de estratégias:', e.message);
+  }
+}
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n✅ Dashboard Server running on port ${PORT}\n`);
