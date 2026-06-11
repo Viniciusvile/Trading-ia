@@ -1346,8 +1346,10 @@ app.patch('/api/bot/config', (req, res) => {
     if (paperTrading !== undefined) upsert('PAPER_TRADING', paperTrading ? 'true' : 'false');
     writeFileSync(BOT_ENV, txt);
 
-    // Update rules.json if trailing params, strategy, activePlan, maxTrade or risk changed
-    if (trailingEnabled !== undefined || trailingMult !== undefined || strategy || activePlan !== undefined || maxTrade !== undefined || dailyMaxLoss !== undefined) {
+    // Update rules.json if trailing params, strategy, activePlan or risk changed
+    // NOTA: maxTrade aqui é exclusivo do MasterBot (MAX_TRADE_SIZE_USD acima).
+    // O max_trade_usdt do Micro Scalper tem endpoint próprio (/api/micro-scalper/config).
+    if (trailingEnabled !== undefined || trailingMult !== undefined || strategy || activePlan !== undefined || dailyMaxLoss !== undefined) {
       if (existsSync(BOT_RULES)) {
         const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
         if (trailingEnabled !== undefined || trailingMult !== undefined) {
@@ -1364,12 +1366,6 @@ app.patch('/api/bot/config', (req, res) => {
         if (dailyMaxLoss !== undefined) {
           if (!rules.risk) rules.risk = {};
           rules.risk.daily_max_loss_usd = parseFloat(dailyMaxLoss) || 0; // 0 = desligado
-        }
-        if (maxTrade !== undefined) {
-          if (!rules.micro_scalper) rules.micro_scalper = {};
-          rules.micro_scalper.max_trade_usdt = parseFloat(maxTrade);
-          // min_trade_usdt = 60% of max to keep proportion
-          rules.micro_scalper.min_trade_usdt = parseFloat((parseFloat(maxTrade) * 0.6).toFixed(2));
         }
         writeFileSync(BOT_RULES, JSON.stringify(rules, null, 2));
       }
@@ -1399,26 +1395,6 @@ app.patch('/api/bot/config', (req, res) => {
         }, 2000);
       }
     }, 500);
-
-    // RESTART MICRO-SCALPER SE maxTrade MUDOU (ele lê rules.json só no startup)
-    if (maxTrade !== undefined) {
-      setTimeout(() => {
-        const liveness = microIsAlive();
-        if (liveness.alive) {
-          console.log(`♻️ Reiniciando Micro-Scalper para aplicar novo max_trade_usdt=${maxTrade}...`);
-          try { process.kill(liveness.pid, 'SIGTERM'); } catch {}
-          if (microProcess) { try { microProcess.kill('SIGTERM'); } catch {} microProcess = null; }
-          if (existsSync(MICRO_PID)) { try { unlinkSync(MICRO_PID); } catch {} }
-
-          setTimeout(() => {
-            microProcess = spawn('node', [MICRO_SCRIPT], { cwd: ROOT, detached: true, stdio: 'ignore', env: { ...process.env } });
-            if (microProcess.pid) writeFileSync(MICRO_PID, microProcess.pid.toString());
-            microProcess.unref();
-            console.log(`✅ Micro-Scalper reiniciado com max_trade_usdt=${maxTrade}.`);
-          }, 2000);
-        }
-      }, 1000);
-    }
 
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -2578,12 +2554,45 @@ app.get('/api/micro-scalper/config', (_req, res) => {
 
 app.patch('/api/micro-scalper/config', (req, res) => {
   try {
-    const { plan, action } = req.body;
+    const { plan, action, max_trade_usdt } = req.body;
     const rules = getRules();
     if (!rules.micro_scalper) {
       rules.micro_scalper = { active_symbols: ['XRPUSDT', 'SOLUSDT'], plans: {} };
     }
-    
+
+    // Atualização do limite financeiro por trade (exclusivo do Micro Scalper)
+    if (max_trade_usdt !== undefined) {
+      const val = parseFloat(max_trade_usdt);
+      if (!Number.isFinite(val) || val <= 0) {
+        return res.status(400).json({ success: false, error: 'max_trade_usdt inválido' });
+      }
+      rules.micro_scalper.max_trade_usdt = val;
+      // min_trade_usdt = 60% do max para manter proporção
+      rules.micro_scalper.min_trade_usdt = parseFloat((val * 0.6).toFixed(2));
+      writeFileSync(join(ROOT, 'rules.json'), JSON.stringify(rules, null, 2));
+
+      res.json({ success: true, max_trade_usdt: val });
+
+      // O Micro Scalper lê rules.json só no startup — reinicia se estiver rodando
+      setTimeout(() => {
+        const liveness = microIsAlive();
+        if (liveness.alive) {
+          console.log(`♻️ Reiniciando Micro-Scalper para aplicar novo max_trade_usdt=${val}...`);
+          try { process.kill(liveness.pid, 'SIGTERM'); } catch {}
+          if (microProcess) { try { microProcess.kill('SIGTERM'); } catch {} microProcess = null; }
+          if (existsSync(MICRO_PID)) { try { unlinkSync(MICRO_PID); } catch {} }
+
+          setTimeout(() => {
+            microProcess = spawn('node', [MICRO_SCRIPT], { cwd: ROOT, detached: true, stdio: 'ignore', env: { ...process.env } });
+            if (microProcess.pid) writeFileSync(MICRO_PID, microProcess.pid.toString());
+            microProcess.unref();
+            console.log(`✅ Micro-Scalper reiniciado com max_trade_usdt=${val}.`);
+          }, 2000);
+        }
+      }, 1000);
+      return;
+    }
+
     const symbolMap = { btc: 'BTCUSDT', eth: 'ETHUSDT', xrp: 'XRPUSDT', sol: 'SOLUSDT' };
     const targetSymbol = symbolMap[plan?.toLowerCase()] || plan?.toUpperCase();
     if (!targetSymbol) return res.status(400).json({ success: false, error: 'Plano inválido' });

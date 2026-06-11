@@ -249,12 +249,12 @@ export default function BotsPage() {
           body: JSON.stringify(masterConfig),
         }).then(r => r.json());
       } else if (selectedBotId === "micro-scalper") {
-        // Envia as chaves usando o endpoint geral de bot config para persistir no rules.json
-        res = await fetch("/api/legacy/bot/config", {
+        // Endpoint EXCLUSIVO do Micro Scalper — não toca nas configs do MasterBot
+        res = await fetch("/api/legacy/micro-scalper/config", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            maxTrade: microConfig.max_trade_usdt,
+            max_trade_usdt: microConfig.max_trade_usdt,
           }),
         }).then(r => r.json());
       }
