@@ -17,6 +17,7 @@ import { api } from "@/lib/api";
 import type { BacktestResult } from "@/lib/api";
 import { StrategyWizard } from "@/components/strategy/StrategyWizard";
 import { BacktestReport } from "@/components/strategy/BacktestReport";
+import { ScalperSection } from "@/components/strategy/ScalperSection";
 
 interface Strategy {
   name: string;
@@ -263,6 +264,9 @@ export default function EstrategiasPage() {
           ))}
         </div>
       )}
+
+      {/* MICRO SCALPER — estratégias por ativo do robô de trades rápidos */}
+      <ScalperSection />
 
       {showCreateModal && (
         <StrategyWizard

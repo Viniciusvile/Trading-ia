@@ -2741,6 +2741,54 @@ app.post('/api/micro-scalper/stop', (_req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
+// ── Estratégia do Micro-Scalper (planos por símbolo) ────────────────────────
+// Atualiza rules.micro_scalper (plano do símbolo, ativação e parâmetros globais)
+// e reinicia o scalper se estiver rodando — ele só lê a config na inicialização.
+app.patch('/api/micro-scalper/strategy', (req, res) => {
+  try {
+    const { symbol, plan, active, global } = req.body || {};
+    const rules = JSON.parse(readFileSync(join(ROOT, 'rules.json'), 'utf8'));
+    if (!rules.micro_scalper) rules.micro_scalper = { active_symbols: [], plans: {} };
+    const ms = rules.micro_scalper;
+    if (!ms.plans) ms.plans = {};
+    if (!Array.isArray(ms.active_symbols)) ms.active_symbols = [];
+
+    if (symbol && plan && typeof plan === 'object') {
+      ms.plans[symbol] = { ...(ms.plans[symbol] || {}), ...plan };
+    }
+    if (symbol && active !== undefined) {
+      ms.active_symbols = ms.active_symbols.filter(s => s !== symbol);
+      if (active) ms.active_symbols.push(symbol);
+    }
+    if (global && typeof global === 'object') {
+      for (const k of ['max_trade_usdt', 'min_trade_usdt', 'daily_profit_target_usdt', 'loop_interval_ms', 'cooldown_ms', 'max_trades']) {
+        if (global[k] !== undefined) ms[k] = Number(global[k]);
+      }
+    }
+    writeFileSync(join(ROOT, 'rules.json'), JSON.stringify(rules, null, 2));
+
+    // Reinicia o scalper para aplicar a nova estratégia, se estiver rodando
+    let restarted = false;
+    const liveness = microIsAlive();
+    if (liveness.alive) {
+      try { process.kill(liveness.pid, 'SIGTERM'); } catch {}
+      if (microProcess) { try { microProcess.kill('SIGTERM'); } catch {} microProcess = null; }
+      if (existsSync(MICRO_PID)) { try { unlinkSync(MICRO_PID); } catch {} }
+      setTimeout(() => {
+        try {
+          microProcess = spawn('node', [MICRO_SCRIPT], { cwd: ROOT, detached: true, stdio: 'ignore', env: { ...process.env } });
+          if (microProcess.pid) writeFileSync(MICRO_PID, microProcess.pid.toString());
+          microProcess.unref();
+          console.log(`♻️ Micro-Scalper reiniciado com nova estratégia (PID ${microProcess.pid})`);
+        } catch (e) { console.error('Falha ao reiniciar micro-scalper:', e.message); }
+      }, 1500);
+      restarted = true;
+    }
+
+    res.json({ success: true, micro_scalper: ms, restarted });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
 // ─── Accounts Helper Functions ───────────────────────────────────────────────
 async function syncEnvWithActiveAccount(userId = null) {
   try {

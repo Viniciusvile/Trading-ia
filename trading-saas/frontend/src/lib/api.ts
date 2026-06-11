@@ -8,6 +8,31 @@
 
 const BASE = "/api/legacy";
 
+export interface ScalperPlan {
+  strategy_mode: "micro-dip" | "turbo-reversion";
+  tp_pct?: number;
+  sl_pct?: number;
+  breakeven_pct?: number;
+  // micro-dip
+  ema_period?: number;
+  rsi_period?: number;
+  min_dip_pct?: number;
+  min_rsi?: number;
+  max_rsi?: number;
+  // turbo-reversion
+  bb_length?: number;
+  bb_mult?: number;
+  rsi_limit?: number;
+  vol_mult?: number;
+  // filtros compartilhados
+  trend_ema_period?: number;
+  trend_max_down_pct?: number;
+  min_atr_pct?: number;
+  qty_decimals?: number;
+  quote_decimals?: number;
+  [k: string]: unknown;
+}
+
 export interface BacktestStats {
   totalTrades: number;
   wins: number;
@@ -191,6 +216,29 @@ export const api = {
 
   botFuturesStop: () =>
     safeJson<{ success: boolean; error?: string }>("/bot/futures/stop", { method: "POST" }),
+
+  microScalperConfig: () =>
+    safeJson<{
+      success: boolean;
+      config: {
+        active_symbols: string[];
+        max_trade_usdt?: number;
+        min_trade_usdt?: number;
+        daily_profit_target_usdt?: number;
+        plans: Record<string, ScalperPlan>;
+      } | null;
+    }>("/micro-scalper/config", undefined, { success: false, config: null }),
+
+  microScalperStrategySave: (payload: {
+    symbol: string;
+    plan?: Partial<ScalperPlan>;
+    active?: boolean;
+    global?: Record<string, number>;
+  }) =>
+    safeJson<{ success: boolean; restarted?: boolean; error?: string }>("/micro-scalper/strategy", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }, { success: false, error: "Falha ao salvar estratégia do scalper" }),
 
   microScalperSignal: (symbol: string) =>
     safeJson<{ action: string; confidence: number; reason: string } | null>(
