@@ -2493,6 +2493,56 @@ app.post('/api/bot/positions/:id/oco', authenticateToken, async (req, res) => {
   } catch(e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
+// ── DASHBOARD SUMMARY (página Início) ─────────────────────────────
+// Métricas REAIS agregadas das posições do usuário (todos os bots gravam
+// em positions). Substitui os números mockados que a home exibia.
+app.get('/api/dashboard/summary', authenticateToken, async (req, res) => {
+  try {
+    const positions = await db.loadPositions(req.user.id);
+    const dayKey = (iso) => (iso || '').slice(0, 10);
+    const todayUtc = new Date().toISOString().slice(0, 10);
+
+    const closed = positions.filter(p => p.status === 'closed' && p.pnl != null);
+    const closedToday = closed.filter(p => dayKey(p.closedAt) === todayUtc);
+    const pnlToday = closedToday.reduce((acc, p) => acc + (parseFloat(p.pnl) || 0), 0);
+
+    // Operações de hoje = entradas abertas hoje (qualquer robô)
+    const operationsToday = positions.filter(p => dayKey(p.openedAt) === todayUtc).length;
+
+    // Taxa de acerto dos últimos 30 dias (posições fechadas com PnL)
+    const cutoff30 = Date.now() - 30 * 86_400_000;
+    const closed30 = closed.filter(p => new Date(p.closedAt).getTime() >= cutoff30);
+    const wins30 = closed30.filter(p => parseFloat(p.pnl) > 0).length;
+    const winRate30d = closed30.length ? wins30 / closed30.length : null;
+
+    const openPositions = positions.filter(p => p.status === 'open').length;
+
+    // Atividade recente real: aberturas e fechamentos mais novos primeiro
+    const events = [];
+    for (const p of positions) {
+      if (p.openedAt) {
+        events.push({ time: p.openedAt, kind: 'open', symbol: p.symbol, title: `Robô abriu posição em ${p.symbol}` });
+      }
+      if (p.status === 'closed' && p.closedAt) {
+        const pnl = parseFloat(p.pnl);
+        const pnlTxt = Number.isFinite(pnl) ? ` (${pnl >= 0 ? '+' : '-'}$${Math.abs(pnl).toFixed(2)})` : '';
+        events.push({ time: p.closedAt, kind: Number.isFinite(pnl) && pnl < 0 ? 'loss' : 'win', symbol: p.symbol, title: `Posição fechada em ${p.symbol}${pnlTxt}` });
+      }
+    }
+    events.sort((a, b) => new Date(b.time) - new Date(a.time));
+
+    res.json({
+      success: true,
+      pnlToday,
+      operationsToday,
+      winRate30d,
+      totalTrades30d: closed30.length,
+      openPositions,
+      recentActivity: events.slice(0, 6),
+    });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
 // ── BALANCE ───────────────────────────────────────────────────────
 app.get('/api/bot/balance', authenticateToken, async (req, res) => {
   try {

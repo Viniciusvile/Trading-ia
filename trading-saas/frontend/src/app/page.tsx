@@ -25,21 +25,40 @@ const QUICK_ACTIONS = [
   { icon: Pause, label: "Pausar bot", color: "var(--color-warn-500)", href: "/bots" },
 ];
 
-const ACTIVITY = [
-  { id: "1", icon: TrendingUp, title: "Bot abriu posição em BTCUSDT", relative: "há 4 minutos", tone: "up" as const },
-  { id: "2", icon: Bot, title: "Estratégia Alpha-RangeMaster aplicada", relative: "há 32 minutos", tone: "brand" as const },
-  { id: "3", icon: Sparkles, title: "Sinal de compra detectado em SOLUSDT", relative: "há 1 hora", tone: "warn" as const },
-];
+// Tempo relativo em PT-BR para a lista de atividade (ex: "há 5 min")
+function timeAgo(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) return "";
+  const min = Math.floor(diffMs / 60_000);
+  if (min < 1) return "agora mesmo";
+  if (min < 60) return `há ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h} h`;
+  const d = Math.floor(h / 24);
+  return `há ${d} d`;
+}
+
+interface ActivityItem {
+  time: string;
+  kind: "open" | "win" | "loss";
+  symbol: string;
+  title: string;
+}
 
 export default function InicioPage() {
   const [balance, setBalance] = useState<{ spot: number; futures: number }>({ spot: 0, futures: 0 });
   const [loading, setLoading] = useState(true);
   const [activeBotsCount, setActiveBotsCount] = useState(0);
   const [pnl24h, setPnl24h] = useState(0);
+  const [opsToday, setOpsToday] = useState(0);
+  const [winRate30d, setWinRate30d] = useState<number | null>(null);
+  const [trades30d, setTrades30d] = useState(0);
+  const [openPositions, setOpenPositions] = useState(0);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
 
   useEffect(() => {
     let active = true;
-    
+
     async function loadData() {
       try {
         const balRes = await api.botBalance();
@@ -60,15 +79,21 @@ export default function InicioPage() {
         if (master?.isAlive) activeCount++;
         if (scalper?.running) activeCount++;
         if (futures?.isAlive) activeCount++;
-        
+
         if (active) {
           setActiveBotsCount(activeCount);
         }
 
-        // Fetch strategy results for dynamic P&L simulation
-        const results = await api.strategyResults();
-        if (active && results) {
-          setPnl24h(results.netProfit * 0.15 || 48.50); // Use a realistic fraction of net profit for 24h P&L
+        // Métricas reais agregadas das posições (P&L do dia, operações,
+        // taxa de acerto 30d e atividade recente) — fim dos números mockados
+        const summary = await api.dashboardSummary();
+        if (active && summary.success) {
+          setPnl24h(summary.pnlToday || 0);
+          setOpsToday(summary.operationsToday || 0);
+          setWinRate30d(summary.winRate30d);
+          setTrades30d(summary.totalTrades30d || 0);
+          setOpenPositions(summary.openPositions || 0);
+          setActivity(summary.recentActivity || []);
         }
       } catch (e) {
         console.error("Erro ao carregar dados do inicio:", e);
@@ -163,13 +188,18 @@ export default function InicioPage() {
       {/* Cards de métricas resumidas */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <Card>
-          <Stat label="P&L hoje" value={fmtUSD(pnl24h)} delta={pnl24h >= 0 ? 0.02 : -0.02} hint="vs ontem" size="sm" />
+          <Stat label="P&L hoje" value={loading ? "..." : fmtUSD(pnl24h)} hint="realizado hoje (UTC)" size="sm" />
         </Card>
         <Card>
-          <Stat label="Operações" value={loading ? "..." : activeBotsCount > 0 ? "5" : "0"} hint="hoje" size="sm" />
+          <Stat label="Operações" value={loading ? "..." : String(opsToday)} hint="hoje" size="sm" />
         </Card>
         <Card>
-          <Stat label="Taxa de acerto" value={loading ? "..." : "62%"} hint="últimos 30 dias" size="sm" />
+          <Stat
+            label="Taxa de acerto"
+            value={loading ? "..." : winRate30d != null ? `${Math.round(winRate30d * 100)}%` : "—"}
+            hint={winRate30d != null ? `${trades30d} trades em 30 dias` : "sem trades em 30 dias"}
+            size="sm"
+          />
         </Card>
         <Card>
           <Stat label="Bots ativos" value={`${activeBotsCount} / 3`} hint="rodando agora" size="sm" />
@@ -195,44 +225,46 @@ export default function InicioPage() {
           <div className="mt-4 grid grid-cols-3 gap-3 pt-4 border-t border-[var(--color-border)]">
             <Stat label="Spot USDT" value={fmtUSD(balance.spot)} size="sm" />
             <Stat label="Futuros USDT" value={fmtUSD(balance.futures)} size="sm" />
-            <Stat label="Tempo ativo" value="5d" size="sm" />
+            <Stat label="Posições abertas" value={String(openPositions)} size="sm" />
           </div>
         </Card>
 
-        {/* Atividade recente */}
+        {/* Atividade recente (eventos reais das posições) */}
         <Card padding="lg">
           <CardHeader title="Atividade recente" subtitle="Últimos eventos do sistema" />
-          <ul className="space-y-3">
-            {ACTIVITY.map((a) => {
-              const Icon = a.icon;
-              return (
-                <li key={a.id} className="flex items-start gap-3">
-                  <span
-                    className={
-                      "h-8 w-8 shrink-0 flex items-center justify-center rounded-full " +
-                      (a.tone === "up"
-                        ? "bg-up"
-                        : a.tone === "warn"
-                          ? "bg-warn"
-                          : "bg-brand-soft")
-                    }
-                  >
-                    <Icon size={14} />
-                  </span>
-                  <div className="min-w-0">
-                    <div className="text-sm text-[var(--color-text)] leading-snug">
-                      {a.title}
+          {activity.length === 0 ? (
+            <p className="text-xs text-muted py-4">
+              {loading ? "Carregando..." : "Nenhuma operação registrada ainda."}
+            </p>
+          ) : (
+            <ul className="space-y-3">
+              {activity.map((a) => {
+                const Icon = a.kind === "open" ? TrendingUp : a.kind === "win" ? Sparkles : Activity;
+                const toneClass = a.kind === "win" ? "bg-up" : a.kind === "loss" ? "bg-warn" : "bg-brand-soft";
+                return (
+                  <li key={`${a.kind}-${a.symbol}-${a.time}`} className="flex items-start gap-3">
+                    <span
+                      className={
+                        "h-8 w-8 shrink-0 flex items-center justify-center rounded-full " + toneClass
+                      }
+                    >
+                      <Icon size={14} />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-sm text-[var(--color-text)] leading-snug">
+                        {a.title}
+                      </div>
+                      <div className="text-[11px] text-muted mt-0.5">
+                        {timeAgo(a.time)}
+                      </div>
                     </div>
-                    <div className="text-[11px] text-muted mt-0.5">
-                      {a.relative}
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
           <Link
-            href="/bots"
+            href="/posicoes"
             className="mt-4 inline-flex items-center gap-1 text-xs font-medium text-[var(--color-brand-500)] hover:underline"
           >
             Ver tudo <ArrowRight size={13} />

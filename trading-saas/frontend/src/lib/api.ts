@@ -226,6 +226,25 @@ export const api = {
   microScalperStatus: () =>
     safeJson<{ success: boolean; running: boolean; activeSymbols?: string[] }>("/micro-scalper/status", undefined, { success: false, running: false }),
 
+  dashboardSummary: () =>
+    safeJson<{
+      success: boolean;
+      pnlToday: number;
+      operationsToday: number;
+      winRate30d: number | null;
+      totalTrades30d: number;
+      openPositions: number;
+      recentActivity: { time: string; kind: "open" | "win" | "loss"; symbol: string; title: string }[];
+    }>("/dashboard/summary", undefined, {
+      success: false,
+      pnlToday: 0,
+      operationsToday: 0,
+      winRate30d: null,
+      totalTrades30d: 0,
+      openPositions: 0,
+      recentActivity: [],
+    }),
+
   microScalperStart: () =>
     safeJson<{ success: boolean; error?: string }>("/micro-scalper/start", { method: "POST" }),
 
