@@ -1330,6 +1330,38 @@ async function monitorPositions() {
         continue; // Garante que a posição de futuros nunca sofra interferência das rotinas Spot abaixo
       }
 
+      // ── Sincronização Spot: detecta posição encerrada fora do bot ──
+      // Se o saldo do ativo na exchange não cobre a posição registrada, ela foi
+      // fechada externamente (OCO executada, venda manual etc.) — marca como
+      // encerrada em vez de tentar vender para sempre (posição fantasma).
+      if (!CONFIG.paperTrading) {
+        try {
+          const baseAsset = pos.symbol.replace(/USDT$/, '');
+          const sQs = `timestamp=${Date.now()}`;
+          const sSig = crypto.createHmac("sha256", CONFIG.binance.secretKey).update(sQs).digest("hex");
+          const accRes = await fetch(`https://api.binance.com/api/v3/account?${sQs}&signature=${sSig}`, {
+            headers: { "X-MBX-APIKEY": CONFIG.binance.apiKey }
+          });
+          const acc = await accRes.json();
+          if (Array.isArray(acc.balances)) {
+            const bal = acc.balances.find(b => b.asset === baseAsset);
+            const held = bal ? parseFloat(bal.free) + parseFloat(bal.locked) : 0;
+            if (held < pos.quantity * 0.9) {
+              console.log(`  🔄 [${pos.symbol}] Saldo na exchange (${held}) não cobre a posição (${pos.quantity}). Fechada externamente — sincronizando registro.`);
+              pos.status = "closed";
+              pos.closedAt = new Date().toISOString();
+              pos.exitReason = "Fechada na exchange (saldo inexistente) — registro sincronizado";
+              pos.exitPrice = pos.entryPrice;
+              pos.pnl = 0;
+              await db.savePosition(pos);
+              continue;
+            }
+          }
+        } catch (syncErr) {
+          console.log(`  ⚠ [${pos.symbol}] Sync de saldo spot falhou: ${syncErr.message}`);
+        }
+      }
+
       // ── Posição com OCO ativa: verifica status na Binance ──
       if (pos.ocoPlaced && !CONFIG.paperTrading && !pos.ocoManual && pos.ocoOrderListId) {
         try {
