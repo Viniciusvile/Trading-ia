@@ -461,6 +461,14 @@ export async function getActiveAccountId(userId = null) {
       if (res.rows.length) return res.rows[0].id;
       return null;
     }
+    // Sem userId (chamadas dos robôs): resolve pela conta cujas chaves o robô
+    // realmente usa (.env) — determinístico. "Primeira ativa" era arbitrário e
+    // fazia posições serem gravadas em contas que o usuário logado não vê.
+    const envKey = process.env.BINANCE_API_KEY;
+    if (envKey) {
+      const byKey = await getPool().query('SELECT id FROM accounts WHERE api_key = $1 LIMIT 1', [envKey]);
+      if (byKey.rows.length) return byKey.rows[0].id;
+    }
     const res = await getPool().query('SELECT id FROM accounts WHERE is_active = true LIMIT 1');
     if (res.rows.length) return res.rows[0].id;
   } catch (e) {}
