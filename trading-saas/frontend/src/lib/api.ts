@@ -198,7 +198,24 @@ export const api = {
     safeJson<{ success: boolean; spot?: number; futures?: number }>("/bot/balance", undefined, { success: false }),
 
   botMasterStatus: () =>
-    safeJson<{ success: boolean; isAlive: boolean; status?: string }>("/bot/master/status", undefined, { success: false, isAlive: false }),
+    safeJson<{
+      success: boolean;
+      isAlive: boolean;
+      status?: string;
+      lastRun?: string;
+      nextRun?: string;
+      watchlist?: string[];
+      openPositions?: number;
+      lastResults?: {
+        symbol: string;
+        timeframe: string;
+        allPass: boolean;
+        side?: string | null;
+        signal: string;
+        price?: number | null;
+        strategy?: string | null;
+      }[];
+    }>("/bot/master/status", undefined, { success: false, isAlive: false }),
 
   botMasterStart: () =>
     safeJson<{ success: boolean; error?: string }>("/bot/master/start", { method: "POST" }),

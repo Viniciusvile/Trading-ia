@@ -138,9 +138,24 @@ export default function BotsPage() {
         return bot;
       }));
 
-      if (microLogRes?.trades) {
-        setDecisionHistory(microLogRes.trades.slice(0, 5));
-      }
+      // Histórico de decisões: varreduras do MasterBot + trades do Scalper
+      const masterDecisions = (masterRes.lastResults || []).slice(0, 12).map(r => ({
+        kind: "master" as const,
+        time: masterRes.lastRun,
+        ...r,
+      }));
+      const scalperDecisions = (microLogRes?.trades || []).slice(0, 5).map((t: any) => ({
+        kind: "scalper" as const,
+        ...t,
+      }));
+      setDecisionHistory(prev => {
+        // Entre o início e o fim de um ciclo o MasterBot zera lastResults —
+        // preserva as decisões anteriores para a lista não piscar vazia
+        const masters = masterDecisions.length
+          ? masterDecisions
+          : prev.filter((p: any) => p.kind === "master");
+        return [...masters, ...scalperDecisions];
+      });
     } catch (err) {
       console.error("Erro ao atualizar status dos robôs:", err);
     }
@@ -418,21 +433,39 @@ export default function BotsPage() {
         {decisionHistory.length > 0 ? (
           <div className="space-y-2 mt-4">
             {decisionHistory.map((item, idx) => (
-              <div key={idx} className="flex justify-between items-center text-xs p-2.5 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)]">
-                <div className="flex items-center gap-2">
-                  <Badge tone={item.event === "entry" ? "brand" : item.pnlPct > 0 ? "up" : "down"}>
-                    {item.event === "entry" ? "COMPRA" : "VENDA"}
-                  </Badge>
-                  <span className="font-semibold text-[var(--color-text)]">{item.symbol}</span>
-                  <span className="text-muted">| {item.event === "entry" ? `Sinal: ${item.signal}` : `Motivo: ${item.reason}`}</span>
+              item.kind === "master" ? (
+                <div key={idx} className="flex justify-between items-center text-xs p-2.5 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)]">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge tone={item.signal === "NEUTRO" ? "neutral" : item.signal === "SEM SALDO" ? "down" : "up"}>
+                      {item.signal === "NEUTRO" ? "SEM SINAL" : item.signal}
+                    </Badge>
+                    <span className="font-semibold text-[var(--color-text)]">{item.symbol}</span>
+                    <span className="text-muted">{item.timeframe}{item.strategy ? ` · ${item.strategy}` : ""}</span>
+                  </div>
+                  <div className="text-right">
+                    {item.price != null && <span className="text-[var(--color-text)] mr-3">{fmtUSD(item.price)}</span>}
+                    <span className="text-muted text-[10px]">
+                      {item.time ? new Date(item.time).toLocaleTimeString("pt-BR") : ""} · MasterBot
+                    </span>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <span className="text-muted mr-3">{new Date(item.t).toLocaleTimeString()}</span>
-                  <span className={item.event === "exit" ? (item.pnlPct > 0 ? "text-[var(--color-up-600)] font-bold" : "text-[var(--color-down-600)] font-bold") : "text-[var(--color-text)]"}>
-                    {item.event === "entry" ? fmtUSD(item.entryPrice) : `${item.pnlPct > 0 ? "+" : ""}${(item.pnlPct * 100).toFixed(2)}%`}
-                  </span>
+              ) : (
+                <div key={idx} className="flex justify-between items-center text-xs p-2.5 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)]">
+                  <div className="flex items-center gap-2">
+                    <Badge tone={item.event === "entry" ? "brand" : item.pnlPct > 0 ? "up" : "down"}>
+                      {item.event === "entry" ? "COMPRA" : "VENDA"}
+                    </Badge>
+                    <span className="font-semibold text-[var(--color-text)]">{item.symbol}</span>
+                    <span className="text-muted">| {item.event === "entry" ? `Sinal: ${item.signal}` : `Motivo: ${item.reason}`}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-muted mr-3">{new Date(item.t).toLocaleTimeString()}</span>
+                    <span className={item.event === "exit" ? (item.pnlPct > 0 ? "text-[var(--color-up-600)] font-bold" : "text-[var(--color-down-600)] font-bold") : "text-[var(--color-text)]"}>
+                      {item.event === "entry" ? fmtUSD(item.entryPrice) : `${item.pnlPct > 0 ? "+" : ""}${(item.pnlPct * 100).toFixed(2)}%`}
+                    </span>
+                  </div>
                 </div>
-              </div>
+              )
             ))}
           </div>
         ) : (
