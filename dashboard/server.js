@@ -1011,14 +1011,28 @@ app.get('/api/bot/strategies', async (req, res) => {
         ) && t.orderPlaced
       );
       const tradesWithPnl = planTrades.filter(t => t.pnl != null && t.pnl !== 0);
-      if (tradesWithPnl.length >= 5) {
-        totalTrades = tradesWithPnl.length;
-        const wins = tradesWithPnl.filter(t => t.pnl > 0);
-        winRate = wins.length / totalTrades;
-        netProfit = tradesWithPnl.reduce((acc, t) => acc + (t.pnl || 0), 0);
-        const totalLosses = Math.abs(tradesWithPnl.filter(t => t.pnl < 0).reduce((acc, t) => acc + (t.pnl || 0), 0));
-        const totalGains = wins.reduce((acc, t) => acc + (t.pnl || 0), 0);
-        profitFactor = totalLosses > 0 ? totalGains / totalLosses : 1.0;
+
+      // realStats sempre que houver QUALQUER trade real com PnL — permite a
+      // comparação "Esperado (backtest) × Realizado" no modal de estatísticas.
+      let realStats = null;
+      if (tradesWithPnl.length >= 1) {
+        const rWins = tradesWithPnl.filter(t => t.pnl > 0);
+        const rGains = rWins.reduce((acc, t) => acc + (t.pnl || 0), 0);
+        const rLosses = Math.abs(tradesWithPnl.filter(t => t.pnl < 0).reduce((acc, t) => acc + (t.pnl || 0), 0));
+        realStats = {
+          totalTrades: tradesWithPnl.length,
+          winRate: rWins.length / tradesWithPnl.length,
+          profitFactor: rLosses > 0 ? rGains / rLosses : (rGains > 0 ? 99 : 0),
+          netProfit: tradesWithPnl.reduce((acc, t) => acc + (t.pnl || 0), 0),
+        };
+      }
+
+      // Os stats do card só trocam para "real" com amostra mínima (≥5 trades)
+      if (realStats && realStats.totalTrades >= 5) {
+        totalTrades = realStats.totalTrades;
+        winRate = realStats.winRate;
+        profitFactor = realStats.profitFactor;
+        netProfit = realStats.netProfit;
         statsSource = 'real';
       }
 
@@ -1036,6 +1050,7 @@ app.get('/api/bot/strategies', async (req, res) => {
         netProfit,
         totalTrades,
         statsSource,
+        realStats,
         winRateTarget: p.winRateTarget ?? null,
         lastBacktest: p.lastBacktest ?? null,
         filters: p.filters || {},
@@ -2007,6 +2022,75 @@ app.get('/api/bot/positions', authenticateToken, async (req, res) => {
   try {
     const positions = await db.loadPositions(req.user.id);
     res.json({ success: true, positions });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ── Reconciliação: confere as posições do banco contra a Binance ────────────
+// Fecha registros fantasma (saldo inexistente), aponta posições sem OCO de
+// proteção e lista saldos relevantes sem posição registrada.
+app.post('/api/bot/reconcile', authenticateToken, async (req, res) => {
+  try {
+    const apiKey = process.env.BINANCE_API_KEY, secretKey = process.env.BINANCE_SECRET_KEY;
+    if (!apiKey || !secretKey) return res.status(400).json({ success: false, error: 'Chaves Binance não configuradas' });
+    const sign = (qs) => qs + '&signature=' + crypto.createHmac('sha256', secretKey).update(qs).digest('hex');
+    const H = { headers: { 'X-MBX-APIKEY': apiKey } };
+
+    const positions = await db.loadPositions(req.user.id);
+    const open = positions.filter(p => p.status === 'open');
+    const report = { checked: open.length, ghostsClosed: [], missingOco: [], ok: [], untracked: [] };
+
+    const acct = await (await fetch(`https://api.binance.com/api/v3/account?${sign('timestamp=' + Date.now())}`, H)).json();
+    const balances = Array.isArray(acct.balances) ? acct.balances : [];
+    const balOf = (asset) => {
+      const b = balances.find(x => x.asset === asset);
+      return b ? parseFloat(b.free) + parseFloat(b.locked) : 0;
+    };
+
+    const closeGhost = async (pos, motivo) => {
+      pos.status = 'closed';
+      pos.closedAt = new Date().toISOString();
+      pos.exitReason = `Reconciliação: ${motivo}`;
+      pos.exitPrice = pos.entryPrice;
+      pos.pnl = pos.pnl ?? 0;
+      await db.savePosition(pos, req.user.id);
+      report.ghostsClosed.push(`${pos.symbol} (${pos.id})`);
+    };
+
+    for (const pos of open) {
+      const isFut = pos.mode === 'futures' || (pos.plan || '').includes('Futures');
+      if (isFut) {
+        const risk = await (await fetch(`https://fapi.binance.com/fapi/v2/positionRisk?${sign(`symbol=${pos.symbol}&timestamp=${Date.now()}`)}`, H)).json();
+        const amt = Array.isArray(risk) ? parseFloat(risk.find(r => r.symbol === pos.symbol)?.positionAmt || 0) : 0;
+        if (amt === 0) await closeGhost(pos, 'posição de futuros inexistente na exchange');
+        else report.ok.push(pos.symbol);
+      } else {
+        const baseAsset = pos.symbol.replace(/USDT$/, '');
+        const held = balOf(baseAsset);
+        if (held < pos.quantity * 0.9) {
+          await closeGhost(pos, `saldo na exchange (${held}) não cobre a posição (${pos.quantity})`);
+        } else {
+          const oo = await (await fetch(`https://api.binance.com/api/v3/openOrders?${sign(`symbol=${pos.symbol}&timestamp=${Date.now()}`)}`, H)).json();
+          if (!Array.isArray(oo) || oo.length === 0) report.missingOco.push(pos.symbol);
+          else report.ok.push(pos.symbol);
+        }
+      }
+    }
+
+    // Saldos relevantes (> $5) sem posição registrada
+    const openBaseAssets = new Set(
+      positions.filter(p => p.status === 'open').map(p => p.symbol.replace(/USDT$/, ''))
+    );
+    for (const b of balances) {
+      const total = parseFloat(b.free) + parseFloat(b.locked);
+      if (total <= 0 || ['USDT', 'BNB', 'BUSD', 'FDUSD', 'BRL'].includes(b.asset) || openBaseAssets.has(b.asset)) continue;
+      try {
+        const pr = await (await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${b.asset}USDT`)).json();
+        const valueUsd = total * parseFloat(pr.price || 0);
+        if (valueUsd > 5) report.untracked.push({ asset: b.asset, qty: total, valueUsd: Math.round(valueUsd * 100) / 100 });
+      } catch { /* par sem USDT: ignora */ }
+    }
+
+    res.json({ success: true, ...report });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 

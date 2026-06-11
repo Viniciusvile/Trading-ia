@@ -46,6 +46,29 @@ export default function PosicoesPage() {
   const [error, setError] = useState<string | null>(null);
   
   const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
+  const [reconciling, setReconciling] = useState(false);
+  const [reconcileMsg, setReconcileMsg] = useState<string | null>(null);
+
+  async function handleReconcile() {
+    setReconciling(true);
+    setReconcileMsg(null);
+    try {
+      const r = await api.botReconcile();
+      if (r.success) {
+        const lines = [`✓ ${r.checked ?? 0} posição(ões) aberta(s) conferida(s) com a Binance.`];
+        if (r.ghostsClosed?.length) lines.push(`Registros fantasma encerrados: ${r.ghostsClosed.join(", ")}.`);
+        if (r.missingOco?.length) lines.push(`⚠ Sem ordem TP/SL na exchange (o robô repõe no próximo ciclo): ${r.missingOco.join(", ")}.`);
+        if (r.untracked?.length) lines.push(`⚠ Saldos sem posição registrada: ${r.untracked.map(u => `${u.asset} (~$${u.valueUsd})`).join(", ")}.`);
+        if (!r.ghostsClosed?.length && !r.missingOco?.length && !r.untracked?.length) lines.push("Tudo consistente — nenhuma divergência encontrada.");
+        setReconcileMsg(lines.join("\n"));
+        loadPositions();
+      } else {
+        setReconcileMsg(r.error || "Falha ao reconciliar com a Binance.");
+      }
+    } finally {
+      setReconciling(false);
+    }
+  }
 
   // Calendar states
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -208,20 +231,38 @@ export default function PosicoesPage() {
           title="Posições"
           description="Suas operações abertas e o histórico de tudo que já foi fechado."
         />
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            setLoading(true);
-            loadPositions();
-          }}
-          disabled={loading}
-          className="self-start sm:self-center gap-2"
-        >
-          <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-          Atualizar
-        </Button>
+        <div className="flex items-center gap-2 self-start sm:self-center">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleReconcile}
+            disabled={reconciling}
+            className="gap-2"
+          >
+            <CheckCircle2 size={14} className={reconciling ? "animate-pulse" : ""} />
+            {reconciling ? "Reconciliando..." : "Reconciliar com a Binance"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setLoading(true);
+              loadPositions();
+            }}
+            disabled={loading}
+            className="gap-2"
+          >
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+            Atualizar
+          </Button>
+        </div>
       </div>
+
+      {reconcileMsg && (
+        <p className="text-[11px] text-muted bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-[var(--radius-sm)] p-2.5 whitespace-pre-line">
+          {reconcileMsg}
+        </p>
+      )}
 
       {/* Responsive layout: Grid on large screens to include calendar on the right */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">

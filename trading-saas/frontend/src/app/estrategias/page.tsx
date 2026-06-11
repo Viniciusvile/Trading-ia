@@ -36,6 +36,7 @@ interface Strategy {
   sl: any;
   tp: any;
   statsSource?: "real" | "backtest" | "sem-dados";
+  realStats?: { totalTrades: number; winRate: number; profitFactor: number; netProfit: number } | null;
   winRateTarget?: number | null;
   lastBacktest?: import("@/lib/api").BacktestResult | null;
 }
@@ -308,7 +309,59 @@ export default function EstrategiasPage() {
                   <span className="text-xs text-muted">Reanalisando com dados atuais da Binance...</span>
                 </div>
               ) : selectedStrategy.lastBacktest ? (
-                <BacktestReport data={selectedStrategy.lastBacktest} />
+                <div className="space-y-5">
+                  {/* Esperado (backtest) × Realizado (conta) */}
+                  {selectedStrategy.realStats && selectedStrategy.lastBacktest.combined && (() => {
+                    const bt = selectedStrategy.lastBacktest!.combined!;
+                    const real = selectedStrategy.realStats!;
+                    const wrGap = bt.winRate * 100 - real.winRate * 100;
+                    const degraded = real.totalTrades >= 5 && wrGap > 15;
+                    return (
+                      <div className={`p-3 rounded-[var(--radius-sm)] border space-y-2 ${
+                        degraded
+                          ? "border-[var(--color-text-down)]/40 bg-[var(--color-text-down)]/5"
+                          : "border-[var(--color-border)] bg-[var(--color-surface-3)]"
+                      }`}>
+                        <p className="text-xs font-semibold text-[var(--color-text)]">Esperado (backtest) × Realizado (sua conta)</p>
+                        <table className="w-full text-[11px]">
+                          <thead className="text-muted">
+                            <tr>
+                              <th className="text-left font-medium pb-1"></th>
+                              <th className="text-right font-medium pb-1">Win Rate</th>
+                              <th className="text-right font-medium pb-1">P. Factor</th>
+                              <th className="text-right font-medium pb-1">Resultado</th>
+                              <th className="text-right font-medium pb-1">Trades</th>
+                            </tr>
+                          </thead>
+                          <tbody className="text-[var(--color-text)]">
+                            <tr>
+                              <td className="py-0.5 text-muted">Backtest</td>
+                              <td className="text-right">{(bt.winRate * 100).toFixed(1)}%</td>
+                              <td className="text-right">{bt.profitFactor.toFixed(2)}</td>
+                              <td className="text-right">{fmtUSD(bt.netProfitUsd)}</td>
+                              <td className="text-right">{bt.totalTrades}</td>
+                            </tr>
+                            <tr>
+                              <td className="py-0.5 text-muted">Real</td>
+                              <td className="text-right font-semibold">{(real.winRate * 100).toFixed(1)}%</td>
+                              <td className="text-right font-semibold">{real.profitFactor.toFixed(2)}</td>
+                              <td className={`text-right font-semibold ${real.netProfit >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"}`}>{fmtUSD(real.netProfit)}</td>
+                              <td className="text-right font-semibold">{real.totalTrades}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                        {degraded ? (
+                          <p className="text-[10px] text-[var(--color-text-down)]">
+                            O desempenho real está bem abaixo do backtest ({wrGap.toFixed(0)} p.p. de win rate). Considere pausar a estratégia e reanalisar com o mercado atual.
+                          </p>
+                        ) : real.totalTrades < 5 ? (
+                          <p className="text-[10px] text-muted">Amostra real ainda pequena ({real.totalTrades} trade{real.totalTrades > 1 ? "s" : ""}) — compare novamente com mais operações.</p>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
+                  <BacktestReport data={selectedStrategy.lastBacktest} />
+                </div>
               ) : (
                 <div className="text-center py-12 space-y-3">
                   <BarChart3 size={36} className="mx-auto text-muted opacity-50" />

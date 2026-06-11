@@ -303,6 +303,7 @@ export const api = {
         sl: any;
         tp: any;
         statsSource: "real" | "backtest" | "sem-dados";
+        realStats: { totalTrades: number; winRate: number; profitFactor: number; netProfit: number } | null;
         winRateTarget: number | null;
         lastBacktest: BacktestResult | null;
       }[];
@@ -361,6 +362,17 @@ export const api = {
         plan?: string;
       }[];
     }>("/bot/positions", undefined, { success: false, positions: [] }),
+
+  botReconcile: () =>
+    safeJson<{
+      success: boolean;
+      error?: string;
+      checked?: number;
+      ghostsClosed?: string[];
+      missingOco?: string[];
+      ok?: string[];
+      untracked?: { asset: string; qty: number; valueUsd: number }[];
+    }>("/bot/reconcile", { method: "POST" }, { success: false, error: "Falha ao reconciliar" }),
 
   botClosePosition: (id: string, markOnly?: boolean) =>
     safeJson<{ success: boolean; error?: string }>(`/bot/positions/${encodeURIComponent(id)}/close${markOnly ? "?markOnly=true" : ""}`, {
