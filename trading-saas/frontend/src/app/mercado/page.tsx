@@ -8,11 +8,14 @@ import { fmtUSD, fmtPct, fmtCompact } from "@/lib/format";
 import { TradingViewWidget } from "@/components/TradingViewWidget";
 import { api } from "@/lib/api";
 
+// Lista de ativos acompanhados. Preço/variação/volume são preenchidos em
+// tempo real pela Binance no fetchQuotesAndBalance — sem valores fixos para
+// não exibir cotações desatualizadas antes do primeiro fetch.
 const FAVORITES_INIT = [
-  { symbol: "BTCUSDT", name: "Bitcoin", price: 68450.12, changePct: 2.34, volume: 28_400_000_000 },
-  { symbol: "ETHUSDT", name: "Ethereum", price: 3490.55, changePct: -1.12, volume: 14_200_000_000 },
-  { symbol: "SOLUSDT", name: "Solana", price: 168.27, changePct: 5.78, volume: 2_900_000_000 },
-  { symbol: "XRPUSDT", name: "XRP", price: 0.524, changePct: 0.42, volume: 1_300_000_000 },
+  { symbol: "BTCUSDT", name: "Bitcoin", price: 0, changePct: 0, volume: 0, high: 0, low: 0 },
+  { symbol: "ETHUSDT", name: "Ethereum", price: 0, changePct: 0, volume: 0, high: 0, low: 0 },
+  { symbol: "SOLUSDT", name: "Solana", price: 0, changePct: 0, volume: 0, high: 0, low: 0 },
+  { symbol: "XRPUSDT", name: "XRP", price: 0, changePct: 0, volume: 0, high: 0, low: 0 },
 ];
 
 export default function MercadoPage() {
@@ -57,12 +60,14 @@ export default function MercadoPage() {
         favorites.map(async (f) => {
           try {
             const q = await api.quote(f.symbol);
-            if (q) {
+            if (q && q.last) {
               return {
                 ...f,
-                price: q.last || f.price,
-                changePct: q.changePct || f.changePct,
-                volume: q.volume || f.volume,
+                price: q.last,
+                changePct: q.changePct ?? f.changePct,
+                volume: q.volume ?? f.volume,
+                high: q.high ?? f.high,
+                low: q.low ?? f.low,
               };
             }
           } catch (e) {
@@ -270,8 +275,8 @@ export default function MercadoPage() {
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <Card><Stat label="Volume 24h" value={fmtCompact(current.volume)} size="sm" /></Card>
-            <Card><Stat label="Máxima 24h" value={fmtUSD(current.price * 1.03)} size="sm" /></Card>
-            <Card><Stat label="Mínima 24h" value={fmtUSD(current.price * 0.97)} size="sm" /></Card>
+            <Card><Stat label="Máxima 24h" value={fmtUSD(current.high || current.price)} size="sm" /></Card>
+            <Card><Stat label="Mínima 24h" value={fmtUSD(current.low || current.price)} size="sm" /></Card>
             <Card><Stat label="Variação" value={fmtPct(current.changePct)} delta={current.changePct} size="sm" /></Card>
           </div>
         </div>

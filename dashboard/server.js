@@ -488,6 +488,26 @@ app.get('/api/state', async (_req, res) => {
 
 // ── QUOTE ────────────────────────────────────────────────────────
 app.get('/api/quote', async (req, res) => {
+  // Fonte primária: API pública da Binance (24h ticker) — funciona no cloud,
+  // ao contrário do getQuote() do TradingView Desktop (CDP indisponível aqui).
+  const symbol = (req.query.symbol || '').toString().toUpperCase().trim();
+  if (symbol && /^[A-Z0-9]{5,20}$/.test(symbol)) {
+    try {
+      const r = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
+      const t = await r.json();
+      if (t && t.lastPrice) {
+        return res.json({
+          symbol,
+          last: parseFloat(t.lastPrice),
+          change: parseFloat(t.priceChange),
+          changePct: parseFloat(t.priceChangePercent),
+          high: parseFloat(t.highPrice),
+          low: parseFloat(t.lowPrice),
+          volume: parseFloat(t.quoteVolume), // volume em USDT
+        });
+      }
+    } catch (e) { /* cai no fallback do TradingView abaixo */ }
+  }
   try { res.json(await data.getQuote({})); }
   catch (e) { return noTv(res); }
 });
