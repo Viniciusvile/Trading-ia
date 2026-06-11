@@ -170,6 +170,13 @@ async function main() {
   let dailyPnlUsdt = 0;
   let dailyDate = new Date().toISOString().slice(0, 10);
 
+  // Kill switch global: perda máxima diária (rules.risk.daily_max_loss_usd).
+  // Considera o PnL realizado de TODOS os bots (consulta o banco), e bloqueia
+  // apenas NOVAS entradas — gestão/saída de posições abertas continua normal.
+  const dailyMaxLossUsd = parseFloat(rulesObj?.risk?.daily_max_loss_usd || 0);
+  let killSwitchActive = false;
+  let lastKillCheck = 0;
+
   // Referência de preço do BTC para filtro de queda brusca
   let btcPriceRef = null;
   let btcPriceRefTime = 0;
@@ -324,6 +331,22 @@ async function main() {
         console.log(`⚠️ [BTC] Queda de ${(btcChange*100).toFixed(2)}% em 15min — bloqueando novas entradas`);
       }
     } catch (e) {}
+
+    // --- KILL SWITCH GLOBAL: perda máxima diária ---
+    if (dailyMaxLossUsd > 0 && now - lastKillCheck > 60000) {
+      lastKillCheck = now;
+      try {
+        const todayPnl = await db.getTodayRealizedPnlUsd();
+        const wasActive = killSwitchActive;
+        killSwitchActive = todayPnl <= -dailyMaxLossUsd;
+        if (killSwitchActive && !wasActive) {
+          console.log(`🛑 [KILL SWITCH] Perda do dia: $${todayPnl.toFixed(2)} (limite: $${dailyMaxLossUsd.toFixed(2)}) — scalper sem novas entradas até a virada do dia UTC.`);
+          sendTelegram(`🛑 [SCALPER] KILL SWITCH ATIVADO\nPerda realizada hoje: $${todayPnl.toFixed(2)} (limite: $${dailyMaxLossUsd.toFixed(2)}).\nSem novas entradas até 00:00 UTC. Posições abertas seguem geridas.`);
+        } else if (!killSwitchActive && wasActive) {
+          console.log(`✅ [KILL SWITCH] Liberado — novo dia ou PnL recuperado.`);
+        }
+      } catch (e) { /* banco indisponível: não bloqueia */ }
+    }
 
     // --- META DIÁRIA DE LUCRO ---
     const dailyProfitTarget = mainConfig.daily_profit_target_usdt || 0;
@@ -504,7 +527,7 @@ async function main() {
             const lossCooldown = mainConfig.cooldown_after_loss_ms || baseCooldown;
             s.cooldownUntil = now + (realizedPct < 0 ? lossCooldown : baseCooldown);
           }
-        } else if (now >= s.cooldownUntil && s.trades < mainConfig.max_trades) {
+        } else if (!killSwitchActive && now >= s.cooldownUntil && s.trades < mainConfig.max_trades) {
           // --- BUSCA DE SINAL ---
           const candles = await client.getKlines(symbol, "5m", 50);
           let sig;

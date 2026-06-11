@@ -73,6 +73,7 @@ export default function BotsPage() {
     portfolio: 200,
     maxTrade: 20,
     paperTrading: true,
+    dailyMaxLoss: 0,
     activePlan: "" as string | null,
     groupPlans: [] as { name: string; description: string; symbols: string[] }[],
   });
@@ -197,6 +198,7 @@ export default function BotsPage() {
             portfolio: configData.portfolio || 200,
             maxTrade: configData.maxTrade || 20,
             paperTrading: configData.paperTrading,
+            dailyMaxLoss: configData.dailyMaxLoss || 0,
             activePlan: configData.activePlan,
             groupPlans: configData.groupPlans || [],
           });
@@ -563,6 +565,19 @@ export default function BotsPage() {
                 value={masterConfig.maxTrade}
                 onChange={e => setMasterConfig(prev => ({ ...prev, maxTrade: Number(e.target.value) }))}
               />
+            </div>
+
+            <div>
+              <Input
+                label="Perda máxima diária ($) — kill switch"
+                type="number"
+                value={masterConfig.dailyMaxLoss}
+                onChange={e => setMasterConfig(prev => ({ ...prev, dailyMaxLoss: Number(e.target.value) }))}
+              />
+              <p className="text-[10px] text-muted mt-1">
+                Ao atingir essa perda realizada no dia (UTC), TODOS os robôs param de abrir novas operações até o dia seguinte.
+                Posições abertas continuam monitoradas. 0 = desligado.
+              </p>
             </div>
 
             <div className="flex items-center justify-between p-3 rounded bg-[var(--color-surface-2)] border border-[var(--color-border)]">

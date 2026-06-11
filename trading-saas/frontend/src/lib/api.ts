@@ -180,6 +180,7 @@ export const api = {
       portfolio: number;
       maxTrade: number;
       paperTrading: boolean;
+      dailyMaxLoss: number;
       activePlan: string | null;
       groupPlans: { name: string; description?: string; symbols: string[] }[];
     } | null>("/bot/config", undefined, null),

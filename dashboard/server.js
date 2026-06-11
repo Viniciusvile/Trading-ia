@@ -961,6 +961,7 @@ app.get('/api/bot/config', authenticateToken, async (req, res) => {
       maxTrade: Number(env.MAX_TRADE_SIZE_USD || 0),
       maxPerDay: Number(env.MAX_TRADES_PER_DAY || 0),
       paperTrading: env.PAPER_TRADING !== 'false',
+      dailyMaxLoss: Number(rules?.risk?.daily_max_loss_usd || 0),
       hasRealKeys,
       rules,
       activePlan: rules?.active_plan || null,
@@ -1306,7 +1307,7 @@ app.patch('/api/bot/config', (req, res) => {
       const content = envVars.filter(k => process.env[k]).map(k => `${k}=${process.env[k]}`).join('\n') + '\n';
       writeFileSync(BOT_ENV, content);
     }
-    const { symbol, timeframe, strategy, portfolio, maxTrade, trailingEnabled, trailingMult, paperTrading, activePlan } = req.body || {};
+    const { symbol, timeframe, strategy, portfolio, maxTrade, trailingEnabled, trailingMult, paperTrading, activePlan, dailyMaxLoss } = req.body || {};
     
     // Validations
     const allowedTf = ['1m','5m','15m','30m','1H','4H','1D','1W'];
@@ -1330,8 +1331,8 @@ app.patch('/api/bot/config', (req, res) => {
     if (paperTrading !== undefined) upsert('PAPER_TRADING', paperTrading ? 'true' : 'false');
     writeFileSync(BOT_ENV, txt);
 
-    // Update rules.json if trailing params, strategy, activePlan or maxTrade changed
-    if (trailingEnabled !== undefined || trailingMult !== undefined || strategy || activePlan !== undefined || maxTrade !== undefined) {
+    // Update rules.json if trailing params, strategy, activePlan, maxTrade or risk changed
+    if (trailingEnabled !== undefined || trailingMult !== undefined || strategy || activePlan !== undefined || maxTrade !== undefined || dailyMaxLoss !== undefined) {
       if (existsSync(BOT_RULES)) {
         const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
         if (trailingEnabled !== undefined || trailingMult !== undefined) {
@@ -1345,6 +1346,10 @@ app.patch('/api/bot/config', (req, res) => {
           rules.strategy.key = strategy;
         }
         if (activePlan !== undefined) rules.active_plan = activePlan || null;
+        if (dailyMaxLoss !== undefined) {
+          if (!rules.risk) rules.risk = {};
+          rules.risk.daily_max_loss_usd = parseFloat(dailyMaxLoss) || 0; // 0 = desligado
+        }
         if (maxTrade !== undefined) {
           if (!rules.micro_scalper) rules.micro_scalper = {};
           rules.micro_scalper.max_trade_usdt = parseFloat(maxTrade);

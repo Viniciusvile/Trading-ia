@@ -1362,6 +1362,24 @@ async function monitorPositions() {
         }
       }
 
+      // ── Auditoria OCO Spot: repõe TP/SL na exchange se a posição estiver sem OCO ──
+      // O stop precisa viver na Binance: o watchdog local roda só a cada ciclo e
+      // morre junto com o servidor. (placeOCOOrder cancela ordens presas antes.)
+      if (!CONFIG.paperTrading && !pos.ocoOrderListId && !pos.ocoManual &&
+          pos.side === 'LONG' && pos.stopPrice && pos.takeProfitPrice) {
+        try {
+          const ocoQty = await roundQty(pos.symbol, pos.quantity, false);
+          console.log(`  🛠️ [${pos.symbol}] Posição sem OCO na exchange — repondo TP/SL (qty=${ocoQty})...`);
+          const ocoResult = await placeOCOOrder(pos.symbol, ocoQty, pos.takeProfitPrice, pos.stopPrice);
+          pos.ocoOrderListId = ocoResult.orderListId;
+          pos.ocoPlaced = true;
+          await db.savePosition(pos);
+          console.log(`  ✅ [${pos.symbol}] OCO reposta: lista ${pos.ocoOrderListId}`);
+        } catch (ocoFixErr) {
+          console.log(`  ⚠ [${pos.symbol}] Falha ao repor OCO: ${ocoFixErr.message}`);
+        }
+      }
+
       // ── Posição com OCO ativa: verifica status na Binance ──
       if (pos.ocoPlaced && !CONFIG.paperTrading && !pos.ocoManual && pos.ocoOrderListId) {
         try {
@@ -1837,7 +1855,10 @@ async function runSymbolCycle(symbol, timeframe, rulesInput, runMode = 'master')
           logEntry.orderId = order.orderId;
           const execQtyRaw = parseFloat(order.executedQty) || (tradeSize / price);
           execQtyNum = execQtyRaw * 0.999; // Deduz 0.1% para taxas
-          const execQtyStr = String(execQtyNum);
+          // Arredonda ao stepSize do par — String(execQtyNum) mandava dízimas
+          // (ex.: 0.47504847600000004) que a Binance rejeita por LOT_SIZE,
+          // deixando a posição sem OCO na exchange.
+          const execQtyStr = await roundQty(symbol, execQtyNum, false);
 
           if (stopPrice && takeProfitPrice && execQtyNum > 0) {
             const delays = [500, 2000, 5000];
@@ -1960,6 +1981,29 @@ async function run(runMode = 'manual') {
   }
 
   const summary = [];
+
+  // ── Kill switch: perda máxima diária (rules.risk.daily_max_loss_usd) ──
+  // Bloqueia NOVAS entradas quando a perda realizada do dia (UTC) atinge o
+  // limite. O monitor de posições já rodou acima — saídas nunca são bloqueadas.
+  const dailyMaxLoss = parseFloat(currentRules?.risk?.daily_max_loss_usd || 0);
+  if (dailyMaxLoss > 0) {
+    try {
+      const todayPnl = await db.getTodayRealizedPnlUsd();
+      if (todayPnl <= -dailyMaxLoss) {
+        console.log(`🛑 [KILL SWITCH] Perda do dia: $${todayPnl.toFixed(2)} (limite: $${dailyMaxLoss.toFixed(2)}) — sem novas entradas até a virada do dia UTC. Posições abertas seguem monitoradas.`);
+        const todayKey = new Date().toISOString().slice(0, 10);
+        if (globalThis.__killSwitchNotifiedDay !== todayKey) {
+          globalThis.__killSwitchNotifiedDay = todayKey;
+          sendWhatsApp(`🛑 KILL SWITCH ATIVADO\n\nPerda realizada hoje: $${todayPnl.toFixed(2)}\nLimite configurado: $${dailyMaxLoss.toFixed(2)}\n\nO robô NÃO abrirá novas operações até amanhã (00:00 UTC). Posições abertas continuam monitoradas e protegidas.`);
+        }
+        if (isLoop) await writeLoopStatus("waiting", summary, isFuturesMode);
+        return;
+      }
+    } catch (ksErr) {
+      console.log(`  ⚠ Kill switch: falha ao apurar PnL diário: ${ksErr.message}`);
+    }
+  }
+
   const entries = isLoop ? ["DYNAMIC"] : (currentRules.watchlist || [CONFIG.symbol]);
   
   if (!balanceOk) {

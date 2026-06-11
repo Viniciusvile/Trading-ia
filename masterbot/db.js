@@ -452,6 +452,27 @@ export async function readMicroHeartbeat(maxAgeMs = 120_000) {
   return { alive: age <= maxAgeMs, pid, lastSeen: ts };
 }
 
+/**
+ * Soma o PnL realizado (USD) das posições fechadas HOJE (UTC) da conta ativa.
+ * Usado pelo kill switch de perda diária (rules.risk.daily_max_loss_usd):
+ * inclui trades do MasterBot e do Micro-Scalper (todos gravam em positions).
+ */
+export async function getTodayRealizedPnlUsd(userId = null) {
+  const accId = await getActiveAccountId(userId);
+  if (!accId) return 0;
+  // closedAt é ISO string — os 10 primeiros caracteres são a data UTC
+  const res = await getPool().query(
+    `SELECT COALESCE(SUM((data->>'pnl')::numeric), 0) AS pnl
+       FROM positions
+      WHERE account_id = $1
+        AND status = 'closed'
+        AND substring(data->>'closedAt' from 1 for 10) = to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD')
+        AND data->>'pnl' IS NOT NULL`,
+    [accId]
+  );
+  return parseFloat(res.rows[0]?.pnl || 0);
+}
+
 // ─── Accounts Helper Functions ───────────────────────────────────────────────
 
 export async function getActiveAccountId(userId = null) {
