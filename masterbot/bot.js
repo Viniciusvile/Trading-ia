@@ -1563,9 +1563,15 @@ async function runSymbolCycle(symbol, timeframe, rulesInput, runMode = 'master')
   const closes = candles.map((c) => c.close);
   const price = closes[closes.length - 1];
 
-  // Strategy dispatch — no Modo Auto usa a estratégia do plano do símbolo, ou warrior como fallback
+  // Strategy dispatch — quando há um plano ATIVO cobrindo o símbolo, a estratégia
+  // do plano manda sempre (o usuário validou essa lógica no backtest do wizard).
+  // O seletor global (BOT_STRATEGY / rules.strategy.key) vale só no modo avulso
+  // ou no Modo Auto, que usa a estratégia do plano do símbolo quando existir.
   const rawStratKey = rules?.strategy?.key || process.env.BOT_STRATEGY || "warrior";
-  const stratKey = rawStratKey === "auto" ? (plan?.strategy || "warrior") : rawStratKey;
+  const isActivePlan = !!(plan && rules?.active_plan && rules.active_plan === plan.name);
+  const stratKey = isActivePlan
+    ? (plan.strategy || "warrior")
+    : (rawStratKey === "auto" ? (plan?.strategy || "warrior") : rawStratKey);
   let safetyResult;
   let activeIndicators = {};
   let usedStrategy = stratKey;

@@ -484,14 +484,22 @@ export default function BotsPage() {
           <div className="text-center py-6 text-sm text-muted">Carregando configurações do servidor...</div>
         ) : selectedBotId === "masterbot" || selectedBotId === "futures" ? (
           <div className="space-y-4">
+            {masterConfig.activePlan && (
+              <p className="text-[11px] text-muted bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-[var(--radius-sm)] p-2.5">
+                O plano ativo <strong className="text-[var(--color-text)]">{masterConfig.activePlan}</strong> define
+                a estratégia, os ativos e os timeframes. Os campos abaixo só valem no modo avulso (sem plano ativo).
+              </p>
+            )}
+
             <div>
               <label className="block text-xs font-medium text-[var(--color-text-2)] mb-1">
-                Estratégia do Robô
+                Estratégia do Robô {masterConfig.activePlan && "(definida pelo plano)"}
               </label>
               <select
                 value={masterConfig.strategy}
+                disabled={!!masterConfig.activePlan}
                 onChange={e => setMasterConfig(prev => ({ ...prev, strategy: e.target.value }))}
-                className="w-full h-10 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text)] outline-none"
+                className="w-full h-10 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text)] outline-none disabled:opacity-50"
               >
                 <option value="warrior">Warrior Trading (Ross Cameron)</option>
                 <option value="stormer">123 Stormer (Alexandre Wolwacz)</option>
@@ -503,6 +511,7 @@ export default function BotsPage() {
               <Input
                 label="Símbolo Ativo"
                 value={masterConfig.symbol}
+                disabled={!!masterConfig.activePlan}
                 onChange={e => setMasterConfig(prev => ({ ...prev, symbol: e.target.value.toUpperCase() }))}
               />
               <div>
@@ -511,8 +520,9 @@ export default function BotsPage() {
                 </label>
                 <select
                   value={masterConfig.timeframe}
+                  disabled={!!masterConfig.activePlan}
                   onChange={e => setMasterConfig(prev => ({ ...prev, timeframe: e.target.value }))}
-                  className="w-full h-10 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text)] outline-none"
+                  className="w-full h-10 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text)] outline-none disabled:opacity-50"
                 >
                   <option value="1m">1m</option>
                   <option value="5m">5m</option>
