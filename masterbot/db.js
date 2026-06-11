@@ -518,6 +518,13 @@ export async function getActiveAccount(userId = null) {
       if (res.rows.length) return res.rows[0];
       return null;
     }
+    // Sem userId: resolve pela conta cujas chaves o robô usa (.env) —
+    // "primeira ativa" pegava a conta (de teste) de outro usuário.
+    const envKey = process.env.BINANCE_API_KEY;
+    if (envKey) {
+      const byKey = await getPool().query('SELECT * FROM accounts WHERE api_key = $1 LIMIT 1', [envKey]);
+      if (byKey.rows.length) return byKey.rows[0];
+    }
     const res = await getPool().query('SELECT * FROM accounts WHERE is_active = true LIMIT 1');
     if (res.rows.length) return res.rows[0];
   } catch (e) {}

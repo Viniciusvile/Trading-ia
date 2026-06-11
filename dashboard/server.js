@@ -2971,7 +2971,11 @@ app.patch('/api/micro-scalper/strategy', (req, res) => {
 // ─── Accounts Helper Functions ───────────────────────────────────────────────
 async function syncEnvWithActiveAccount(userId = null) {
   try {
-    const activeAcc = await db.getActiveAccount(userId);
+    // Sem userId (boot): resolve a conta do DONO do bot. "Primeira conta
+    // ativa" global podia ser a conta de teste de OUTRO usuário e envenenava
+    // process.env — micro-scalper/masterbot herdam essas chaves no spawn.
+    const targetUser = userId || await db.getOwnerUserId();
+    const activeAcc = await db.getActiveAccount(targetUser);
     if (activeAcc) {
       process.env.BINANCE_API_KEY = activeAcc.api_key;
       process.env.BINANCE_SECRET_KEY = activeAcc.secret_key;
@@ -3049,7 +3053,8 @@ app.post('/api/accounts', authenticateToken, async (req, res) => {
       return res.status(400).json({ success: false, error: 'name, apiKey e secretKey são obrigatórios' });
     }
     const id = await db.createAccount(req.user.id, name, apiKey.trim(), secretKey.trim(), !!isTestnet);
-    await syncEnvWithActiveAccount(req.user.id);
+    // Só a conta do DONO alimenta as chaves dos robôs reais
+    if (await isOwnerUser(req.user.id)) await syncEnvWithActiveAccount(req.user.id);
     res.json({ success: true, id });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
@@ -3060,8 +3065,13 @@ app.post('/api/accounts/:id/activate', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     await db.activateAccount(req.user.id, id);
-    await syncEnvWithActiveAccount(req.user.id);
-    await restartRunningBots();
+    // Trocar de conta só afeta os ROBÔS se quem trocou for o dono — outro
+    // usuário ativando a própria conta não pode reiniciar os bots com as
+    // chaves dele (sequestro das operações reais).
+    if (await isOwnerUser(req.user.id)) {
+      await syncEnvWithActiveAccount(req.user.id);
+      await restartRunningBots();
+    }
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
@@ -3072,8 +3082,10 @@ app.delete('/api/accounts/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     await db.deleteAccount(req.user.id, id);
-    await syncEnvWithActiveAccount(req.user.id);
-    await restartRunningBots();
+    if (await isOwnerUser(req.user.id)) {
+      await syncEnvWithActiveAccount(req.user.id);
+      await restartRunningBots();
+    }
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
