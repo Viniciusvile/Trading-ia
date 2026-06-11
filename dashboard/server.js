@@ -2717,7 +2717,9 @@ app.get('/api/micro-scalper/status', authenticateToken, async (req, res) => {
     const running = hb.alive || localLiveness.alive;
     const pid = hb.pid ?? localLiveness.pid;
     const lastSession = sessions.length ? sessions[sessions.length - 1] : null;
-    res.json({ success: true, running, pid, lastSeen: hb.lastSeen, lastSession });
+    // Ativos que o scalper realmente opera (para o card não mostrar só 1 símbolo)
+    const activeSymbols = getRules().micro_scalper?.active_symbols || [];
+    res.json({ success: true, running, pid, lastSeen: hb.lastSeen, lastSession, activeSymbols });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 

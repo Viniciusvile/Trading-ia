@@ -118,12 +118,18 @@ export default function BotsPage() {
         if (bot.id === "micro-scalper") {
           const isOnline = microRes.running;
           const dailyStats = microLogRes?.daily || { trades: 0, profit: 0 };
+          // O scalper opera MÚLTIPLOS ativos — mostra todos os ativos ativos,
+          // não só o símbolo do último trade (que travava o card em "SOLUSDT").
+          const actives = microRes.activeSymbols || [];
+          const symbolLabel = actives.length
+            ? (actives.length > 3 ? actives.slice(0, 3).join(", ") + "…" : actives.join(", "))
+            : (microLogRes?.trades?.[0]?.symbol || bot.symbol);
           return {
             ...bot,
             status: isOnline ? "online" : "paused",
             trades24h: dailyStats.trades || 0,
             pnl24h: dailyStats.profit || 0,
-            symbol: microLogRes?.trades?.[0]?.symbol || bot.symbol,
+            symbol: symbolLabel,
           };
         }
         if (bot.id === "futures") {

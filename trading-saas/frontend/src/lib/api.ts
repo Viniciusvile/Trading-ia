@@ -224,7 +224,7 @@ export const api = {
     safeJson<{ success: boolean; error?: string }>("/bot/master/stop", { method: "POST" }),
 
   microScalperStatus: () =>
-    safeJson<{ success: boolean; running: boolean }>("/micro-scalper/status", undefined, { success: false, running: false }),
+    safeJson<{ success: boolean; running: boolean; activeSymbols?: string[] }>("/micro-scalper/status", undefined, { success: false, running: false }),
 
   microScalperStart: () =>
     safeJson<{ success: boolean; error?: string }>("/micro-scalper/start", { method: "POST" }),
