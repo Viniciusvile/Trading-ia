@@ -484,56 +484,71 @@ export default function BotsPage() {
           <div className="text-center py-6 text-sm text-muted">Carregando configurações do servidor...</div>
         ) : selectedBotId === "masterbot" || selectedBotId === "futures" ? (
           <div className="space-y-4">
-            {masterConfig.activePlan && (
-              <p className="text-[11px] text-muted bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-[var(--radius-sm)] p-2.5">
-                O plano ativo <strong className="text-[var(--color-text)]">{masterConfig.activePlan}</strong> define
-                a estratégia, os ativos e os timeframes. Os campos abaixo só valem no modo avulso (sem plano ativo).
-              </p>
-            )}
-
             <div>
               <label className="block text-xs font-medium text-[var(--color-text-2)] mb-1">
-                Estratégia do Robô {masterConfig.activePlan && "(definida pelo plano)"}
+                Estratégia
               </label>
               <select
-                value={masterConfig.strategy}
-                disabled={!!masterConfig.activePlan}
-                onChange={e => setMasterConfig(prev => ({ ...prev, strategy: e.target.value }))}
-                className="w-full h-10 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text)] outline-none disabled:opacity-50"
+                value={masterConfig.activePlan ? `plan:${masterConfig.activePlan}` : `engine:${masterConfig.strategy}`}
+                onChange={e => {
+                  const v = e.target.value;
+                  if (v.startsWith("plan:")) {
+                    setMasterConfig(prev => ({ ...prev, activePlan: v.slice(5) }));
+                  } else {
+                    setMasterConfig(prev => ({ ...prev, activePlan: null, strategy: v.slice(7) }));
+                  }
+                }}
+                className="w-full h-10 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text)] outline-none"
               >
-                <option value="warrior">Warrior Trading (Ross Cameron)</option>
-                <option value="stormer">123 Stormer (Alexandre Wolwacz)</option>
-                <option value="both">Ambas (Warrior + Stormer)</option>
+                {masterConfig.groupPlans.length > 0 && (
+                  <optgroup label="Minhas estratégias">
+                    {masterConfig.groupPlans.map(plan => (
+                      <option key={plan.name} value={`plan:${plan.name}`}>
+                        {plan.name} ({plan.symbols.join(", ")})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label="Modo avulso (motores clássicos)">
+                  <option value="engine:warrior">Warrior Trading (Ross Cameron)</option>
+                  <option value="engine:stormer">123 Stormer (Alexandre Wolwacz)</option>
+                  <option value="engine:both">Ambas (Warrior + Stormer)</option>
+                </optgroup>
               </select>
+              <p className="text-[10px] text-muted mt-1">
+                {masterConfig.activePlan
+                  ? "A estratégia define ativos, timeframes, SL/TP e filtros — tudo o que você configurou e analisou no backtest."
+                  : "Modo avulso: o robô opera um único ativo com o símbolo e timeframe abaixo."}
+              </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <Input
-                label="Símbolo Ativo"
-                value={masterConfig.symbol}
-                disabled={!!masterConfig.activePlan}
-                onChange={e => setMasterConfig(prev => ({ ...prev, symbol: e.target.value.toUpperCase() }))}
-              />
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-text-2)] mb-1">
-                  Timeframe
-                </label>
-                <select
-                  value={masterConfig.timeframe}
-                  disabled={!!masterConfig.activePlan}
-                  onChange={e => setMasterConfig(prev => ({ ...prev, timeframe: e.target.value }))}
-                  className="w-full h-10 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text)] outline-none disabled:opacity-50"
-                >
-                  <option value="1m">1m</option>
-                  <option value="5m">5m</option>
-                  <option value="15m">15m</option>
-                  <option value="30m">30m</option>
-                  <option value="1H">1H</option>
-                  <option value="4H">4H</option>
-                  <option value="1D">1D</option>
-                </select>
+            {!masterConfig.activePlan && (
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  label="Símbolo Ativo"
+                  value={masterConfig.symbol}
+                  onChange={e => setMasterConfig(prev => ({ ...prev, symbol: e.target.value.toUpperCase() }))}
+                />
+                <div>
+                  <label className="block text-xs font-medium text-[var(--color-text-2)] mb-1">
+                    Timeframe
+                  </label>
+                  <select
+                    value={masterConfig.timeframe}
+                    onChange={e => setMasterConfig(prev => ({ ...prev, timeframe: e.target.value }))}
+                    className="w-full h-10 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text)] outline-none"
+                  >
+                    <option value="1m">1m</option>
+                    <option value="5m">5m</option>
+                    <option value="15m">15m</option>
+                    <option value="30m">30m</option>
+                    <option value="1H">1H</option>
+                    <option value="4H">4H</option>
+                    <option value="1D">1D</option>
+                  </select>
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <Input
@@ -549,26 +564,6 @@ export default function BotsPage() {
                 onChange={e => setMasterConfig(prev => ({ ...prev, maxTrade: Number(e.target.value) }))}
               />
             </div>
-
-            {masterConfig.groupPlans.length > 0 && (
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-text-2)] mb-1">
-                  Plano de Grupo Ativo
-                </label>
-                <select
-                  value={masterConfig.activePlan || ""}
-                  onChange={e => setMasterConfig(prev => ({ ...prev, activePlan: e.target.value || null }))}
-                  className="w-full h-10 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text)] outline-none"
-                >
-                  <option value="">Nenhum plano ativado (Usar configurações avulsas acima)</option>
-                  {masterConfig.groupPlans.map((plan, i) => (
-                    <option key={i} value={plan.name}>
-                      {plan.name} ({plan.symbols.join(", ")})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
 
             <div className="flex items-center justify-between p-3 rounded bg-[var(--color-surface-2)] border border-[var(--color-border)]">
               <div>
