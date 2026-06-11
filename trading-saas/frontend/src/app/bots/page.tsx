@@ -241,18 +241,26 @@ export default function BotsPage() {
     setSavingConfig(true);
 
     try {
+      // O endpoint /bot/config agora exige login (ativa plano por usuário) —
+      // anexa o JWT igual ao cliente api.ts, senão dá "Token ausente".
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      const authHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+
       let res;
       if (selectedBotId === "masterbot" || selectedBotId === "futures") {
         res = await fetch("/api/legacy/bot/config", {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders,
           body: JSON.stringify(masterConfig),
         }).then(r => r.json());
       } else if (selectedBotId === "micro-scalper") {
         // Endpoint EXCLUSIVO do Micro Scalper — não toca nas configs do MasterBot
         res = await fetch("/api/legacy/micro-scalper/config", {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders,
           body: JSON.stringify({
             max_trade_usdt: microConfig.max_trade_usdt,
           }),
