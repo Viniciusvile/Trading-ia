@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Search, Star, Camera, RefreshCw, TrendingUp, TrendingDown, HelpCircle, CheckCircle, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
-import { PageHeader } from "@/components/PageHeader";
-import { Card, CardHeader, Input, Button, Badge, Stat, Skeleton, Modal } from "@/components/ui";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import { Camera, RefreshCw, HelpCircle, CheckCircle, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
+import { Card, Button, Input, Modal } from "@/components/ui";
+import { AnimatedNumber, PillTabs, MetricStrip, SymbolIcon } from "@/components/fx";
 import { fmtUSD, fmtPct, fmtCompact } from "@/lib/format";
 import { TradingViewWidget } from "@/components/TradingViewWidget";
 import { api } from "@/lib/api";
@@ -18,11 +19,17 @@ const FAVORITES_INIT = [
   { symbol: "XRPUSDT", name: "XRP", price: 0, changePct: 0, volume: 0, high: 0, low: 0 },
 ];
 
-export default function MercadoPage() {
-  const [query, setQuery] = useState("");
+function MercadoInner() {
+  const searchParams = useSearchParams();
   const [selected, setSelected] = useState(FAVORITES_INIT[0].symbol);
   const [favorites, setFavorites] = useState(FAVORITES_INIT);
   const [loadingQuotes, setLoadingQuotes] = useState(false);
+
+  // Command palette / links externos: /mercado?symbol=SOLUSDT
+  useEffect(() => {
+    const s = searchParams.get("symbol");
+    if (s && FAVORITES_INIT.some((f) => f.symbol === s)) setSelected(s);
+  }, [searchParams]);
 
   // Trade Modal State
   const [tradeModalOpen, setTradeModalOpen] = useState(false);
@@ -90,12 +97,6 @@ export default function MercadoPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const filtered = favorites.filter(
-    (f) =>
-      f.symbol.toLowerCase().includes(query.toLowerCase()) ||
-      f.name.toLowerCase().includes(query.toLowerCase())
-  );
-
   const current = favorites.find((f) => f.symbol === selected) ?? favorites[0];
 
   const handleOpenTrade = (side: "LONG" | "SHORT") => {
@@ -153,134 +154,102 @@ export default function MercadoPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="Mercado"
-        description="Acompanhe cotações em tempo real e analise gráficos sem complicação."
-        actions={
-          <>
-            <Button
-              variant="outline"
-              size="md"
-              leftIcon={<Camera size={15} />}
-              onClick={() => alert("Captura de gráfico salva na pasta de screenshots.")}
-            >
-              Capturar gráfico
-            </Button>
-            <Button
-              variant="primary"
-              size="md"
-              leftIcon={<RefreshCw size={15} className={loadingQuotes ? "animate-spin" : ""} />}
-              onClick={fetchQuotesAndBalance}
-            >
-              {loadingQuotes ? "Carregando..." : "Atualizar"}
-            </Button>
-          </>
-        }
-      />
-
-      <div className="grid lg:grid-cols-3 gap-4">
-        {/* Lista de ativos */}
-        <Card padding="md" className="lg:col-span-1">
-          <CardHeader title="Ativos favoritos" subtitle={`${filtered.length} ativos`} />
-          <Input
-            placeholder="Buscar ativo (BTC, ETH...)"
-            leftIcon={<Search size={15} />}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="mb-3"
-          />
-          <ul className="flex flex-col gap-1">
-            {filtered.map((item) => {
-              const isUp = item.changePct >= 0;
-              const active = item.symbol === selected;
-              return (
-                <li key={item.symbol}>
-                  <button
-                    type="button"
-                    onClick={() => setSelected(item.symbol)}
-                    className={
-                      "w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-[var(--radius-sm)] text-left transition " +
-                      (active
-                        ? "bg-brand-soft"
-                        : "hover:bg-[var(--color-surface-3)]")
-                    }
-                  >
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-[var(--color-text)] flex items-center gap-1.5">
-                        <Star
-                          size={12}
-                          className="text-[var(--color-warn-500)] fill-[var(--color-warn-500)]"
-                        />
-                        {item.symbol}
-                      </div>
-                      <div className="text-[11px] text-muted">{item.name}</div>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-sm font-semibold tabular-nums">
-                        {fmtUSD(item.price)}
-                      </div>
-                      <div
-                        className={
-                          "text-[11px] font-semibold tabular-nums flex items-center justify-end gap-0.5 " +
-                          (isUp ? "text-up" : "text-down")
-                        }
-                      >
-                        {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                        {fmtPct(item.changePct)}
-                      </div>
-                    </div>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </Card>
-
-        {/* Detalhe do ativo selecionado */}
-        <div className="lg:col-span-2 space-y-4">
-          <Card padding="lg">
-            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-bold text-[var(--color-text)]">{current.symbol}</h2>
-                  <Badge tone="brand" size="sm">{current.name}</Badge>
-                </div>
-                <div className="text-3xl font-bold tabular-nums mt-2">
-                  {fmtUSD(current.price)}
-                </div>
-                <div className="mt-1.5 flex items-center gap-2">
-                  <Badge
-                    tone={current.changePct >= 0 ? "up" : "down"}
-                    dot
-                  >
-                    {fmtPct(current.changePct)}
-                  </Badge>
-                  <span className="text-xs text-muted">últimas 24h</span>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="success" size="md" onClick={() => handleOpenTrade("LONG")}>
-                  Comprar
-                </Button>
-                <Button variant="danger" size="md" onClick={() => handleOpenTrade("SHORT")}>
-                  Vender
-                </Button>
-              </div>
+      {/* Header de detalhe do ativo — estilo Fey (TSLA) */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <SymbolIcon symbol={current.symbol} size={40} />
+            <div>
+              <div className="text-sm font-semibold text-[var(--color-text)]">{current.symbol.replace("USDT", "")}</div>
+              <div className="text-[11px] text-muted">{current.name} · USDT · Binance</div>
             </div>
-
-            <div className="mt-5">
-              <TradingViewWidget symbol={current.symbol} />
-            </div>
-          </Card>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Card><Stat label="Volume 24h" value={fmtCompact(current.volume)} size="sm" /></Card>
-            <Card><Stat label="Máxima 24h" value={fmtUSD(current.high || current.price)} size="sm" /></Card>
-            <Card><Stat label="Mínima 24h" value={fmtUSD(current.low || current.price)} size="sm" /></Card>
-            <Card><Stat label="Variação" value={fmtPct(current.changePct)} delta={current.changePct} size="sm" /></Card>
+          </div>
+          <div className="mt-3 flex items-end gap-3 flex-wrap">
+            <AnimatedNumber
+              value={current.price}
+              format={fmtUSD}
+              className="text-4xl sm:text-5xl font-bold tabular-nums tracking-tight text-[var(--color-text)]"
+            />
+            <span className={`text-sm font-semibold mb-1.5 ${current.changePct >= 0 ? "text-up" : "text-down"}`}>
+              {current.changePct >= 0 ? "+" : ""}{fmtPct(current.changePct)} · 24h
+            </span>
           </div>
         </div>
+        <div className="flex gap-2 flex-wrap">
+          <Button
+            variant="ghost"
+            size="md"
+            leftIcon={<Camera size={15} />}
+            onClick={() => alert("Captura de gráfico salva na pasta de screenshots.")}
+          >
+            Capturar
+          </Button>
+          <Button
+            variant="outline"
+            size="md"
+            leftIcon={<RefreshCw size={15} className={loadingQuotes ? "animate-spin" : ""} />}
+            onClick={fetchQuotesAndBalance}
+          >
+            {loadingQuotes ? "Carregando..." : "Atualizar"}
+          </Button>
+          <Button variant="success" size="md" onClick={() => handleOpenTrade("LONG")}>
+            Comprar
+          </Button>
+          <Button variant="danger" size="md" onClick={() => handleOpenTrade("SHORT")}>
+            Vender
+          </Button>
+        </div>
       </div>
+
+      {/* Troca de ativo por pills (substitui a lista lateral) */}
+      <PillTabs
+        options={favorites.map((f) => ({ value: f.symbol, label: f.symbol.replace("USDT", "") }))}
+        value={selected}
+        onChange={setSelected}
+        size="md"
+      />
+
+      {/* Gráfico */}
+      <Card padding="sm">
+        <TradingViewWidget symbol={current.symbol} />
+      </Card>
+
+      {/* Faixa de métricas estilo Fey */}
+      <MetricStrip
+        items={[
+          { label: "Volume 24h", value: fmtCompact(current.volume) },
+          { label: "Máxima 24h", value: fmtUSD(current.high || current.price) },
+          { label: "Mínima 24h", value: fmtUSD(current.low || current.price) },
+          { label: "Variação 24h", value: `${current.changePct >= 0 ? "+" : ""}${fmtPct(current.changePct)}`, tone: current.changePct >= 0 ? "up" : "down" },
+          { label: "Saldo Spot", value: fmtUSD(balance.spot) },
+          { label: "Saldo Futuros", value: fmtUSD(balance.futures) },
+        ]}
+      />
+
+      {/* Indicadores-chave (estilo Key Indicators do Fey) */}
+      <Card padding="lg">
+        <div className="text-xs font-semibold text-[var(--color-text)] mb-3">Indicadores-chave</div>
+        <ul className="space-y-2.5 text-sm text-[var(--color-text-2)]">
+          <li className="flex items-center gap-2.5">
+            <span className={`h-1.5 w-1.5 rounded-full ${current.changePct >= 0 ? "bg-[var(--color-up-500)]" : "bg-[var(--color-down-500)]"}`} />
+            <span>
+              {current.changePct >= 0 ? "Em alta" : "Em queda"} de <strong className="text-[var(--color-text)]">{fmtPct(Math.abs(current.changePct))}</strong> nas últimas 24h
+            </span>
+          </li>
+          <li className="flex items-center gap-2.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-brand-400)]" />
+            <span>
+              Amplitude do dia de <strong className="text-[var(--color-text)]">{current.low > 0 ? fmtPct(((current.high - current.low) / current.low) * 100) : "—"}</strong> (mínima → máxima)
+            </span>
+          </li>
+          <li className="flex items-center gap-2.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-warn-500)]" />
+            <span>
+              Preço a <strong className="text-[var(--color-text)]">{current.high > 0 ? fmtPct(((current.high - current.price) / current.high) * 100) : "—"}</strong> da máxima de 24h
+            </span>
+          </li>
+        </ul>
+      </Card>
 
       {/* Trade execution modal */}
       <Modal
@@ -487,5 +456,14 @@ export default function MercadoPage() {
         </div>
       </Modal>
     </div>
+  );
+}
+
+// useSearchParams exige Suspense no App Router
+export default function MercadoPage() {
+  return (
+    <Suspense fallback={null}>
+      <MercadoInner />
+    </Suspense>
   );
 }
