@@ -46,23 +46,23 @@ export function Modal({
     <div
       role="dialog"
       aria-modal
-      className="fixed inset-0 z-50 flex items-end sm:items-start justify-center p-0 sm:p-4 md:p-8 fade-in overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 md:p-10 fade-in"
     >
       <div
-        className="fixed inset-0 bg-black/70 backdrop-blur-md"
+        className="fixed inset-0 bg-black/75 backdrop-blur-md"
         onClick={onClose}
         aria-hidden
       />
       <div
         className={cn(
-          "relative w-full sm:my-auto bg-[var(--color-surface-2)] shadow-[var(--shadow-pop)]",
-          "rounded-t-[var(--radius-lg)] sm:rounded-[var(--radius-lg)]",
-          "border border-[var(--color-border)] slide-up",
+          "relative w-full max-h-[85vh] sm:max-h-[90vh] flex flex-col bg-[var(--color-surface-2)] shadow-[var(--shadow-pop)]",
+          "rounded-[var(--radius-lg)]",
+          "border border-[var(--color-border)] slide-up overflow-hidden",
           sizes[size],
         )}
       >
         {(title || description) && (
-          <div className="flex items-start justify-between gap-3 p-5 border-b border-[var(--color-border)]">
+          <div className="flex items-start justify-between gap-3 p-5 border-b border-[var(--color-border)] shrink-0">
             <div className="min-w-0">
               {title && (
                 <h2 className="text-base font-semibold text-[var(--color-text)]">{title}</h2>
@@ -81,9 +81,9 @@ export function Modal({
             </button>
           </div>
         )}
-        <div className="p-5">{children}</div>
+        <div className="p-5 overflow-y-auto min-h-0 flex-1">{children}</div>
         {footer && (
-          <div className="p-5 pt-0 flex items-center justify-end gap-2">{footer}</div>
+          <div className="p-5 pt-0 flex items-center justify-end gap-2 shrink-0">{footer}</div>
         )}
       </div>
     </div>
