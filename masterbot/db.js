@@ -708,6 +708,31 @@ export async function getActiveStrategyName(userId) {
   return res.rows[0]?.name || null;
 }
 
+/**
+ * Define o CONJUNTO exato de estratégias ativas do usuário de uma vez:
+ * ativa as listadas em `names` e desativa todas as demais.
+ */
+export async function setActiveStrategies(userId, names) {
+  if (!userId || !Array.isArray(names)) return;
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('UPDATE strategies SET is_active = false WHERE user_id = $1', [userId]);
+    if (names.length) {
+      await client.query(
+        'UPDATE strategies SET is_active = true, updated_at = NOW() WHERE user_id = $1 AND name = ANY($2)',
+        [userId, names]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 /** Nomes de TODAS as estratégias ativas do usuário (suporte multi-estratégia). */
 export async function getActiveStrategyNames(userId) {
   if (!userId) return [];

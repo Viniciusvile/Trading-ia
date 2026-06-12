@@ -546,43 +546,70 @@ export default function BotsPage() {
           <div className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-[var(--color-text-2)] mb-1">
-                Estratégia
+                Estratégias ativas no robô
               </label>
-              <select
-                value={masterConfig.activePlan ? `plan:${masterConfig.activePlan}` : `engine:${masterConfig.strategy}`}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (v.startsWith("plan:")) {
-                    setMasterConfig(prev => ({ ...prev, activePlan: v.slice(5) }));
-                  } else {
-                    setMasterConfig(prev => ({ ...prev, activePlan: null, strategy: v.slice(7) }));
-                  }
-                }}
-                className="w-full h-10 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text)] outline-none"
-              >
-                {masterConfig.groupPlans.length > 0 && (
-                  <optgroup label="Minhas estratégias">
-                    {masterConfig.groupPlans.map(plan => (
-                      <option key={plan.name} value={`plan:${plan.name}`}>
-                        {plan.name} ({plan.symbols.join(", ")})
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-                <optgroup label="Modo avulso (motores clássicos)">
-                  <option value="engine:warrior">Warrior Trading (Ross Cameron)</option>
-                  <option value="engine:stormer">123 Stormer (Alexandre Wolwacz)</option>
-                  <option value="engine:both">Ambas (Warrior + Stormer)</option>
-                </optgroup>
-              </select>
-              <p className="text-[10px] text-muted mt-1">
-                {masterConfig.activePlans.length > 1
-                  ? `${masterConfig.activePlans.length} estratégias ativas ao mesmo tempo: ${masterConfig.activePlans.join(", ")}. Gerencie quais ficam ligadas na página Estratégias — aqui você adiciona mais uma sem desligar as outras.`
-                  : masterConfig.activePlan
-                  ? "A estratégia define ativos, timeframes, SL/TP e filtros — tudo o que você configurou e analisou no backtest. Você pode ativar várias ao mesmo tempo na página Estratégias."
-                  : "Modo avulso: o robô opera um único ativo com o símbolo e timeframe abaixo."}
+              {masterConfig.groupPlans.length === 0 ? (
+                <p className="text-[11px] text-muted p-3 rounded border border-dashed border-[var(--color-border)]">
+                  Você ainda não criou estratégias. Crie na página Estratégias para ativá-las aqui.
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {masterConfig.groupPlans.map(plan => {
+                    const checked = masterConfig.activePlans.includes(plan.name);
+                    return (
+                      <label
+                        key={plan.name}
+                        className={`flex items-center gap-2.5 p-2.5 rounded-[var(--radius-sm)] border cursor-pointer transition-colors ${
+                          checked
+                            ? "border-[var(--color-brand-500)] bg-brand-soft"
+                            : "border-[var(--color-border)] bg-[var(--color-surface-2)] hover:border-[var(--color-border-strong)]"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={e =>
+                            setMasterConfig(prev => ({
+                              ...prev,
+                              activePlans: e.target.checked
+                                ? [...prev.activePlans, plan.name]
+                                : prev.activePlans.filter(n => n !== plan.name),
+                            }))
+                          }
+                          className="w-4 h-4 accent-[var(--color-brand-500)]"
+                        />
+                        <span className="text-xs font-medium text-[var(--color-text)]">
+                          {plan.name}{" "}
+                          <span className="text-muted font-normal">({plan.symbols.join(", ")})</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="text-[10px] text-muted mt-1.5">
+                {masterConfig.activePlans.length > 0
+                  ? `${masterConfig.activePlans.length} estratégia${masterConfig.activePlans.length > 1 ? "s" : ""} ativa${masterConfig.activePlans.length > 1 ? "s" : ""} ao mesmo tempo — cada ativo opera com as regras da própria estratégia. Se duas cobrirem o mesmo ativo, vale a primeira.`
+                  : "Nenhuma marcada = modo avulso: o robô opera um único ativo com o motor clássico, símbolo e timeframe abaixo."}
               </p>
             </div>
+
+            {masterConfig.activePlans.length === 0 && (
+              <div>
+                <label className="block text-xs font-medium text-[var(--color-text-2)] mb-1">
+                  Motor clássico (modo avulso)
+                </label>
+                <select
+                  value={masterConfig.strategy}
+                  onChange={e => setMasterConfig(prev => ({ ...prev, strategy: e.target.value }))}
+                  className="w-full h-10 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text)] outline-none"
+                >
+                  <option value="warrior">Warrior Trading (Ross Cameron)</option>
+                  <option value="stormer">123 Stormer (Alexandre Wolwacz)</option>
+                  <option value="both">Ambas (Warrior + Stormer)</option>
+                </select>
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-medium text-[var(--color-text-2)] mb-1">
@@ -605,7 +632,7 @@ export default function BotsPage() {
               </p>
             </div>
 
-            {!masterConfig.activePlan && (
+            {masterConfig.activePlans.length === 0 && (
               <div className="grid grid-cols-2 gap-3">
                 <Input
                   label="Símbolo Ativo"

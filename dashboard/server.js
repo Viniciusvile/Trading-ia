@@ -1443,7 +1443,7 @@ app.patch('/api/bot/watchlist', (req, res) => {
 
 app.patch('/api/bot/config', authenticateToken, async (req, res) => {
   try {
-    const { symbol, timeframe, strategy, portfolio, maxTrade, trailingEnabled, trailingMult, paperTrading, activePlan, dailyMaxLoss, loopInterval } = req.body || {};
+    const { symbol, timeframe, strategy, portfolio, maxTrade, trailingEnabled, trailingMult, paperTrading, activePlan, activePlans, dailyMaxLoss, loopInterval } = req.body || {};
     const allowedLoop = ['10m','15m','20m','30m','45m','1h','4h'];
     if (loopInterval !== undefined && !allowedLoop.includes(loopInterval)) {
       return res.status(400).json({ success: false, error: 'Intervalo inválido (use 10m–1h)' });
@@ -1456,10 +1456,14 @@ app.patch('/api/bot/config', authenticateToken, async (req, res) => {
     if (timeframe && !allowedTf.includes(timeframe)) return res.status(400).json({ success: false, error: 'Timeframe inválido' });
     if (strategy && !allowedStrat.includes(strategy)) return res.status(400).json({ success: false, error: 'Estratégia inválida' });
 
-    // O plano ativo é PER-USUÁRIO (vive no banco). Multi-estratégia: passar
-    // um nome GARANTE que ele está ativo sem desativar os demais (gerencie
-    // as outras na página Estratégias); null desativa todas (modo avulso).
-    if (activePlan !== undefined) {
+    // Planos ativos são PER-USUÁRIO (vivem no banco). Multi-estratégia:
+    // - activePlans (array) define o CONJUNTO exato de estratégias ativas
+    //   (lista vazia = nenhuma = modo avulso) e tem prioridade;
+    // - activePlan (legado, nome único) garante aquele ativo sem desativar
+    //   os demais; null desativa todas.
+    if (Array.isArray(activePlans)) {
+      await db.setActiveStrategies(req.user.id, activePlans);
+    } else if (activePlan !== undefined) {
       if (activePlan) await db.setStrategyActive(req.user.id, activePlan, true);
       else await db.setActiveStrategy(req.user.id, null);
     }
@@ -1537,9 +1541,9 @@ app.patch('/api/bot/config', authenticateToken, async (req, res) => {
       }
     }
 
-    // Se quem editou é o dono da conta do bot, reflete group_plans/active_plan
-    // do banco no rules.json para o MasterBot real operar a estratégia certa.
-    if (activePlan !== undefined && await isOwnerUser(req.user.id)) {
+    // Se quem editou é o dono da conta do bot, reflete group_plans/active_plan(s)
+    // do banco no rules.json para o MasterBot real operar as estratégias certas.
+    if ((activePlan !== undefined || Array.isArray(activePlans)) && await isOwnerUser(req.user.id)) {
       await syncRulesFromOwner(req.user.id);
     }
 
