@@ -1,12 +1,27 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 import { Bot, Pause, Play, AlertTriangle, FileText, Settings, Zap } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardHeader, Button, Badge, Stat, Tooltip, Modal, Input } from "@/components/ui";
+import { AnimatedNumber, SymbolIcon, PillTabs } from "@/components/fx";
 import { fmtUSD } from "@/lib/format";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
+
+// Traduções legíveis para sinais/motivos técnicos do histórico de decisões
+const REASON_LABELS: Record<string, string> = {
+  stop_loss: "Stop Loss atingido",
+  timeout: "Tempo esgotado",
+  binance_oco_filled: "Alvo atingido (OCO)",
+  take_profit: "Alvo atingido",
+  manual: "Fechamento manual",
+  trailing_stop: "Trailing stop",
+  "turbo-reversion-bottom": "Reversão no fundo (Turbo)",
+  "micro-dip": "Queda curta (Micro Dip)",
+};
+const labelFor = (key?: string) => (key ? REASON_LABELS[key] ?? key.replace(/[-_]/g, " ") : "");
 
 interface BotData {
   id: string;
@@ -55,6 +70,7 @@ export default function BotsPage() {
 
   const [emergencyOpen, setEmergencyOpen] = useState(false);
   const [isEmergencyLoading, setIsEmergencyLoading] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState<"all" | "buys" | "sells" | "scans">("all");
 
   // States for interactive actions
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
@@ -375,130 +391,238 @@ export default function BotsPage() {
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {bots.map((bot) => {
+        {bots.map((bot, botIdx) => {
           const isOnline = bot.status === "online";
           const isLoading = !!loadingMap[bot.id];
+          const botSymbols = bot.symbol.split(",").map((s) => s.trim()).filter(Boolean);
+          // Última decisão deste bot no histórico (contexto vivo no card)
+          const lastDecision = decisionHistory.find((d: any) =>
+            d.kind === "master" ? bot.id !== "micro-scalper" : bot.id === "micro-scalper"
+          );
 
           return (
-            <Card key={bot.id} padding="lg" interactive>
-              <CardHeader
-                icon={<Bot size={18} className="text-[var(--color-brand-500)]" />}
-                title={bot.name}
-                subtitle={bot.description}
-                action={
-                  <Badge tone={bot.status === "online" ? "up" : bot.status === "paused" ? "warn" : "neutral"} dot>
-                    {bot.status === "online" ? "Rodando" : bot.status === "paused" ? "Pausado" : "Desligado"}
-                  </Badge>
-                }
-              />
-              <div className="grid grid-cols-2 gap-3 my-4">
-                <Stat label="P&L 24h" value={fmtUSD(bot.pnl24h)} size="sm" />
-                <Stat label="Trades 24h" value={String(bot.trades24h)} size="sm" />
-              </div>
-              <div className="space-y-1.5 text-xs">
-                <Row label="Estratégia" value={bot.strategy} />
-                <Row label="Símbolo" value={bot.symbol} />
-              </div>
-              <div className="flex gap-2 mt-4 pt-4 border-t border-[var(--color-border)]">
-                {isOnline ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    leftIcon={<Pause size={14} />}
-                    fullWidth
-                    loading={isLoading}
-                    onClick={() => handleToggleBot(bot.id, bot.status)}
-                  >
-                    Pausar
-                  </Button>
-                ) : (
-                  <Button
-                    variant="success"
-                    size="sm"
-                    leftIcon={<Play size={14} />}
-                    fullWidth
-                    loading={isLoading}
-                    onClick={() => handleToggleBot(bot.id, bot.status)}
-                  >
-                    Ligar
-                  </Button>
-                )}
-                <Tooltip content="Configurações do bot">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label="Configurar"
-                    onClick={() => handleOpenConfig(bot.id)}
-                  >
-                    <Settings size={14} />
-                  </Button>
-                </Tooltip>
-                <Tooltip content="Ver log de execução">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label="Logs"
-                    onClick={() => handleOpenLogs(bot.id)}
-                  >
-                    <FileText size={14} />
-                  </Button>
-                </Tooltip>
-              </div>
-            </Card>
+            <motion.div
+              key={bot.id}
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: botIdx * 0.07, duration: 0.3, ease: "easeOut" }}
+            >
+              <Card padding="lg" className={`h-full flex flex-col ${isOnline ? "border-[var(--color-up-500)]/25" : ""}`}>
+                <CardHeader
+                  icon={<Bot size={18} className={isOnline ? "text-[var(--color-up-300)]" : "text-[var(--color-muted)]"} />}
+                  title={bot.name}
+                  subtitle={bot.description}
+                  action={
+                    <span className="inline-flex items-center gap-1.5 text-[11px] font-medium">
+                      <span className="relative flex h-2 w-2">
+                        {isOnline && (
+                          <motion.span
+                            className="absolute inline-flex h-full w-full rounded-full bg-[var(--color-up-500)]"
+                            animate={{ scale: [1, 2.2], opacity: [0.6, 0] }}
+                            transition={{ duration: 1.6, repeat: Infinity, ease: "easeOut" }}
+                          />
+                        )}
+                        <span className={`relative inline-flex h-2 w-2 rounded-full ${
+                          isOnline ? "bg-[var(--color-up-500)]" : bot.status === "paused" ? "bg-[var(--color-warn-500)]" : "bg-[var(--color-muted-2)]"
+                        }`} />
+                      </span>
+                      <span className={isOnline ? "text-up" : bot.status === "paused" ? "text-warn" : "text-muted"}>
+                        {isOnline ? "Rodando" : bot.status === "paused" ? "Pausado" : "Desligado"}
+                      </span>
+                    </span>
+                  }
+                />
+                <div className="grid grid-cols-2 gap-3 my-4">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] uppercase tracking-[0.08em] font-semibold text-muted">P&L 24h</span>
+                    <AnimatedNumber
+                      value={bot.pnl24h}
+                      format={(v) => `${v > 0 ? "+" : ""}${fmtUSD(v)}`}
+                      className={`text-xl font-bold tabular-nums tracking-tight ${
+                        bot.pnl24h > 0 ? "text-up" : bot.pnl24h < 0 ? "text-down" : "text-[var(--color-text)]"
+                      }`}
+                    />
+                  </div>
+                  <Stat label="Trades 24h" value={String(bot.trades24h)} size="sm" />
+                </div>
+                <div className="space-y-2 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted">Estratégia</span>
+                    <span className="text-[var(--color-text)] font-medium truncate">{bot.strategy}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted">Ativos</span>
+                    <span className="flex items-center -space-x-1.5">
+                      {botSymbols.slice(0, 5).map((sym) => (
+                        <SymbolIcon key={sym} symbol={sym} size={20} />
+                      ))}
+                      {botSymbols.length > 5 && (
+                        <span className="pl-2.5 text-[10px] text-muted">+{botSymbols.length - 5}</span>
+                      )}
+                    </span>
+                  </div>
+                  {lastDecision && (
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <span className="text-muted">Última ação</span>
+                      <span className="text-[var(--color-text-2)] text-[11px] truncate">
+                        {(lastDecision as any).kind === "master"
+                          ? `${(lastDecision as any).signal === "NEUTRO" ? "varredura sem sinal" : (lastDecision as any).signal} · ${(lastDecision as any).symbol}`
+                          : `${(lastDecision as any).event === "entry" ? "compra" : "venda"} · ${(lastDecision as any).symbol}`}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2 mt-4 pt-4 border-t border-[var(--color-border)] mt-auto">
+                  {isOnline ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      leftIcon={<Pause size={14} />}
+                      fullWidth
+                      loading={isLoading}
+                      onClick={() => handleToggleBot(bot.id, bot.status)}
+                    >
+                      Pausar
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="success"
+                      size="sm"
+                      leftIcon={<Play size={14} />}
+                      fullWidth
+                      loading={isLoading}
+                      onClick={() => handleToggleBot(bot.id, bot.status)}
+                    >
+                      Ligar
+                    </Button>
+                  )}
+                  <Tooltip content="Configurações do bot">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label="Configurar"
+                      onClick={() => handleOpenConfig(bot.id)}
+                    >
+                      <Settings size={14} />
+                    </Button>
+                  </Tooltip>
+                  <Tooltip content="Ver log de execução">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label="Logs"
+                      onClick={() => handleOpenLogs(bot.id)}
+                    >
+                      <FileText size={14} />
+                    </Button>
+                  </Tooltip>
+                </div>
+              </Card>
+            </motion.div>
           );
         })}
       </div>
 
       <Card padding="lg">
-        <CardHeader
-          icon={<Zap size={18} className="text-[var(--color-warn-500)]" />}
-          title="Histórico de decisões"
-          subtitle="Cada ciclo do bot e o motivo das ações"
-        />
-        {decisionHistory.length > 0 ? (
-          <div className="space-y-2 mt-4">
-            {decisionHistory.map((item, idx) => (
-              item.kind === "master" ? (
-                <div key={idx} className="flex justify-between items-center text-xs p-2.5 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)]">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Badge tone={item.signal === "NEUTRO" ? "neutral" : item.signal === "SEM SALDO" ? "down" : "up"}>
-                      {item.signal === "NEUTRO" ? "SEM SINAL" : item.signal}
-                    </Badge>
-                    <span className="font-semibold text-[var(--color-text)]">{item.symbol}</span>
-                    <span className="text-muted">{item.timeframe}{item.strategy ? ` · ${item.strategy}` : ""}</span>
-                  </div>
-                  <div className="text-right">
-                    {item.price != null && <span className="text-[var(--color-text)] mr-3">{fmtUSD(item.price)}</span>}
-                    <span className="text-muted text-[10px]">
-                      {item.time ? new Date(item.time).toLocaleTimeString("pt-BR") : ""} · MasterBot
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <div key={idx} className="flex justify-between items-center text-xs p-2.5 rounded border border-[var(--color-border)] bg-[var(--color-surface-2)]">
-                  <div className="flex items-center gap-2">
-                    <Badge tone={item.event === "entry" ? "brand" : item.pnlPct > 0 ? "up" : "down"}>
-                      {item.event === "entry" ? "COMPRA" : "VENDA"}
-                    </Badge>
-                    <span className="font-semibold text-[var(--color-text)]">{item.symbol}</span>
-                    <span className="text-muted">| {item.event === "entry" ? `Sinal: ${item.signal}` : `Motivo: ${item.reason}`}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-muted mr-3">{new Date(item.t).toLocaleTimeString()}</span>
-                    <span className={item.event === "exit" ? (item.pnlPct > 0 ? "text-[var(--color-up-600)] font-bold" : "text-[var(--color-down-600)] font-bold") : "text-[var(--color-text)]"}>
-                      {item.event === "entry" ? fmtUSD(item.entryPrice) : `${item.pnlPct > 0 ? "+" : ""}${(item.pnlPct * 100).toFixed(2)}%`}
-                    </span>
-                  </div>
-                </div>
-              )
-            ))}
-          </div>
-        ) : (
-          <div className="text-xs text-muted text-center py-10">
-            Nenhuma decisão registrada ainda nesta sessão. Quando seus bots começarem a operar,
-            o histórico aparecerá aqui.
-          </div>
-        )}
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <CardHeader
+            icon={<Zap size={18} className="text-[var(--color-warn-500)]" />}
+            title="Histórico de decisões"
+            subtitle="Cada ciclo do bot e o motivo das ações"
+            className="mb-0"
+          />
+          <PillTabs
+            options={[
+              { value: "all", label: "Tudo" },
+              { value: "buys", label: "Compras" },
+              { value: "sells", label: "Vendas" },
+              { value: "scans", label: "Varreduras" },
+            ]}
+            value={historyFilter}
+            onChange={(v) => setHistoryFilter(v as typeof historyFilter)}
+          />
+        </div>
+        {(() => {
+          const filtered = decisionHistory.filter((item: any) => {
+            if (historyFilter === "all") return true;
+            if (historyFilter === "scans") return item.kind === "master";
+            if (item.kind === "master") return false;
+            return historyFilter === "buys" ? item.event === "entry" : item.event === "exit";
+          });
+          if (filtered.length === 0) {
+            return (
+              <div className="text-xs text-muted text-center py-10">
+                {decisionHistory.length === 0
+                  ? "Nenhuma decisão registrada ainda nesta sessão. Quando seus bots começarem a operar, o histórico aparecerá aqui."
+                  : "Nada nesse filtro por enquanto."}
+              </div>
+            );
+          }
+          return (
+            <div className="mt-4 divide-y divide-[var(--color-border)]">
+              {filtered.map((item: any, idx: number) => {
+                const isMaster = item.kind === "master";
+                const isEntry = !isMaster && item.event === "entry";
+                const isWin = !isMaster && !isEntry && item.pnlPct > 0;
+                return (
+                  <motion.div
+                    key={idx}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: Math.min(idx * 0.04, 0.4), duration: 0.25, ease: "easeOut" }}
+                    className="flex items-center gap-3 py-3 text-xs"
+                  >
+                    <SymbolIcon symbol={item.symbol} size={30} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {isMaster ? (
+                          <Badge tone={item.signal === "NEUTRO" ? "neutral" : item.signal === "SEM SALDO" ? "down" : "up"} size="sm">
+                            {item.signal === "NEUTRO" ? "SEM SINAL" : item.signal}
+                          </Badge>
+                        ) : (
+                          <Badge tone={isEntry ? "brand" : isWin ? "up" : "down"} size="sm">
+                            {isEntry ? "COMPRA" : "VENDA"}
+                          </Badge>
+                        )}
+                        <span className="font-semibold text-sm text-[var(--color-text)]">
+                          {String(item.symbol || "").replace("USDT", "")}
+                        </span>
+                        <span className="text-[10px] text-muted">{isMaster ? "MasterBot" : "Micro Scalper"}</span>
+                      </div>
+                      <div className="text-muted mt-0.5 truncate">
+                        {isMaster
+                          ? `${item.timeframe ?? ""}${item.strategy ? ` · ${labelFor(item.strategy)}` : ""}`
+                          : isEntry
+                            ? `Sinal: ${labelFor(item.signal)}`
+                            : `Motivo: ${labelFor(item.reason)}`}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className={
+                        isMaster
+                          ? "text-[var(--color-text)] font-medium tabular-nums"
+                          : isEntry
+                            ? "text-[var(--color-text)] font-medium tabular-nums"
+                            : `font-bold tabular-nums ${isWin ? "text-up" : "text-down"}`
+                      }>
+                        {isMaster
+                          ? (item.price != null ? fmtUSD(item.price) : "—")
+                          : isEntry
+                            ? fmtUSD(item.entryPrice)
+                            : `${item.pnlPct > 0 ? "+" : ""}${(item.pnlPct * 100).toFixed(2)}%`}
+                      </div>
+                      <div className="text-[10px] text-muted mt-0.5">
+                        {isMaster
+                          ? (item.time ? new Date(item.time).toLocaleTimeString("pt-BR") : "")
+                          : new Date(item.t).toLocaleTimeString("pt-BR")}
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </Card>
 
       {/* Emergency Sell Modal */}

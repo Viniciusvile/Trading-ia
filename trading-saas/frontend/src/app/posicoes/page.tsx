@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Wallet, History, Trash2, Loader2, ArrowUpRight, ArrowDownRight, RefreshCw, Calendar, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Info } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardHeader, EmptyState, Badge, Stat, Button, Modal } from "@/components/ui";
-import { SymbolIcon } from "@/components/fx";
+import { SymbolIcon, RangeBar, AnimatedNumber } from "@/components/fx";
 import { fmtUSD } from "@/lib/format";
 import { api } from "@/lib/api";
 
@@ -277,25 +277,29 @@ export default function PosicoesPage() {
               <Stat label="Posições abertas" value={String(totalOpen)} size="sm" />
             </Card>
             <Card padding="md">
-              <Stat 
-                label="P&L não realizado" 
+              <Stat
+                label="P&L não realizado"
                 value={
-                  <span className={totalUnrealizedPnL > 0 ? "text-up" : totalUnrealizedPnL < 0 ? "text-down" : ""}>
-                    {totalUnrealizedPnL > 0 ? "+" : ""}{fmtUSD(totalUnrealizedPnL)}
-                  </span>
-                } 
-                size="sm" 
+                  <AnimatedNumber
+                    value={totalUnrealizedPnL}
+                    format={(v) => `${v > 0 ? "+" : ""}${fmtUSD(v)}`}
+                    className={totalUnrealizedPnL > 0 ? "text-up" : totalUnrealizedPnL < 0 ? "text-down" : ""}
+                  />
+                }
+                size="sm"
               />
             </Card>
             <Card padding="md">
-              <Stat 
-                label="P&L realizado" 
+              <Stat
+                label="P&L realizado"
                 value={
-                  <span className={totalRealizedPnL > 0 ? "text-up" : totalRealizedPnL < 0 ? "text-down" : ""}>
-                    {totalRealizedPnL > 0 ? "+" : ""}{fmtUSD(totalRealizedPnL)}
-                  </span>
-                } 
-                size="sm" 
+                  <AnimatedNumber
+                    value={totalRealizedPnL}
+                    format={(v) => `${v > 0 ? "+" : ""}${fmtUSD(v)}`}
+                    className={totalRealizedPnL > 0 ? "text-up" : totalRealizedPnL < 0 ? "text-down" : ""}
+                  />
+                }
+                size="sm"
               />
             </Card>
             <Card padding="md">
@@ -333,8 +337,7 @@ export default function PosicoesPage() {
                       <th className="pb-3 font-medium px-4">Preço Atual</th>
                       <th className="pb-3 font-medium px-4">Quantidade</th>
                       <th className="pb-3 font-medium px-4">P&L live</th>
-                      <th className="pb-3 font-medium px-4">Stop Loss</th>
-                      <th className="pb-3 font-medium px-4">Take Profit</th>
+                      <th className="pb-3 font-medium px-4">Stop → Alvo</th>
                       <th className="pb-3 font-medium text-right pl-4">Ação</th>
                     </tr>
                   </thead>
@@ -376,8 +379,20 @@ export default function PosicoesPage() {
                               {isProfit ? "+" : ""}{pos.pnlPct.toFixed(2)}%
                             </div>
                           </td>
-                          <td className="py-4 px-4 font-mono text-down text-xs">{pos.stopPrice ? fmtUSD(pos.stopPrice) : "-"}</td>
-                          <td className="py-4 px-4 font-mono text-up text-xs">{pos.takeProfitPrice ? fmtUSD(pos.takeProfitPrice) : "-"}</td>
+                          <td className="py-4 px-4">
+                            {pos.stopPrice && pos.takeProfitPrice ? (
+                              <RangeBar
+                                stop={pos.stopPrice}
+                                tp={pos.takeProfitPrice}
+                                entry={pos.entryPrice}
+                                current={pos.currentPrice}
+                                format={fmtUSD}
+                                className="min-w-[150px]"
+                              />
+                            ) : (
+                              <span className="text-xs text-muted">—</span>
+                            )}
+                          </td>
                           <td className="py-4 pl-4 text-right">
                             <Button
                               variant="danger"
