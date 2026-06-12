@@ -61,6 +61,16 @@ export interface BacktestTrade {
   timeframe?: string;
 }
 
+export interface SummaryTrade {
+  symbol: string;
+  side: string;
+  pnl: number;
+  openedAt: string;
+  closedAt: string | null;
+  status: string;
+  strategy: string | null;
+}
+
 export interface AdaptiveParams {
   version: number;
   strategy: string;
@@ -277,6 +287,9 @@ export const api = {
       totalTrades30d: number;
       openPositions: number;
       recentActivity: { time: string; kind: "open" | "win" | "loss"; symbol: string; title: string }[];
+      todayTrades?: SummaryTrade[];
+      todayOpened?: SummaryTrade[];
+      stats30d?: { wins: number; losses: number; totalPnl: number; bestPnl: number; worstPnl: number } | null;
     }>("/dashboard/summary", undefined, {
       success: false,
       pnlToday: 0,

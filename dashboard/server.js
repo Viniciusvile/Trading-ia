@@ -2721,6 +2721,32 @@ app.get('/api/dashboard/summary', authenticateToken, async (req, res) => {
     }
     events.sort((a, b) => new Date(b.time) - new Date(a.time));
 
+    // Detalhamento para os modais dos cards do painel
+    const toTrade = (p) => ({
+      symbol: p.symbol,
+      side: p.side || 'LONG',
+      pnl: parseFloat(p.pnl) || 0,
+      openedAt: p.openedAt,
+      closedAt: p.closedAt || null,
+      status: p.status,
+      strategy: p.plan || p.strategy || null,
+    });
+    const todayTrades = closedToday
+      .map(toTrade)
+      .sort((a, b) => new Date(b.closedAt) - new Date(a.closedAt));
+    const todayOpened = positions
+      .filter(p => dayKey(p.openedAt) === todayUtc)
+      .map(toTrade)
+      .sort((a, b) => new Date(b.openedAt) - new Date(a.openedAt));
+    const pnls30 = closed30.map(p => parseFloat(p.pnl) || 0);
+    const stats30d = closed30.length ? {
+      wins: wins30,
+      losses: closed30.filter(p => parseFloat(p.pnl) < 0).length,
+      totalPnl: pnls30.reduce((a, b) => a + b, 0),
+      bestPnl: Math.max(...pnls30),
+      worstPnl: Math.min(...pnls30),
+    } : null;
+
     res.json({
       success: true,
       pnlToday,
@@ -2729,6 +2755,9 @@ app.get('/api/dashboard/summary', authenticateToken, async (req, res) => {
       totalTrades30d: closed30.length,
       openPositions,
       recentActivity: events.slice(0, 6),
+      todayTrades,
+      todayOpened,
+      stats30d,
     });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });

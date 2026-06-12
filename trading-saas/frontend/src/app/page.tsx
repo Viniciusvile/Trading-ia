@@ -14,9 +14,11 @@ import {
   Activity,
   Sparkles,
 } from "lucide-react";
-import { Card, CardHeader, Stat, Badge, Button, Tooltip, Skeleton } from "@/components/ui";
+import { useRouter } from "next/navigation";
+import { Card, CardHeader, Stat, Badge, Button, Tooltip, Skeleton, Modal } from "@/components/ui";
 import { fmtUSD } from "@/lib/format";
 import { api } from "@/lib/api";
+import type { SummaryTrade } from "@/lib/api";
 
 const QUICK_ACTIONS = [
   { icon: ShoppingCart, label: "Comprar", color: "var(--color-up-500)", href: "/mercado" },
@@ -55,6 +57,11 @@ export default function InicioPage() {
   const [trades30d, setTrades30d] = useState(0);
   const [openPositions, setOpenPositions] = useState(0);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [todayTrades, setTodayTrades] = useState<SummaryTrade[]>([]);
+  const [todayOpened, setTodayOpened] = useState<SummaryTrade[]>([]);
+  const [stats30d, setStats30d] = useState<{ wins: number; losses: number; totalPnl: number; bestPnl: number; worstPnl: number } | null>(null);
+  const [metricModal, setMetricModal] = useState<"pnl" | "ops" | "winrate" | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     let active = true;
@@ -94,6 +101,9 @@ export default function InicioPage() {
           setTrades30d(summary.totalTrades30d || 0);
           setOpenPositions(summary.openPositions || 0);
           setActivity(summary.recentActivity || []);
+          setTodayTrades(summary.todayTrades || []);
+          setTodayOpened(summary.todayOpened || []);
+          setStats30d(summary.stats30d || null);
         }
       } catch (e) {
         console.error("Erro ao carregar dados do inicio:", e);
@@ -185,26 +195,142 @@ export default function InicioPage() {
         </div>
       </section>
 
-      {/* Cards de métricas resumidas */}
+      {/* Cards de métricas resumidas — clicáveis: abrem o detalhamento */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <Card>
-          <Stat label="P&L hoje" value={loading ? "..." : fmtUSD(pnl24h)} hint="realizado hoje (UTC)" size="sm" />
-        </Card>
-        <Card>
-          <Stat label="Operações" value={loading ? "..." : String(opsToday)} hint="hoje" size="sm" />
-        </Card>
-        <Card>
-          <Stat
-            label="Taxa de acerto"
-            value={loading ? "..." : winRate30d != null ? `${Math.round(winRate30d * 100)}%` : "—"}
-            hint={winRate30d != null ? `${trades30d} trades em 30 dias` : "sem trades em 30 dias"}
-            size="sm"
-          />
-        </Card>
-        <Card>
-          <Stat label="Bots ativos" value={`${activeBotsCount} / 3`} hint="rodando agora" size="sm" />
-        </Card>
+        <button type="button" onClick={() => setMetricModal("pnl")} className="text-left cursor-pointer">
+          <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
+            <Stat label="P&L hoje" value={loading ? "..." : fmtUSD(pnl24h)} hint="realizado hoje (UTC) · clique p/ detalhes" size="sm" />
+          </Card>
+        </button>
+        <button type="button" onClick={() => setMetricModal("ops")} className="text-left cursor-pointer">
+          <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
+            <Stat label="Operações" value={loading ? "..." : String(opsToday)} hint="hoje · clique p/ detalhes" size="sm" />
+          </Card>
+        </button>
+        <button type="button" onClick={() => setMetricModal("winrate")} className="text-left cursor-pointer">
+          <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
+            <Stat
+              label="Taxa de acerto"
+              value={loading ? "..." : winRate30d != null ? `${Math.round(winRate30d * 100)}%` : "—"}
+              hint={winRate30d != null ? `${trades30d} trades em 30 dias · clique p/ detalhes` : "sem trades em 30 dias"}
+              size="sm"
+            />
+          </Card>
+        </button>
+        <button type="button" onClick={() => router.push("/bots")} className="text-left cursor-pointer">
+          <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
+            <Stat label="Bots ativos" value={`${activeBotsCount} / 3`} hint="rodando agora · clique p/ gerenciar" size="sm" />
+          </Card>
+        </button>
       </div>
+
+      {/* Modais de detalhamento das métricas */}
+      <Modal
+        open={metricModal === "pnl"}
+        onClose={() => setMetricModal(null)}
+        title="Resultado de hoje (UTC)"
+        description={`${todayTrades.length} operação${todayTrades.length === 1 ? "" : "ões"} fechada${todayTrades.length === 1 ? "" : "s"} hoje · total ${fmtUSD(pnl24h)}`}
+        footer={
+          <Button variant="outline" size="sm" onClick={() => { setMetricModal(null); router.push("/posicoes"); }}>
+            Ver todas as posições <ArrowRight size={13} />
+          </Button>
+        }
+      >
+        {todayTrades.length === 0 ? (
+          <p className="text-xs text-muted py-6 text-center">Nenhuma operação fechada hoje ainda. O P&L do dia soma apenas resultados realizados (posições fechadas).</p>
+        ) : (
+          <ul className="divide-y divide-[var(--color-border)]">
+            {todayTrades.map((t, i) => (
+              <li key={i} className="flex items-center justify-between py-2.5 gap-3">
+                <div className="min-w-0">
+                  <span className="text-sm font-medium text-[var(--color-text)]">{t.symbol}</span>
+                  <span className="text-[11px] text-muted ml-2">{t.strategy || t.side}</span>
+                  <div className="text-[11px] text-muted">{t.closedAt ? new Date(t.closedAt).toLocaleTimeString("pt-BR") : ""}</div>
+                </div>
+                <span className={`text-sm font-semibold tabular-nums ${t.pnl >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"}`}>
+                  {t.pnl >= 0 ? "+" : ""}{fmtUSD(t.pnl)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Modal>
+
+      <Modal
+        open={metricModal === "ops"}
+        onClose={() => setMetricModal(null)}
+        title="Operações de hoje"
+        description={`${todayOpened.length} entrada${todayOpened.length === 1 ? "" : "s"} aberta${todayOpened.length === 1 ? "" : "s"} hoje pelos robôs`}
+        footer={
+          <Button variant="outline" size="sm" onClick={() => { setMetricModal(null); router.push("/posicoes"); }}>
+            Ver todas as posições <ArrowRight size={13} />
+          </Button>
+        }
+      >
+        {todayOpened.length === 0 ? (
+          <p className="text-xs text-muted py-6 text-center">Nenhuma entrada aberta hoje. Os robôs abrem posições quando o mercado dá sinal dentro das regras das estratégias ativas.</p>
+        ) : (
+          <ul className="divide-y divide-[var(--color-border)]">
+            {todayOpened.map((t, i) => (
+              <li key={i} className="flex items-center justify-between py-2.5 gap-3">
+                <div className="min-w-0">
+                  <span className="text-sm font-medium text-[var(--color-text)]">{t.symbol}</span>
+                  <span className="text-[11px] text-muted ml-2">{t.strategy || t.side}</span>
+                  <div className="text-[11px] text-muted">aberta às {new Date(t.openedAt).toLocaleTimeString("pt-BR")}</div>
+                </div>
+                {t.status === "open" ? (
+                  <Badge tone="neutral" dot size="sm">Aberta</Badge>
+                ) : (
+                  <span className={`text-sm font-semibold tabular-nums ${t.pnl >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"}`}>
+                    {t.pnl >= 0 ? "+" : ""}{fmtUSD(t.pnl)}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Modal>
+
+      <Modal
+        open={metricModal === "winrate"}
+        onClose={() => setMetricModal(null)}
+        title="Taxa de acerto — últimos 30 dias"
+        description={winRate30d != null ? `${trades30d} operações fechadas no período` : "Sem operações fechadas no período"}
+        footer={
+          <Button variant="outline" size="sm" onClick={() => { setMetricModal(null); router.push("/posicoes"); }}>
+            Ver histórico completo <ArrowRight size={13} />
+          </Button>
+        }
+      >
+        {!stats30d ? (
+          <p className="text-xs text-muted py-6 text-center">Quando houver operações fechadas nos últimos 30 dias, o detalhamento de vitórias, derrotas e resultado aparece aqui.</p>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="p-3 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] border border-[var(--color-border)] text-center">
+                <div className="text-lg font-bold text-[var(--color-text-up)]">{stats30d.wins}</div>
+                <div className="text-[10px] text-muted uppercase">Vitórias</div>
+              </div>
+              <div className="p-3 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] border border-[var(--color-border)] text-center">
+                <div className="text-lg font-bold text-[var(--color-text-down)]">{stats30d.losses}</div>
+                <div className="text-[10px] text-muted uppercase">Derrotas</div>
+              </div>
+              <div className="p-3 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] border border-[var(--color-border)] text-center">
+                <div className={`text-lg font-bold ${stats30d.totalPnl >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"}`}>{fmtUSD(stats30d.totalPnl)}</div>
+                <div className="text-[10px] text-muted uppercase">Resultado</div>
+              </div>
+            </div>
+            <div className="text-xs text-[var(--color-text-2)] space-y-1">
+              <div className="flex justify-between"><span className="text-muted">Melhor operação</span><span className="font-medium text-[var(--color-text-up)]">+{fmtUSD(stats30d.bestPnl)}</span></div>
+              <div className="flex justify-between"><span className="text-muted">Pior operação</span><span className="font-medium text-[var(--color-text-down)]">{fmtUSD(stats30d.worstPnl)}</span></div>
+              <div className="flex justify-between"><span className="text-muted">Taxa de acerto</span><span className="font-medium">{winRate30d != null ? `${Math.round(winRate30d * 100)}%` : "—"}</span></div>
+            </div>
+            <p className="text-[10px] text-muted">
+              Vitória = operação fechada com lucro. A taxa considera todas as posições fechadas com resultado nos últimos 30 dias, somando todos os robôs.
+            </p>
+          </div>
+        )}
+      </Modal>
 
       <div className="grid lg:grid-cols-3 gap-4">
         {/* Bot ativo agora */}
