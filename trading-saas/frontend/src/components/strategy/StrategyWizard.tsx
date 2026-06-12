@@ -26,36 +26,57 @@ const BASES = [
 const SYMBOL_OPTIONS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "LTCUSDT", "AVAXUSDT"];
 const TF_OPTIONS = ["15m", "1H", "4H", "1D"];
 
+/** Estratégia existente para edição (personalização) — pré-preenche o wizard. */
+export interface StrategyInitial {
+  name: string;
+  description?: string;
+  symbols?: string[];
+  timeframes?: string[];
+  strategy?: string;
+  mode?: string;
+  leverage?: number;
+  sl?: { type?: string; multiplier?: number } | null;
+  tp?: { type?: string; multiplier?: number } | null;
+  filters?: Record<string, number | boolean> | null;
+  winRateTarget?: number | null;
+}
+
 interface Props {
   onClose: () => void;
   onSaved: () => void;
+  initial?: StrategyInitial | null;
 }
 
-export function StrategyWizard({ onClose, onSaved }: Props) {
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+export function StrategyWizard({ onClose, onSaved, initial }: Props) {
+  const isEditing = !!initial;
+  // Edição pula direto para o passo de personalização
+  const [step, setStep] = useState<1 | 2 | 3>(isEditing ? 2 : 1);
 
   // Passo 1
-  const [strategyType, setStrategyType] = useState<"warrior" | "range-v2">("warrior");
+  const [strategyType, setStrategyType] = useState<"warrior" | "range-v2">(
+    initial?.strategy === "range-v2" ? "range-v2" : "warrior"
+  );
 
-  // Passo 2
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [mode, setMode] = useState("spot");
-  const [leverage, setLeverage] = useState(1);
-  const [symbols, setSymbols] = useState<string[]>(["BTCUSDT"]);
-  const [timeframes, setTimeframes] = useState<string[]>(["1H"]);
-  const [slMultiplier, setSlMultiplier] = useState(1.5);
-  const [tpMultiplier, setTpMultiplier] = useState(2.0);
-  const [winRateTarget, setWinRateTarget] = useState(55);
+  // Passo 2 — pré-preenchido na edição
+  const f = initial?.filters || {};
+  const [name, setName] = useState(initial?.name || "");
+  const [description, setDescription] = useState(initial?.description || "");
+  const [mode, setMode] = useState(initial?.mode || "spot");
+  const [leverage, setLeverage] = useState(initial?.leverage || 1);
+  const [symbols, setSymbols] = useState<string[]>(initial?.symbols?.length ? initial.symbols : ["BTCUSDT"]);
+  const [timeframes, setTimeframes] = useState<string[]>(initial?.timeframes?.length ? initial.timeframes : ["1H"]);
+  const [slMultiplier, setSlMultiplier] = useState(initial?.sl?.multiplier ?? 1.5);
+  const [tpMultiplier, setTpMultiplier] = useState(initial?.tp?.multiplier ?? 2.0);
+  const [winRateTarget, setWinRateTarget] = useState(initial?.winRateTarget ?? 55);
   // filtros warrior
-  const [emaTriple, setEmaTriple] = useState(true);
-  const [adxMin, setAdxMin] = useState(20);
-  const [volumeMult, setVolumeMult] = useState(1.3);
+  const [emaTriple, setEmaTriple] = useState(f.ema_triple != null ? !!f.ema_triple : true);
+  const [adxMin, setAdxMin] = useState(Number(f.adx_min ?? 20));
+  const [volumeMult, setVolumeMult] = useState(Number(f.volume_mult ?? 1.3));
   // filtros range
-  const [adxMax, setAdxMax] = useState(28);
-  const [choppinessMin, setChoppinessMin] = useState(45);
-  const [rsiLongMax, setRsiLongMax] = useState(42);
-  const [rsiShortMin, setRsiShortMin] = useState(58);
+  const [adxMax, setAdxMax] = useState(Number(f.adx_max ?? 28));
+  const [choppinessMin, setChoppinessMin] = useState(Number(f.choppiness_min ?? 45));
+  const [rsiLongMax, setRsiLongMax] = useState(Number(f.rsi_long_max ?? 42));
+  const [rsiShortMin, setRsiShortMin] = useState(Number(f.rsi_short_min ?? 58));
 
   // Passo 3
   const reqIdRef = useRef(0);
@@ -163,7 +184,8 @@ export function StrategyWizard({ onClose, onSaved }: Props) {
 
         {/* Header + progresso */}
         <h3 className="text-base font-semibold text-[var(--color-text)] flex items-center gap-2 mb-1">
-          <Brain className="text-[var(--color-brand-500)]" size={20} /> Nova Estratégia Personalizada
+          <Brain className="text-[var(--color-brand-500)]" size={20} />
+          {isEditing ? `Personalizar: ${initial!.name}` : "Nova Estratégia Personalizada"}
         </h3>
         <div className="flex items-center gap-2 text-[11px] text-muted mb-6 flex-wrap">
           {["Estratégia base", "Personalizar", "Análise de mercado"].map((label, i) => (
@@ -216,7 +238,8 @@ export function StrategyWizard({ onClose, onSaved }: Props) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label className="text-xs font-medium text-[var(--color-text)]">Nome da Estratégia</label>
-                <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Minha_Tendencia_BTC" className={inputCls} />
+                <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Minha_Tendencia_BTC" disabled={isEditing} className={`${inputCls} disabled:opacity-60`} />
+                {isEditing && <p className="text-[10px] text-muted">O nome não muda na personalização — as alterações sobrescrevem esta estratégia.</p>}
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-[var(--color-text)]">Descrição</label>
@@ -348,7 +371,7 @@ export function StrategyWizard({ onClose, onSaved }: Props) {
             </div>
 
             <div className="flex justify-between border-t border-[var(--color-border)] pt-4">
-              <Button variant="ghost" onClick={() => setStep(1)}><ChevronLeft size={14} /> Voltar</Button>
+              <Button variant="ghost" onClick={() => setStep(1)}><ChevronLeft size={14} /> {isEditing ? "Trocar estratégia base" : "Voltar"}</Button>
               <Button variant="primary" disabled={!name || comboCount > 6} onClick={() => { setStep(3); runAnalysis(); }}>
                 <FlaskConical size={14} /> Analisar no Mercado
               </Button>

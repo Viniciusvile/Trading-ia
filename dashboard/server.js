@@ -1208,6 +1208,15 @@ app.post('/api/bot/strategies', authenticateToken, async (req, res) => {
     const { name, description, symbols, timeframes, strategy, mode, leverage, sl, tp, filters, winRateTarget, lastBacktest } = req.body;
     if (!name) return res.status(400).json({ success: false, error: 'Nome da estratégia é obrigatório' });
 
+    // Edição (Personalizar) sem nova análise: preserva o último backtest salvo
+    let prevBacktest = null;
+    if (!lastBacktest) {
+      try {
+        const existing = (await db.listStrategies(req.user.id)).find(p => p.name === name);
+        prevBacktest = existing?.lastBacktest || null;
+      } catch {}
+    }
+
     const newPlan = {
       name,
       description: description || `Estratégia personalizada para ${symbols?.join(', ')}`,
@@ -1220,7 +1229,7 @@ app.post('/api/bot/strategies', authenticateToken, async (req, res) => {
       tp: tp || { type: 'atr', multiplier: 2.0 },
       filters: filters || {},
       winRateTarget: winRateTarget != null ? Number(winRateTarget) : null,
-      lastBacktest: lastBacktest || null
+      lastBacktest: lastBacktest || prevBacktest
     };
 
     await db.upsertStrategy(req.user.id, name, newPlan);

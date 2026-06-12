@@ -8,6 +8,7 @@ import {
   Play,
   Square,
   BarChart3,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
@@ -46,6 +47,7 @@ export default function EstrategiasPage() {
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingStrategy, setEditingStrategy] = useState<Strategy | null>(null);
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null);
   const [reanalyzing, setReanalyzing] = useState(false);
@@ -218,6 +220,9 @@ export default function EstrategiasPage() {
                       </>
                     )}
                   </Button>
+                  <Button variant="outline" size="sm" onClick={() => setEditingStrategy(s)}>
+                    <SlidersHorizontal size={14} /> Personalizar
+                  </Button>
                   <Button variant="outline" size="sm" onClick={() => openStats(s)}>
                     <BarChart3 size={14} /> Estatísticas
                   </Button>
@@ -276,6 +281,15 @@ export default function EstrategiasPage() {
       {showCreateModal && (
         <StrategyWizard
           onClose={() => setShowCreateModal(false)}
+          onSaved={fetchStrategies}
+        />
+      )}
+
+      {/* PERSONALIZAR — mesmo wizard, pré-preenchido com a estratégia existente */}
+      {editingStrategy && (
+        <StrategyWizard
+          initial={editingStrategy}
+          onClose={() => setEditingStrategy(null)}
           onSaved={fetchStrategies}
         />
       )}
