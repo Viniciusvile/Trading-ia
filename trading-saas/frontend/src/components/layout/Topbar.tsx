@@ -7,6 +7,7 @@ import { navItems } from "@/config/navigation";
 import { Badge } from "@/components/ui";
 import { fmtUSD } from "@/lib/format";
 import { api } from "@/lib/api";
+import { BalanceChartModal } from "@/components/fx";
 
 export function Topbar() {
   const pathname = usePathname();
@@ -33,6 +34,7 @@ export function Topbar() {
   const [accounts, setAccounts] = useState<{ id: string; name: string; isActive: boolean; isTestnet: boolean }[]>([]);
   const [activeAccount, setActiveAccount] = useState<{ id: string; name: string; isTestnet: boolean } | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isChartOpen, setIsChartOpen] = useState(false);
 
   useEffect(() => {
     const saved = (localStorage.getItem("theme") as "light" | "dark" | null) ?? "dark";
@@ -196,9 +198,11 @@ export function Topbar() {
           )}
         </div>
 
-        <div
-          className="hidden md:flex items-center gap-2 px-4 py-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] text-xs text-muted min-w-[160px]"
-          title={`Spot: ${fmtUSD(balance.spot)} | Futuros: ${fmtUSD(balance.futures)}`}
+        <button
+          type="button"
+          onClick={() => setIsChartOpen(true)}
+          className="hidden md:flex items-center gap-2 px-4 py-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)] text-xs text-muted min-w-[160px] text-left transition cursor-pointer"
+          title={`Spot: ${fmtUSD(balance.spot)} | Futuros: ${fmtUSD(balance.futures)} · Clique para ver a evolução`}
         >
           <div className="flex flex-col">
             <span className="text-[10px] uppercase tracking-wider">Saldo</span>
@@ -209,7 +213,7 @@ export function Topbar() {
           <Badge tone={tone} dot size="sm" className="ml-auto">
             {formattedPercent}
           </Badge>
-        </div>
+        </button>
 
         <button
           type="button"
@@ -253,6 +257,8 @@ export function Topbar() {
           <LogOut size={18} />
         </button>
       </div>
+
+      <BalanceChartModal open={isChartOpen} onClose={() => setIsChartOpen(false)} />
     </header>
   );
 }

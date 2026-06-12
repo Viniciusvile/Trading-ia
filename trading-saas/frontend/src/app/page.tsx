@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Card, CardHeader, Stat, Badge, Button, Tooltip, Modal } from "@/components/ui";
-import { Sparkline, AnimatedNumber, PillTabs, SymbolIcon } from "@/components/fx";
+import { Sparkline, AnimatedNumber, PillTabs, SymbolIcon, BalanceChartModal } from "@/components/fx";
 import { fmtUSD } from "@/lib/format";
 import { api } from "@/lib/api";
 import type { SummaryTrade } from "@/lib/api";
@@ -38,6 +38,7 @@ interface ActivityItem {
 export default function InicioPage() {
   const [balance, setBalance] = useState<{ spot: number; futures: number }>({ spot: 0, futures: 0 });
   const [loading, setLoading] = useState(true);
+  const [isChartOpen, setIsChartOpen] = useState(false);
   const [activeBotsCount, setActiveBotsCount] = useState(0);
   const [pnl24h, setPnl24h] = useState(0);
   const [opsToday, setOpsToday] = useState(0);
@@ -154,13 +155,18 @@ export default function InicioPage() {
                 <CircleHelp size={13} className="text-[var(--color-muted)]" />
               </Tooltip>
             </div>
-            <div className="text-4xl sm:text-5xl font-bold tabular-nums tracking-tight text-[var(--color-text)] mt-3">
+            <button
+              type="button"
+              onClick={() => setIsChartOpen(true)}
+              className="block text-4xl sm:text-5xl font-bold tabular-nums tracking-tight text-[var(--color-text)] mt-3 hover:opacity-80 transition cursor-pointer text-left focus:outline-none"
+              title="Clique para ver o gráfico de evolução"
+            >
               {loading ? (
                 <div className="h-12 w-56 bg-[var(--color-surface-3)] animate-pulse rounded" />
               ) : (
                 <AnimatedNumber value={totalBalance} format={fmtUSD} />
               )}
-            </div>
+            </button>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
               <Badge tone={pnl24h >= 0 ? "up" : "down"} dot>
                 {pnl24h >= 0 ? "+" : ""}{fmtUSD(pnl24h)} hoje
@@ -396,6 +402,7 @@ export default function InicioPage() {
         )}
       </Modal>
 
+      <BalanceChartModal open={isChartOpen} onClose={() => setIsChartOpen(false)} />
     </div>
   );
 }
