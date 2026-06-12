@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Moon, Sun, Search, Bell, ChevronDown, Check, LogOut } from "lucide-react";
+import { Moon, Sun, Search, Bell, ChevronDown, Check, LogOut, TrendingUp } from "lucide-react";
 import { navItems } from "@/config/navigation";
 import { Badge } from "@/components/ui";
 import { fmtUSD } from "@/lib/format";
@@ -17,6 +17,14 @@ export function Topbar() {
     );
 
   const [theme, setTheme] = useState<"light" | "dark">("dark");
+  const [firstName, setFirstName] = useState<string>("");
+
+  useEffect(() => {
+    try {
+      const u = JSON.parse(localStorage.getItem("user") || "null");
+      if (u?.name) setFirstName(String(u.name).split(" ")[0]);
+    } catch {}
+  }, []);
   const [balance, setBalance] = useState<{ spot: number; futures: number }>({ spot: 0, futures: 0 });
   const [loading, setLoading] = useState(true);
 
@@ -101,15 +109,21 @@ export function Topbar() {
   }
 
   return (
-    <header className="sticky top-0 z-20 bg-[var(--color-surface)]/85 backdrop-blur border-b border-[var(--color-border)]">
-      <div className="h-16 flex items-center gap-3 px-4 sm:px-6">
+    <header className="sticky top-0 z-20 bg-[var(--color-bg)]/70 backdrop-blur-xl">
+      <div className="max-w-6xl mx-auto h-16 flex items-center gap-3 px-4 sm:px-6">
         <div className="min-w-0 flex-1 flex items-center gap-4">
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-muted">
-              {current?.description ?? "Painel de operações"}
+          {/* Logo + saudação (estilo "Hello, Sam" do Fey) */}
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-text)] text-[var(--color-bg)]">
+              <TrendingUp size={15} strokeWidth={2.5} />
             </div>
-            <div className="text-base font-semibold text-[var(--color-text)] truncate">
-              {current?.label ?? "Dashboard"}
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-[var(--color-text)] truncate">
+                {firstName ? `Olá, ${firstName}` : current?.label ?? "Trading SaaS"}
+              </div>
+              <div className="text-[10px] text-muted truncate capitalize">
+                {new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" })}
+              </div>
             </div>
           </div>
 
@@ -119,7 +133,7 @@ export function Topbar() {
               <button
                 type="button"
                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)] text-xs text-[var(--color-text)] font-medium transition cursor-pointer"
+                className="flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)] text-xs text-[var(--color-text)] font-medium transition cursor-pointer"
               >
                 <span className="max-w-[100px] sm:max-w-[150px] truncate">{activeAccount.name}</span>
                 {activeAccount.isTestnet && (
@@ -166,7 +180,7 @@ export function Topbar() {
         </div>
 
         <div
-          className="hidden md:flex items-center gap-2 px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--color-surface-3)] text-xs text-muted min-w-[160px]"
+          className="hidden md:flex items-center gap-2 px-4 py-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] text-xs text-muted min-w-[160px]"
           title={`Spot: ${fmtUSD(balance.spot)} | Futuros: ${fmtUSD(balance.futures)}`}
         >
           <div className="flex flex-col">
@@ -183,7 +197,7 @@ export function Topbar() {
         <button
           type="button"
           aria-label="Buscar"
-          className="hidden sm:flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] transition"
+          className="hidden sm:flex h-9 w-9 items-center justify-center rounded-full text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] transition"
         >
           <Search size={18} />
         </button>
@@ -215,7 +229,7 @@ export function Topbar() {
           }}
           aria-label="Sair"
           title="Sair"
-          className="h-9 w-9 flex items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-down-500)] hover:bg-[var(--color-down-50)] dark:hover:bg-[var(--color-down-500)]/10 transition"
+          className="h-9 w-9 flex items-center justify-center rounded-full text-[var(--color-muted)] hover:text-[var(--color-down-300)] hover:bg-[var(--color-down-50)] transition"
         >
           <LogOut size={18} />
         </button>
