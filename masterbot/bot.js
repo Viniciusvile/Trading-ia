@@ -221,21 +221,30 @@ function calcVWAP(candles, nowMs = Date.now()) {
 
 // ─── Group Plans ─────────────────────────────────────────────────────────────
 
+// Nomes dos planos ativos: suporta múltiplos via active_plans (array) com
+// retrocompatibilidade para o active_plan único antigo.
+export function getActivePlanNames(rules) {
+  if (Array.isArray(rules?.active_plans) && rules.active_plans.length) return rules.active_plans;
+  return rules?.active_plan ? [rules.active_plan] : [];
+}
+
 function getPlanForSymbol(symbol, rules, runMode = 'master') {
   const plans = rules.group_plans || [];
 
-  // Se o usuário fixou um plano ativo (active_plan), respeitamos essa escolha
-  // e retornamos APENAS esse plano caso o símbolo esteja contemplado por ele.
-  // Isso evita que planos de Futuros vencem por estarem primeiro no array.
-  if (rules.active_plan) {
-    const fixed = plans.find(p => p.name === rules.active_plan);
-    if (fixed && fixed.symbols && fixed.symbols.includes(symbol)) {
+  // Se o usuário fixou planos ativos (active_plans/active_plan), respeitamos
+  // essa escolha: o símbolo só opera se estiver coberto por um deles. Quando
+  // mais de um plano ativo cobre o mesmo símbolo, vale o primeiro da lista.
+  const activeNames = getActivePlanNames(rules);
+  if (activeNames.length) {
+    for (const name of activeNames) {
+      const fixed = plans.find(p => p.name === name);
+      if (!fixed || !fixed.symbols || !fixed.symbols.includes(symbol)) continue;
       // Em runMode 'master' rejeita planos de Futuros mesmo quando fixados
-      if (runMode !== 'futures' && fixed.mode === 'futures') return null;
-      if (runMode === 'futures' && fixed.mode !== 'futures') return null;
+      if (runMode !== 'futures' && fixed.mode === 'futures') continue;
+      if (runMode === 'futures' && fixed.mode !== 'futures') continue;
       return fixed;
     }
-    // Se o active_plan não cobre o símbolo, o símbolo é ignorado nesse run
+    // Se nenhum plano ativo cobre o símbolo, o símbolo é ignorado nesse run
     return null;
   }
 
@@ -1573,15 +1582,18 @@ async function runSymbolCycle(symbol, timeframe, rulesInput, runMode = 'master')
   let rules = rulesInput;
   try { rules = JSON.parse(readFileSync(RULES_FILE, 'utf8')); } catch(e) {}
 
-  // Plano aplicado quando: active_plan definido OU Modo Auto ativo
+  // Plano aplicado quando: há plano(s) ativo(s) OU Modo Auto ativo
   const isAutoMode = rules?.strategy?.key === 'auto';
-  const plan = (rules?.active_plan || isAutoMode) ? getPlanForSymbol(symbol, rules, runMode) : null;
+  const plan = (getActivePlanNames(rules).length || isAutoMode) ? getPlanForSymbol(symbol, rules, runMode) : null;
 
-  if (isAutoMode && !plan && !_missingPlanWarned.has(symbol)) {
-    console.log(`⚠️  [${symbol}] Modo Auto sem plano — símbolo será ignorado. Adicione-o a um group_plan ou remova da watchlist.`);
+  // Com planos ativos fixados, símbolo sem plano que o cubra NÃO opera no
+  // modo avulso — é ignorado (mesma proteção do Modo Auto).
+  const requiresPlan = isAutoMode || getActivePlanNames(rules).length > 0;
+  if (requiresPlan && !plan && !_missingPlanWarned.has(symbol)) {
+    console.log(`⚠️  [${symbol}] Sem plano ativo cobrindo o símbolo — será ignorado. Adicione-o a uma estratégia ativa ou remova da watchlist.`);
     _missingPlanWarned.add(symbol);
   }
-  if (isAutoMode && !plan) {
+  if (requiresPlan && !plan) {
     // Retorna um objeto Neutro com aviso explícito de bloqueio para manter o ativo visível no painel
     const dummyResults = [{ label: "Plano associado ao ativo", pass: false, required: "Sim", actual: "Não" }];
     return {
@@ -1635,7 +1647,7 @@ async function runSymbolCycle(symbol, timeframe, rulesInput, runMode = 'master')
   // O seletor global (BOT_STRATEGY / rules.strategy.key) vale só no modo avulso
   // ou no Modo Auto, que usa a estratégia do plano do símbolo quando existir.
   const rawStratKey = rules?.strategy?.key || process.env.BOT_STRATEGY || "warrior";
-  const isActivePlan = !!(plan && rules?.active_plan && rules.active_plan === plan.name);
+  const isActivePlan = !!(plan && getActivePlanNames(rules).includes(plan.name));
   const stratKey = isActivePlan
     ? (plan.strategy || "warrior")
     : (rawStratKey === "auto" ? (plan?.strategy || "warrior") : rawStratKey);
@@ -2027,12 +2039,15 @@ async function run(runMode = 'manual') {
     let watchlistToUse = [];
     if (isLoop) {
       const refreshedRules = JSON.parse(readFileSync(RULES_FILE, "utf8"));
-      const activePlanName = refreshedRules.active_plan || null;
-      const activePlan = activePlanName
-        ? (refreshedRules.group_plans || []).find(p => p.name === activePlanName)
-        : null;
-      watchlistToUse = (activePlan?.symbols?.length) ? activePlan.symbols : (refreshedRules.watchlist || []);
-      timeframes = (activePlan?.timeframes?.length) ? activePlan.timeframes : (refreshedRules.timeframes || ["15m"]);
+      // Múltiplos planos ativos: a watchlist é a UNIÃO dos símbolos de todos
+      // eles, e os timeframes a união dos timeframes (cada símbolo respeita os
+      // timeframes do PRÓPRIO plano via filtro dentro do runSymbolCycle).
+      const activeNamesLoop = getActivePlanNames(refreshedRules);
+      const activePlansList = (refreshedRules.group_plans || []).filter(p => activeNamesLoop.includes(p.name));
+      const unionSymbols = [...new Set(activePlansList.flatMap(p => p.symbols || []))];
+      const unionTfs = [...new Set(activePlansList.flatMap(p => p.timeframes || []))];
+      watchlistToUse = unionSymbols.length ? unionSymbols : (refreshedRules.watchlist || []);
+      timeframes = unionTfs.length ? unionTfs : (refreshedRules.timeframes || ["15m"]);
       currentRules = refreshedRules;
       
       // ISOLAR AMBIENTES: MasterBot (Spot) executa ativos com cobertura em plano não-futures;
@@ -2055,7 +2070,11 @@ async function run(runMode = 'manual') {
 
     const targetSymbols = isLoop ? watchlistToUse : [symbolEntry];
     if (isLoop && symbolEntry === "DYNAMIC") {
-       const isAutoMode = currentRules?.strategy?.key === 'auto' && !currentRules?.active_plan;
+       // Resolução por símbolo: no Modo Auto OU com múltiplos planos ativos,
+       // cada símbolo usa o plano e os timeframes DELE (evita rodar todos os
+       // timeframes da união em todos os ativos).
+       const isAutoMode = (currentRules?.strategy?.key === 'auto' && getActivePlanNames(currentRules).length === 0)
+         || getActivePlanNames(currentRules).length > 1;
        for (const symbol of targetSymbols) {
          let tfsForSymbol = timeframes;
          if (isAutoMode) {
@@ -2116,35 +2135,48 @@ async function run(runMode = 'manual') {
 function parseIntervalMs(str) {
   const n = parseInt(str);
   if (str.endsWith('m')) return n * 60 * 1000;
-  return n * 60 * 60 * 1000; 
+  return n * 60 * 60 * 1000;
+}
+
+const ALLOWED_INTERVALS = ['10m', '15m', '20m', '30m', '45m', '1h', '4h'];
+
+// Intervalo atual do loop: rules.master_interval (editável pela UI sem
+// reiniciar o bot) tem prioridade sobre o env. Fora da lista → 1h.
+function getCurrentInterval() {
+  let str = process.env.MASTERBOT_LOOP_INTERVAL || "1h";
+  try {
+    const r = JSON.parse(readFileSync(RULES_FILE, "utf8"));
+    if (r.master_interval) str = r.master_interval;
+  } catch (_) {}
+  if (!ALLOWED_INTERVALS.includes(str)) str = "1h";
+  return { str, ms: parseIntervalMs(str) };
 }
 
 function startScheduler(runMode = 'master') {
-  const intervalStr = process.env.MASTERBOT_LOOP_INTERVAL || "4h";
-  const ms = parseIntervalMs(intervalStr);
-
-  console.log(`\n⏰ ${runMode.toUpperCase()} Scheduler Active: Runs every ${intervalStr} (${ms/1000}s)`);
+  const first = getCurrentInterval();
+  console.log(`\n⏰ ${runMode.toUpperCase()} Scheduler Active: Runs every ${first.str} (${first.ms/1000}s) — intervalo re-lido do rules.json a cada ciclo`);
 
   let isExecuting = false;
   const heartbeat = async () => {
-    if (isExecuting) {
-      console.log(`⏳ [Scheduler] Execução anterior do ${runMode.toUpperCase()} ainda em processamento. Evitando sobreposição de ciclos.`);
-      return;
+    if (!isExecuting) {
+      isExecuting = true;
+      try {
+        await run(runMode);
+      } catch (err) {
+        console.error(`❌ [Scheduler] Falha não tratada capturada no loop principal do ${runMode.toUpperCase()}:`, err.message);
+        // Garante que o status no banco retorne para 'waiting' permitindo rearmar na UI/Dashboard
+        try { await writeLoopStatus("waiting", [], runMode === 'futures'); } catch (_) {}
+      } finally {
+        isExecuting = false;
+      }
     }
-    isExecuting = true;
-    try {
-      await run(runMode);
-    } catch (err) {
-      console.error(`❌ [Scheduler] Falha não tratada capturada no loop principal do ${runMode.toUpperCase()}:`, err.message);
-      // Garante que o status no banco retorne para 'waiting' permitindo rearmar na UI/Dashboard
-      try { await writeLoopStatus("waiting", [], runMode === 'futures'); } catch (_) {}
-    } finally {
-      isExecuting = false;
-    }
+    // Reagenda lendo o intervalo VIGENTE — mudanças na UI valem no próximo ciclo
+    const { str, ms } = getCurrentInterval();
+    console.log(`⏰ [Scheduler] Próxima execução do ${runMode.toUpperCase()} em ${str}.`);
+    setTimeout(heartbeat, ms);
   };
 
   heartbeat();
-  setInterval(heartbeat, ms);
 }
 
 // Detecta se este arquivo é o entry point — funciona com node direto E com wrappers (PM2 ProcessContainerFork)
@@ -2193,8 +2225,7 @@ if (__isMainEntry) {
 async function writeLoopStatus(status = "running", results = [], isFutures = false) {
   const now = Date.now();
   const rules = JSON.parse(readFileSync(RULES_FILE, "utf8"));
-  const intervalStr = process.env.MASTERBOT_LOOP_INTERVAL || "4h";
-  const intervalMs = parseIntervalMs(intervalStr);
+  const { str: intervalStr, ms: intervalMs } = getCurrentInterval();
 
   const allPositions = await db.loadPositions();
   const state = {

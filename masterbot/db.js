@@ -686,6 +686,18 @@ export async function setActiveStrategy(userId, name) {
   }
 }
 
+/**
+ * Liga/desliga UMA estratégia específica sem mexer nas outras — permite
+ * múltiplas estratégias ativas ao mesmo tempo no MasterBot.
+ */
+export async function setStrategyActive(userId, name, active) {
+  if (!userId || !name) return;
+  await getPool().query(
+    'UPDATE strategies SET is_active = $3, updated_at = NOW() WHERE user_id = $1 AND name = $2',
+    [userId, name, !!active]
+  );
+}
+
 /** Retorna o nome da estratégia ativa do usuário, ou null. */
 export async function getActiveStrategyName(userId) {
   if (!userId) return null;
@@ -694,6 +706,16 @@ export async function getActiveStrategyName(userId) {
     [userId]
   );
   return res.rows[0]?.name || null;
+}
+
+/** Nomes de TODAS as estratégias ativas do usuário (suporte multi-estratégia). */
+export async function getActiveStrategyNames(userId) {
+  if (!userId) return [];
+  const res = await getPool().query(
+    'SELECT name FROM strategies WHERE user_id = $1 AND is_active = true ORDER BY name',
+    [userId]
+  );
+  return res.rows.map(r => r.name);
 }
 
 /**

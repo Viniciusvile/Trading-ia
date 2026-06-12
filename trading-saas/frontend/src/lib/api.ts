@@ -209,6 +209,8 @@ export const api = {
       paperTrading: boolean;
       dailyMaxLoss: number;
       activePlan: string | null;
+      activePlans?: string[];
+      loopInterval?: string;
       groupPlans: { name: string; description?: string; symbols: string[] }[];
     } | null>("/bot/config", undefined, null),
 

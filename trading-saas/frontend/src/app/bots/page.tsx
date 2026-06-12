@@ -74,7 +74,9 @@ export default function BotsPage() {
     maxTrade: 20,
     paperTrading: true,
     dailyMaxLoss: 0,
+    loopInterval: "1h",
     activePlan: "" as string | null,
+    activePlans: [] as string[],
     groupPlans: [] as { name: string; description: string; symbols: string[] }[],
   });
 
@@ -226,7 +228,9 @@ export default function BotsPage() {
             maxTrade: configData.maxTrade || 20,
             paperTrading: configData.paperTrading,
             dailyMaxLoss: configData.dailyMaxLoss || 0,
+            loopInterval: configData.loopInterval || "1h",
             activePlan: configData.activePlan,
+            activePlans: configData.activePlans || [],
             groupPlans: configData.groupPlans || [],
           });
         }
@@ -572,9 +576,32 @@ export default function BotsPage() {
                 </optgroup>
               </select>
               <p className="text-[10px] text-muted mt-1">
-                {masterConfig.activePlan
-                  ? "A estratégia define ativos, timeframes, SL/TP e filtros — tudo o que você configurou e analisou no backtest."
+                {masterConfig.activePlans.length > 1
+                  ? `${masterConfig.activePlans.length} estratégias ativas ao mesmo tempo: ${masterConfig.activePlans.join(", ")}. Gerencie quais ficam ligadas na página Estratégias — aqui você adiciona mais uma sem desligar as outras.`
+                  : masterConfig.activePlan
+                  ? "A estratégia define ativos, timeframes, SL/TP e filtros — tudo o que você configurou e analisou no backtest. Você pode ativar várias ao mesmo tempo na página Estratégias."
                   : "Modo avulso: o robô opera um único ativo com o símbolo e timeframe abaixo."}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-2)] mb-1">
+                Intervalo de execução do robô
+              </label>
+              <select
+                value={masterConfig.loopInterval}
+                onChange={e => setMasterConfig(prev => ({ ...prev, loopInterval: e.target.value }))}
+                className="w-full h-10 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text)] outline-none"
+              >
+                <option value="10m">A cada 10 minutos</option>
+                <option value="15m">A cada 15 minutos</option>
+                <option value="20m">A cada 20 minutos</option>
+                <option value="30m">A cada 30 minutos</option>
+                <option value="45m">A cada 45 minutos</option>
+                <option value="1h">A cada 1 hora</option>
+              </select>
+              <p className="text-[10px] text-muted mt-1">
+                Frequência com que o robô varre o mercado em busca de sinais. Aplica no próximo ciclo, sem precisar reiniciar.
               </p>
             </div>
 

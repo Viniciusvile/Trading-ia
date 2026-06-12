@@ -159,16 +159,19 @@ async function isOwnerUser(userId) {
   } catch { return false; }
 }
 
-/** Reescreve group_plans/active_plan do rules.json a partir do banco do dono. */
+/** Reescreve group_plans/active_plan(s) do rules.json a partir do banco do dono. */
 async function syncRulesFromOwner(ownerUserId) {
   try {
     const plans = await db.listStrategies(ownerUserId);
-    const activeName = await db.getActiveStrategyName(ownerUserId);
+    const activeNames = await db.getActiveStrategyNames(ownerUserId);
     if (!existsSync(BOT_RULES)) return;
     const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
     // Remove a chave interna _active antes de persistir no arquivo do bot
     rules.group_plans = plans.map(({ _active, ...p }) => p);
-    rules.active_plan = activeName || null;
+    // Multi-estratégia: active_plans é a fonte de verdade; active_plan é
+    // mantido para retrocompatibilidade quando há exatamente uma ativa.
+    rules.active_plans = activeNames;
+    rules.active_plan = activeNames.length === 1 ? activeNames[0] : null;
     writeFileSync(BOT_RULES, JSON.stringify(rules, null, 2));
   } catch (e) {
     console.error('⚠️  Falha ao sincronizar rules.json a partir do dono:', e.message);
@@ -1075,6 +1078,7 @@ app.get('/api/bot/config', authenticateToken, async (req, res) => {
     // rules.json global (que vazava as estratégias do dono para todos).
     const userPlans = await db.listStrategies(req.user.id);
     const userActivePlan = await db.getActiveStrategyName(req.user.id);
+    const userActivePlans = await db.getActiveStrategyNames(req.user.id);
 
     // Config do MasterBot: dono lê do .env (fonte do robô real); demais
     // usuários leem a PRÓPRIA cópia salva no banco (não a do dono).
@@ -1097,6 +1101,8 @@ app.get('/api/bot/config', authenticateToken, async (req, res) => {
       // rules.json inteiro só para o dono — contém dados do robô real
       rules: isOwner ? rules : null,
       activePlan: userActivePlan || null,
+      activePlans: userActivePlans,
+      loopInterval: (!isOwner && mc.loopInterval) || rules?.master_interval || env.MASTERBOT_LOOP_INTERVAL || '1h',
       groupPlans: userPlans.map(p => ({ name: p.name, description: p.description, symbols: p.symbols })),
       watchlist: rules?.watchlist || [],
       watchlistPreset: ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','LTCUSDT','AVAXUSDT','TRXUSDT'],
@@ -1236,10 +1242,11 @@ app.post('/api/bot/strategies/:name/activate', authenticateToken, async (req, re
       return res.status(404).json({ success: false, error: 'Estratégia não encontrada' });
     }
 
-    await db.setActiveStrategy(req.user.id, name);
+    // Multi-estratégia: ativa ESTA sem desativar as outras
+    await db.setStrategyActive(req.user.id, name, true);
     if (await isOwnerUser(req.user.id)) await syncRulesFromOwner(req.user.id);
 
-    res.json({ success: true, activePlan: name });
+    res.json({ success: true, activePlan: name, activePlans: await db.getActiveStrategyNames(req.user.id) });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -1247,10 +1254,11 @@ app.post('/api/bot/strategies/:name/activate', authenticateToken, async (req, re
 
 app.post('/api/bot/strategies/:name/deactivate', authenticateToken, async (req, res) => {
   try {
-    await db.setActiveStrategy(req.user.id, null);
+    // Multi-estratégia: desativa SÓ a estratégia informada
+    await db.setStrategyActive(req.user.id, req.params.name, false);
     if (await isOwnerUser(req.user.id)) await syncRulesFromOwner(req.user.id);
 
-    res.json({ success: true, activePlan: null });
+    res.json({ success: true, activePlan: null, activePlans: await db.getActiveStrategyNames(req.user.id) });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -1435,7 +1443,11 @@ app.patch('/api/bot/watchlist', (req, res) => {
 
 app.patch('/api/bot/config', authenticateToken, async (req, res) => {
   try {
-    const { symbol, timeframe, strategy, portfolio, maxTrade, trailingEnabled, trailingMult, paperTrading, activePlan, dailyMaxLoss } = req.body || {};
+    const { symbol, timeframe, strategy, portfolio, maxTrade, trailingEnabled, trailingMult, paperTrading, activePlan, dailyMaxLoss, loopInterval } = req.body || {};
+    const allowedLoop = ['10m','15m','20m','30m','45m','1h','4h'];
+    if (loopInterval !== undefined && !allowedLoop.includes(loopInterval)) {
+      return res.status(400).json({ success: false, error: 'Intervalo inválido (use 10m–1h)' });
+    }
 
     // Validations
     const allowedTf = ['1m','5m','15m','30m','1H','4H','1D','1W'];
@@ -1444,9 +1456,12 @@ app.patch('/api/bot/config', authenticateToken, async (req, res) => {
     if (timeframe && !allowedTf.includes(timeframe)) return res.status(400).json({ success: false, error: 'Timeframe inválido' });
     if (strategy && !allowedStrat.includes(strategy)) return res.status(400).json({ success: false, error: 'Estratégia inválida' });
 
-    // O plano ativo é PER-USUÁRIO (vive no banco)
+    // O plano ativo é PER-USUÁRIO (vive no banco). Multi-estratégia: passar
+    // um nome GARANTE que ele está ativo sem desativar os demais (gerencie
+    // as outras na página Estratégias); null desativa todas (modo avulso).
     if (activePlan !== undefined) {
-      await db.setActiveStrategy(req.user.id, activePlan || null);
+      if (activePlan) await db.setStrategyActive(req.user.id, activePlan, true);
+      else await db.setActiveStrategy(req.user.id, null);
     }
 
     // Persiste a config do MasterBot NA VISÃO DO USUÁRIO (banco). Para o
@@ -1460,6 +1475,7 @@ app.patch('/api/bot/config', authenticateToken, async (req, res) => {
     if (maxTrade !== undefined) st.master_config.maxTrade = Number(maxTrade);
     if (paperTrading !== undefined) st.master_config.paperTrading = !!paperTrading;
     if (dailyMaxLoss !== undefined) st.master_config.dailyMaxLoss = Number(dailyMaxLoss) || 0;
+    if (loopInterval !== undefined) st.master_config.loopInterval = loopInterval;
     await db.saveUserBotState(req.user.id, st);
 
     // Não-dono: nunca toca .env/rules.json nem reinicia o robô real
@@ -1489,14 +1505,20 @@ app.patch('/api/bot/config', authenticateToken, async (req, res) => {
     if (portfolio !== undefined) upsert('PORTFOLIO_VALUE_USD', portfolio);
     if (maxTrade !== undefined) upsert('MAX_TRADE_SIZE_USD', maxTrade);
     if (paperTrading !== undefined) upsert('PAPER_TRADING', paperTrading ? 'true' : 'false');
+    if (loopInterval !== undefined) upsert('MASTERBOT_LOOP_INTERVAL', loopInterval);
     writeFileSync(BOT_ENV, txt);
 
     // Update rules.json if trailing params, strategy or risk changed.
     // NOTA: maxTrade aqui é exclusivo do MasterBot (MAX_TRADE_SIZE_USD acima).
     // O max_trade_usdt do Micro Scalper tem endpoint próprio (/api/micro-scalper/config).
-    if (trailingEnabled !== undefined || trailingMult !== undefined || strategy || dailyMaxLoss !== undefined) {
+    if (trailingEnabled !== undefined || trailingMult !== undefined || strategy || dailyMaxLoss !== undefined || loopInterval !== undefined) {
       if (existsSync(BOT_RULES)) {
         const rules = JSON.parse(readFileSync(BOT_RULES, 'utf8'));
+        if (loopInterval !== undefined) {
+          // O bot re-lê master_interval do rules.json a cada ciclo — aplica
+          // sem reiniciar o processo.
+          rules.master_interval = loopInterval;
+        }
         if (trailingEnabled !== undefined || trailingMult !== undefined) {
           if (!rules.exit_rules_config) rules.exit_rules_config = {};
           if (!rules.exit_rules_config.trailing_stop) rules.exit_rules_config.trailing_stop = { enabled: false, type: 'atr', multiplier: 2.0 };
@@ -1758,7 +1780,7 @@ app.get('/api/bot/master/status', authenticateToken, async (req, res) => {
 app.post('/api/bot/master/config', async (req, res) => {
   try {
     const { interval } = req.body || {};
-    const allowedIntervals = ['10m', '30m', '1h', '4h'];
+    const allowedIntervals = ['10m', '15m', '20m', '30m', '45m', '1h', '4h'];
     const safeInterval = allowedIntervals.includes(interval) ? interval : '1h';
 
     // 1. Atualiza rules.json
@@ -1797,7 +1819,7 @@ app.post('/api/bot/master/start', authenticateToken, async (req, res) => {
     }
 
     const { interval } = req.body || {};
-    const allowedIntervals = ['10m', '30m', '1h', '4h'];
+    const allowedIntervals = ['10m', '15m', '20m', '30m', '45m', '1h', '4h'];
     const safeInterval = allowedIntervals.includes(interval) ? interval : '1h';
 
     // Matar qualquer instância anterior pelo PID file antes de iniciar nova
