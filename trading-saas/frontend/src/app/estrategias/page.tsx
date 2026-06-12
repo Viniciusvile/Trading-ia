@@ -20,6 +20,7 @@ import { StrategyWizard } from "@/components/strategy/StrategyWizard";
 import { BacktestReport } from "@/components/strategy/BacktestReport";
 import { ScalperSection } from "@/components/strategy/ScalperSection";
 import { AdaptiveSection } from "@/components/strategy/AdaptiveSection";
+import { Sparkline, SymbolIcon } from "@/components/fx";
 
 interface Strategy {
   name: string;
@@ -236,8 +237,11 @@ export default function EstrategiasPage() {
               <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
                 {/* Meta details (Ativos, Timeframe, Lógica) */}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-muted flex-1 min-w-0">
-                  <div className="flex items-center gap-1">
-                    <strong>Ativos:</strong> 
+                  <div className="flex items-center gap-1.5">
+                    <span className="flex -space-x-1.5">
+                      {s.symbols.slice(0, 4).map((sym) => <SymbolIcon key={sym} symbol={sym} size={18} />)}
+                    </span>
+                    <strong>Ativos:</strong>
                     <span className="text-[var(--color-text-2)] break-all">{s.symbols.join(", ")}</span>
                   </div>
                   <span className="hidden sm:inline text-muted/30">•</span>
@@ -258,6 +262,14 @@ export default function EstrategiasPage() {
                   {s.statsSource === "real" && <Badge tone="up" size="sm">Trades reais</Badge>}
                   {s.statsSource === "backtest" && <Badge tone="neutral" size="sm">Backtest real</Badge>}
                   {(!s.statsSource || s.statsSource === "sem-dados") && <Badge tone="neutral" size="sm">Sem análise</Badge>}
+                  {s.lastBacktest?.equityCurve && s.lastBacktest.equityCurve.length > 1 && (
+                    <Sparkline
+                      data={s.lastBacktest.equityCurve.map((p) => p.equity)}
+                      width={140}
+                      height={32}
+                      className="ml-auto"
+                    />
+                  )}
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 sm:gap-10 border-t lg:border-t-0 pt-3 lg:pt-0 border-[var(--color-border)] justify-between lg:justify-end">
                   <Stat label="Win Rate" value={fmtPct(s.winRate * 100, { sign: false })} size="sm" />

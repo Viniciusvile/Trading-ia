@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Wallet, History, Trash2, Loader2, ArrowUpRight, ArrowDownRight, RefreshCw, Calendar, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Info } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardHeader, EmptyState, Badge, Stat, Button, Modal } from "@/components/ui";
+import { SymbolIcon } from "@/components/fx";
 import { fmtUSD } from "@/lib/format";
 import { api } from "@/lib/api";
 
@@ -325,7 +326,7 @@ export default function PosicoesPage() {
               <div className="overflow-x-auto mt-4">
                 <table className="w-full min-w-[1000px] text-left border-collapse">
                   <thead>
-                    <tr className="border-b border-white/10 text-xs font-semibold text-muted uppercase tracking-wider">
+                    <tr className="border-b border-[var(--color-border)] text-[10px] font-semibold text-muted uppercase tracking-[0.08em]">
                       <th className="pb-3 font-medium pr-4">Ativo / Tipo</th>
                       <th className="pb-3 font-medium px-4">Lado</th>
                       <th className="pb-3 font-medium px-4">Preço Entrada</th>
@@ -344,9 +345,14 @@ export default function PosicoesPage() {
                       return (
                         <tr key={pos.id} className="hover:bg-white/5 cursor-pointer transition-colors" onClick={() => setSelectedPosition(pos)}>
                           <td className="py-4 pr-4">
-                            <div className="font-semibold">{pos.symbol}</div>
-                            <div className="text-xs text-muted">
-                              {pos.plan || "Sem Plano"} ({pos.timeframe})
+                            <div className="flex items-center gap-2.5">
+                              <SymbolIcon symbol={pos.symbol} size={28} />
+                              <div className="min-w-0">
+                                <div className="font-semibold">{pos.symbol.replace("USDT", "")}</div>
+                                <div className="text-xs text-muted truncate">
+                                  {pos.plan || "Sem Plano"} ({pos.timeframe})
+                                </div>
+                              </div>
                             </div>
                           </td>
                           <td className="py-4 px-4">
@@ -421,7 +427,7 @@ export default function PosicoesPage() {
               <div className="overflow-x-auto mt-4">
                 <table className="w-full min-w-[900px] text-left border-collapse">
                   <thead>
-                    <tr className="border-b border-white/10 text-xs font-semibold text-muted uppercase tracking-wider">
+                    <tr className="border-b border-[var(--color-border)] text-[10px] font-semibold text-muted uppercase tracking-[0.08em]">
                       <th className="pb-3 font-medium pr-4">Ativo / Tipo</th>
                       <th className="pb-3 font-medium px-4">Lado</th>
                       <th className="pb-3 font-medium px-4">Preço Entrada</th>
@@ -439,9 +445,14 @@ export default function PosicoesPage() {
                       return (
                         <tr key={pos.id} className="hover:bg-white/5 cursor-pointer transition-colors" onClick={() => setSelectedPosition(pos)}>
                           <td className="py-4 pr-4">
-                            <div className="font-semibold">{pos.symbol}</div>
-                            <div className="text-xs text-muted">
-                              {pos.plan || "Sem Plano"} ({pos.timeframe})
+                            <div className="flex items-center gap-2.5">
+                              <SymbolIcon symbol={pos.symbol} size={28} />
+                              <div className="min-w-0">
+                                <div className="font-semibold">{pos.symbol.replace("USDT", "")}</div>
+                                <div className="text-xs text-muted truncate">
+                                  {pos.plan || "Sem Plano"} ({pos.timeframe})
+                                </div>
+                              </div>
                             </div>
                           </td>
                           <td className="py-4 px-4">
