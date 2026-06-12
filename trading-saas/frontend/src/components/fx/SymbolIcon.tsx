@@ -1,4 +1,4 @@
-"use client";
+import { useState } from "react";
 
 const PALETTE = ["#F7931A", "#627EEA", "#9945FF", "#23B5E8", "#345D9D", "#E84142", "#FF060A", "#2EBD8A"];
 
@@ -16,6 +16,26 @@ function colorFor(symbol: string) {
 
 export function SymbolIcon({ symbol, size = 28 }: { symbol: string; size?: number }) {
   const base = symbol.replace(/USDT$/i, "").toUpperCase();
+  const [hasError, setHasError] = useState(false);
+  const [lastSymbol, setLastSymbol] = useState(symbol);
+
+  if (symbol !== lastSymbol) {
+    setLastSymbol(symbol);
+    setHasError(false);
+  }
+
+  if (!hasError) {
+    return (
+      <img
+        src={`https://assets.coincap.io/assets/icons/${base.toLowerCase()}@2x.png`}
+        alt={base}
+        onError={() => setHasError(true)}
+        className="inline-block shrink-0 rounded-full object-cover ring-2 ring-[var(--color-bg)] bg-[var(--color-surface-2)]"
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+
   return (
     <span
       aria-hidden
