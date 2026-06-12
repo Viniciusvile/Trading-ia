@@ -114,7 +114,10 @@ export function Topbar() {
         <div className="min-w-0 flex-1 flex items-center gap-4">
           {/* Logo + saudação (estilo "Hello, Sam" do Fey) */}
           <div className="flex items-center gap-3 min-w-0">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-text)] text-[var(--color-bg)]">
+            <div 
+              style={{ backgroundColor: "var(--color-text)", color: "var(--color-bg)" }}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+            >
               <TrendingUp size={15} strokeWidth={2.5} />
             </div>
             <div className="min-w-0">

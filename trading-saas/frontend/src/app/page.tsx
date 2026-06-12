@@ -177,7 +177,8 @@ export default function InicioPage() {
             </Link>
             <Link
               href="/mercado"
-              className="inline-flex items-center gap-2 h-10 px-5 rounded-full text-sm font-semibold bg-[var(--color-text)] text-[var(--color-bg)] hover:opacity-90 transition"
+              style={{ backgroundColor: "var(--color-text)", color: "var(--color-bg)" }}
+              className="inline-flex items-center gap-2 h-10 px-5 rounded-full text-sm font-semibold hover:opacity-90 transition"
             >
               Operar <ArrowRight size={16} />
             </Link>

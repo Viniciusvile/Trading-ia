@@ -199,7 +199,8 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex items-center justify-center gap-2 py-3.5 px-4 mt-6 text-sm font-semibold rounded-full bg-[var(--color-text)] text-[var(--color-bg)] hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none"
+              style={{ backgroundColor: "var(--color-text)", color: "var(--color-bg)" }}
+              className="w-full flex items-center justify-center gap-2 py-3.5 px-4 mt-6 text-sm font-semibold rounded-full hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none"
             >
               {loading ? (
                 <Loader2 className="w-4 h-4 animate-spin" />

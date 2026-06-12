@@ -18,7 +18,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 const variants: Record<Variant, string> = {
   // Assinatura Fey: botão primário claro sobre fundo escuro (inverte no tema claro)
   primary:
-    "bg-[var(--color-text)] text-[var(--color-bg)] hover:opacity-90 active:opacity-80",
+    "hover:opacity-90 active:opacity-80",
   secondary:
     "bg-[var(--color-surface-3)] text-[var(--color-text)] hover:bg-[var(--color-border)] border border-[var(--color-border)]",
   ghost:
@@ -56,6 +56,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     <button
       ref={ref}
       disabled={disabled || loading}
+      style={
+        variant === "primary"
+          ? { backgroundColor: "var(--color-text)", color: "var(--color-bg)", ...rest.style }
+          : rest.style
+      }
       className={cn(
         "inline-flex items-center justify-center font-medium select-none transition-all duration-150",
         "disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none",
