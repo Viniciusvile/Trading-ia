@@ -1,98 +1,103 @@
 @import "tailwindcss";
 
 /* ============================================================
-   DESIGN TOKENS — Trading SaaS (inspirado em XP Investimentos)
-   Paleta: Azul XP #0033A0 + Verde dinheiro #10B981
+   DESIGN TOKENS — Trading SaaS (estilo Fey: dark premium)
+   Fundo quase-preto + bordas translúcidas + acento indigo discreto
+   DARK É O TEMA PADRÃO; claro é opcional via [data-theme="light"]
    ============================================================ */
 
 @theme {
-  /* ===== Cores de Marca ===== */
-  --color-brand-50:  #EBF0FB;
-  --color-brand-100: #C7D5F2;
-  --color-brand-200: #94B0E5;
-  --color-brand-300: #5C84D3;
-  --color-brand-400: #2D5DBE;
-  --color-brand-500: #0033A0;  /* Azul XP — primária */
-  --color-brand-600: #002C8C;
-  --color-brand-700: #002476;
-  --color-brand-800: #001D5F;
-  --color-brand-900: #001142;
+  /* ===== Acento (indigo Fey — discreto) ===== */
+  --color-brand-50:  #EEF0FE;
+  --color-brand-100: #DDE1FD;
+  --color-brand-200: #BCC3FB;
+  --color-brand-300: #9AA5F8;
+  --color-brand-400: #8490F5;
+  --color-brand-500: #6E7BF2;
+  --color-brand-600: #5865E8;
+  --color-brand-700: #4550C9;
+  --color-brand-800: #353EA0;
+  --color-brand-900: #272E78;
 
-  /* ===== Verde (Ganhos / Sucesso) ===== */
-  --color-up-50:  #ECFDF5;
-  --color-up-100: #D1FAE5;
-  --color-up-300: #6EE7B7;
-  --color-up-500: #10B981;
-  --color-up-600: #059669;
-  --color-up-700: #047857;
+  /* ===== Verde (ganhos) — dessaturado ===== */
+  --color-up-50:  #0E1F18;
+  --color-up-100: #11271E;
+  --color-up-300: #34D399;
+  --color-up-500: #34D399;
+  --color-up-600: #2EBD8A;
+  --color-up-700: #25A578;
 
-  /* ===== Vermelho (Perdas / Erro) ===== */
-  --color-down-50:  #FEF2F2;
-  --color-down-100: #FEE2E2;
-  --color-down-300: #FCA5A5;
-  --color-down-500: #EF4444;
-  --color-down-600: #DC2626;
-  --color-down-700: #B91C1C;
+  /* ===== Vermelho (perdas) — dessaturado ===== */
+  --color-down-50:  #251214;
+  --color-down-100: #2D1518;
+  --color-down-300: #F87171;
+  --color-down-500: #F26D6D;
+  --color-down-600: #E25858;
+  --color-down-700: #C94B4B;
 
-  /* ===== Amarelo (Alerta / Atenção) ===== */
-  --color-warn-50:  #FFFBEB;
-  --color-warn-100: #FEF3C7;
-  --color-warn-500: #F59E0B;
-  --color-warn-600: #D97706;
+  /* ===== Amarelo (alerta) ===== */
+  --color-warn-50:  #261D0C;
+  --color-warn-100: #2E240F;
+  --color-warn-500: #E8B33C;
+  --color-warn-600: #D2A032;
 
-  /* ===== Neutros (light) ===== */
-  --color-bg:        #F4F6FB;
-  --color-surface:   #FFFFFF;
-  --color-surface-2: #F8FAFF;
-  --color-surface-3: #EEF2FA;
-  --color-border:    #E1E7F2;
-  --color-border-strong: #C9D3E8;
-  --color-text:      #0A1633;
-  --color-text-2:    #2A3552;
-  --color-muted:     #6B7593;
-  --color-muted-2:   #9AA4C0;
+  /* ===== Neutros (DARK padrão — estilo Fey) ===== */
+  --color-bg:        #050507;
+  --color-surface:   #0B0C0F;
+  --color-surface-2: #101114;
+  --color-surface-3: #16181D;
+  --color-border:    rgba(255, 255, 255, 0.07);
+  --color-border-strong: rgba(255, 255, 255, 0.14);
+  --color-text:      #F2F3F5;
+  --color-text-2:    #B6BAC3;
+  --color-muted:     #7A7F8A;
+  --color-muted-2:   #4D525C;
 
   /* ===== Tipografia ===== */
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", Menlo, monospace;
 
-  /* ===== Sombras (XP usa sombras suaves) ===== */
-  --shadow-card: 0 1px 2px rgba(10, 22, 51, 0.04), 0 2px 8px rgba(10, 22, 51, 0.06);
-  --shadow-card-hover: 0 4px 12px rgba(10, 22, 51, 0.08), 0 8px 24px rgba(10, 22, 51, 0.08);
-  --shadow-pop: 0 12px 32px rgba(10, 22, 51, 0.14), 0 4px 12px rgba(10, 22, 51, 0.08);
-  --shadow-brand: 0 8px 24px rgba(0, 51, 160, 0.22);
+  /* ===== Sombras (profundas, dark) ===== */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-card-hover: 0 4px 16px rgba(0, 0, 0, 0.5), 0 12px 32px rgba(0, 0, 0, 0.45);
+  --shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.65);
+  --shadow-brand: 0 8px 24px rgba(110, 123, 242, 0.25);
 
-  /* ===== Raios ===== */
-  --radius-xs: 6px;
-  --radius-sm: 10px;
-  --radius-md: 14px;
+  /* ===== Raios (cantos generosos) ===== */
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
   --radius-lg: 20px;
   --radius-xl: 28px;
 }
 
 /* ============================================================
-   Dark mode (toggle via [data-theme="dark"] no <html>)
+   Tema claro (opcional — toggle via [data-theme="light"])
+   O padrão do sistema agora é DARK (estilo Fey).
    ============================================================ */
-[data-theme="dark"] {
-  --color-bg:        #0A0F1F;
-  --color-surface:   #131A2E;
-  --color-surface-2: #1A2238;
-  --color-surface-3: #232C46;
-  --color-border:    #2A3450;
-  --color-border-strong: #3A476A;
-  --color-text:      #EAF0FB;
-  --color-text-2:    #B7C2DD;
-  --color-muted:     #7B88A8;
-  --color-muted-2:   #56607D;
+[data-theme="light"] {
+  --color-bg:        #F4F5F8;
+  --color-surface:   #FFFFFF;
+  --color-surface-2: #F8F9FC;
+  --color-surface-3: #EEF0F5;
+  --color-border:    #E3E6EE;
+  --color-border-strong: #C9CEDC;
+  --color-text:      #101218;
+  --color-text-2:    #3A3F4C;
+  --color-muted:     #6E7480;
+  --color-muted-2:   #9AA0AC;
 
-  --color-brand-500: #3B6FE8;
-  --color-brand-600: #2D5DBE;
+  --color-up-50:  #ECFDF5;
+  --color-up-100: #D1FAE5;
+  --color-down-50:  #FEF2F2;
+  --color-down-100: #FEE2E2;
+  --color-warn-50:  #FFFBEB;
+  --color-warn-100: #FEF3C7;
 
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
-  --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.55), 0 8px 24px rgba(0, 0, 0, 0.45);
-  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.6);
-  --shadow-brand: 0 8px 24px rgba(59, 111, 232, 0.35);
+  --shadow-card: 0 1px 2px rgba(16, 18, 24, 0.05), 0 2px 8px rgba(16, 18, 24, 0.06);
+  --shadow-card-hover: 0 4px 12px rgba(16, 18, 24, 0.08), 0 8px 24px rgba(16, 18, 24, 0.08);
+  --shadow-pop: 0 12px 32px rgba(16, 18, 24, 0.14);
 }
 
 /* ============================================================
@@ -111,7 +116,10 @@ body {
 
 body {
   margin: 0;
-  background: var(--color-bg);
+  background:
+    radial-gradient(1200px 500px at 50% -10%, rgba(110, 123, 242, 0.06), transparent 60%),
+    var(--color-bg);
+  background-attachment: fixed;
   color: var(--color-text);
   font-family: var(--font-sans);
   font-size: 14px;
@@ -156,16 +164,22 @@ a {
 .surface-2 { background: var(--color-surface-2); }
 .surface-3 { background: var(--color-surface-3); }
 
-.text-up    { color: var(--color-up-600); }
-.text-down  { color: var(--color-down-600); }
-.text-warn  { color: var(--color-warn-600); }
+.text-up    { color: var(--color-up-300); }
+.text-down  { color: var(--color-down-300); }
+.text-warn  { color: var(--color-warn-500); }
 .text-muted { color: var(--color-muted); }
+[data-theme="light"] .text-up   { color: var(--color-up-600); }
+[data-theme="light"] .text-down { color: var(--color-down-600); }
+[data-theme="light"] .text-warn { color: var(--color-warn-600); }
 
-.bg-up   { background: var(--color-up-50);   color: var(--color-up-700); }
-.bg-down { background: var(--color-down-50); color: var(--color-down-700); }
-.bg-warn { background: var(--color-warn-50); color: var(--color-warn-600); }
-.bg-brand-soft { background: rgba(0, 51, 160, 0.08); color: var(--color-brand-600); }
-[data-theme="dark"] .bg-brand-soft { background: rgba(59, 111, 232, 0.16); color: #6E97F2; }
+.bg-up   { background: var(--color-up-50);   color: var(--color-up-300); }
+.bg-down { background: var(--color-down-50); color: var(--color-down-300); }
+.bg-warn { background: var(--color-warn-50); color: var(--color-warn-500); }
+.bg-brand-soft { background: rgba(110, 123, 242, 0.12); color: var(--color-brand-300); }
+[data-theme="light"] .bg-up   { color: var(--color-up-700); }
+[data-theme="light"] .bg-down { color: var(--color-down-700); }
+[data-theme="light"] .bg-warn { color: var(--color-warn-600); }
+[data-theme="light"] .bg-brand-soft { background: rgba(88, 101, 232, 0.10); color: var(--color-brand-700); }
 
 /* Skeleton shimmer */
 @keyframes shimmer {

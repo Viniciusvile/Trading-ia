@@ -7,7 +7,7 @@ import { Card, CardHeader, Button, Badge } from "@/components/ui";
 import { api } from "@/lib/api";
  
 export default function AjustesPage() {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [advanced, setAdvanced] = useState(false);
 
   // Accounts state
@@ -21,7 +21,7 @@ export default function AjustesPage() {
   const [errorMsg, setErrorMsg] = useState("");
  
   useEffect(() => {
-    const saved = (localStorage.getItem("theme") as "light" | "dark" | null) ?? "light";
+    const saved = (localStorage.getItem("theme") as "light" | "dark" | null) ?? "dark";
     setTheme(saved);
   }, []);
 

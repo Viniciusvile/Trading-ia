@@ -16,7 +16,7 @@ export function Topbar() {
       i.href === "/" ? pathname === "/" : pathname.startsWith(i.href),
     );
 
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [balance, setBalance] = useState<{ spot: number; futures: number }>({ spot: 0, futures: 0 });
   const [loading, setLoading] = useState(true);
 
@@ -26,7 +26,7 @@ export function Topbar() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   useEffect(() => {
-    const saved = (localStorage.getItem("theme") as "light" | "dark" | null) ?? "light";
+    const saved = (localStorage.getItem("theme") as "light" | "dark" | null) ?? "dark";
     setTheme(saved);
     document.documentElement.dataset.theme = saved;
   }, []);
