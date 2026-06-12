@@ -5,6 +5,8 @@ import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { Topbar } from "./Topbar";
 import { Dock } from "./Dock";
+import { PageTransition } from "@/components/fx";
+import { CommandPalette } from "@/components/CommandPalette";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -37,11 +39,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="min-h-screen bg-transparent">
         <Topbar />
         <main className="pb-28">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 fade-in">
-            {children}
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+            <PageTransition>{children}</PageTransition>
           </div>
         </main>
         <Dock />
+        <CommandPalette />
       </div>
     );
   }

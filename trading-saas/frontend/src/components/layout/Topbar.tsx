@@ -196,7 +196,9 @@ export function Topbar() {
 
         <button
           type="button"
-          aria-label="Buscar"
+          aria-label="Buscar (Ctrl+K)"
+          title="Buscar (Ctrl+K)"
+          onClick={() => window.dispatchEvent(new Event("open-command-palette"))}
           className="hidden sm:flex h-9 w-9 items-center justify-center rounded-full text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] transition"
         >
           <Search size={18} />
