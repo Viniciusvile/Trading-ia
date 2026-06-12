@@ -49,13 +49,13 @@ export function Modal({
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 fade-in"
     >
       <div
-        className="absolute inset-0 bg-black/45 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/70 backdrop-blur-md"
         onClick={onClose}
         aria-hidden
       />
       <div
         className={cn(
-          "relative w-full bg-[var(--color-surface)] shadow-[var(--shadow-pop)]",
+          "relative w-full bg-[var(--color-surface-2)] shadow-[var(--shadow-pop)]",
           "rounded-t-[var(--radius-lg)] sm:rounded-[var(--radius-lg)]",
           "border border-[var(--color-border)] slide-up",
           sizes[size],

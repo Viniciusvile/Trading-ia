@@ -23,10 +23,11 @@ export function Card({
   return (
     <div
       className={cn(
-        "bg-[var(--color-surface)] border border-[var(--color-border)]",
+        "bg-gradient-to-b from-[var(--color-surface-2)] to-[var(--color-surface)] border border-[var(--color-border)]",
         "rounded-[var(--radius-md)] shadow-[var(--shadow-card)]",
+        "transition-colors duration-200 hover:border-[var(--color-border-strong)]",
         interactive &&
-          "transition-all duration-200 hover:shadow-[var(--shadow-card-hover)] hover:-translate-y-0.5 cursor-pointer",
+          "transition-all hover:shadow-[var(--shadow-card-hover)] hover:-translate-y-0.5 cursor-pointer",
         paddings[padding],
         className,
       )}

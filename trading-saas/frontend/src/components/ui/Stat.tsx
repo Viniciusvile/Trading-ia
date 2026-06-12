@@ -14,9 +14,9 @@ interface StatProps {
 }
 
 const sizes = {
-  sm: { value: "text-lg", label: "text-[11px]" },
-  md: { value: "text-2xl", label: "text-xs" },
-  lg: { value: "text-3xl sm:text-4xl", label: "text-xs" },
+  sm: { value: "text-xl tracking-tight", label: "text-[10px]" },
+  md: { value: "text-2xl tracking-tight", label: "text-[11px]" },
+  lg: { value: "text-3xl sm:text-4xl tracking-tight", label: "text-xs" },
 };
 
 export function Stat({ label, value, delta, hint, icon, size = "md", className }: StatProps) {
@@ -26,7 +26,7 @@ export function Stat({ label, value, delta, hint, icon, size = "md", className }
     <div className={cn("flex flex-col gap-1", className)}>
       <div className="flex items-center gap-2">
         {icon && <span className="text-[var(--color-muted)]">{icon}</span>}
-        <span className={cn("uppercase tracking-wide font-medium text-muted", s.label)}>
+        <span className={cn("uppercase tracking-[0.08em] font-semibold text-muted", s.label)}>
           {label}
         </span>
       </div>

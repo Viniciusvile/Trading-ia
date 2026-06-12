@@ -16,8 +16,9 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variants: Record<Variant, string> = {
+  // Assinatura Fey: botão primário claro sobre fundo escuro (inverte no tema claro)
   primary:
-    "bg-[var(--color-brand-500)] text-white hover:bg-[var(--color-brand-600)] active:bg-[var(--color-brand-700)] shadow-[var(--shadow-brand)]",
+    "bg-[var(--color-text)] text-[var(--color-bg)] hover:opacity-90 active:opacity-80",
   secondary:
     "bg-[var(--color-surface-3)] text-[var(--color-text)] hover:bg-[var(--color-border)] border border-[var(--color-border)]",
   ghost:
