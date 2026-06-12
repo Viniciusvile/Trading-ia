@@ -68,36 +68,34 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center p-4 relative overflow-hidden bg-[var(--color-bg)]">
-      {/* Decorative background grid and gradients */}
-      <div className="absolute inset-0 opacity-30 pointer-events-none">
-        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-gradient-to-br from-[var(--color-brand-500)] to-transparent blur-[120px]" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-gradient-to-tr from-[var(--color-up-500)] to-transparent blur-[120px]" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(0,51,160,0.08),rgba(255,255,255,0))]" />
+      {/* Glow central sutil (estilo Welcome to Fey) */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-[-15%] left-1/2 -translate-x-1/2 w-[720px] h-[420px] rounded-full bg-[var(--color-brand-500)]/8 blur-[120px]" />
       </div>
 
-      <div className="w-full max-w-md z-10 slide-up">
+      <div className="w-full max-w-sm z-10 slide-up">
         {/* Logo and header */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center p-3 rounded-2xl bg-gradient-to-tr from-[var(--color-brand-500)] to-[var(--color-brand-400)] text-white shadow-[var(--shadow-brand)] mb-4">
-            <TrendingUp className="w-8 h-8" />
+          <div className="inline-flex items-center justify-center h-12 w-12 rounded-full bg-[var(--color-text)] text-[var(--color-bg)] mb-5">
+            <TrendingUp className="w-6 h-6" />
           </div>
-          <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-[var(--color-brand-500)] to-[var(--color-up-500)] bg-clip-text text-transparent">
-            Trading SaaS
+          <h1 className="text-3xl font-bold tracking-tight text-[var(--color-text)]">
+            Bem-vindo ao Trading SaaS
           </h1>
-          <p className="text-sm text-[var(--color-muted)] mt-2">
-            A plataforma definitiva de inteligência e automatização
+          <p className="text-sm text-[var(--color-muted)] mt-3">
+            Entre para acompanhar seus robôs, estratégias e resultados.
           </p>
         </div>
 
         {/* Auth card */}
-        <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[20px] shadow-[var(--shadow-pop)] p-6 sm:p-8">
+        <div className="bg-[var(--color-surface)]/60 backdrop-blur-xl border border-[var(--color-border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-pop)] p-6 sm:p-8">
           {/* Tabs */}
-          <div className="flex p-1 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-xl mb-6">
+          <div className="flex p-1 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-full mb-6">
             <button
               type="button"
-              className={`flex-1 text-center py-2.5 text-sm font-semibold rounded-lg transition-all ${
+              className={`flex-1 text-center py-2 text-sm font-semibold rounded-full transition-all ${
                 !isRegister
-                  ? "bg-[var(--color-surface)] text-[var(--color-brand-500)] shadow-sm"
+                  ? "bg-[var(--color-surface-3)] text-[var(--color-text)]"
                   : "text-[var(--color-muted)] hover:text-[var(--color-text)]"
               }`}
               onClick={() => {
@@ -111,9 +109,9 @@ export default function LoginPage() {
             </button>
             <button
               type="button"
-              className={`flex-1 text-center py-2.5 text-sm font-semibold rounded-lg transition-all ${
+              className={`flex-1 text-center py-2 text-sm font-semibold rounded-full transition-all ${
                 isRegister
-                  ? "bg-[var(--color-surface)] text-[var(--color-brand-500)] shadow-sm"
+                  ? "bg-[var(--color-surface-3)] text-[var(--color-text)]"
                   : "text-[var(--color-muted)] hover:text-[var(--color-text)]"
               }`}
               onClick={() => {
@@ -143,7 +141,7 @@ export default function LoginPage() {
                   placeholder="seu@email.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-11 pr-4 py-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-text)] placeholder-[var(--color-muted-2)] focus:outline-none focus:border-[var(--color-brand-500)] focus:ring-4 focus:ring-[var(--color-brand-500)]/10 transition-all text-sm"
+                  className="w-full pl-11 pr-4 py-3 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-text)] placeholder-[var(--color-muted-2)] focus:outline-none focus:border-[var(--color-border-strong)] transition-all text-sm"
                 />
               </div>
             </div>
@@ -163,7 +161,7 @@ export default function LoginPage() {
                   placeholder="Sua senha secreta"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-11 pr-11 py-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-text)] placeholder-[var(--color-muted-2)] focus:outline-none focus:border-[var(--color-brand-500)] focus:ring-4 focus:ring-[var(--color-brand-500)]/10 transition-all text-sm"
+                  className="w-full pl-11 pr-11 py-3 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-text)] placeholder-[var(--color-muted-2)] focus:outline-none focus:border-[var(--color-border-strong)] transition-all text-sm"
                 />
                 <button
                   type="button"
@@ -191,7 +189,7 @@ export default function LoginPage() {
                     placeholder="Repita sua senha secreta"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full pl-11 pr-11 py-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-text)] placeholder-[var(--color-muted-2)] focus:outline-none focus:border-[var(--color-brand-500)] focus:ring-4 focus:ring-[var(--color-brand-500)]/10 transition-all text-sm"
+                    className="w-full pl-11 pr-11 py-3 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-text)] placeholder-[var(--color-muted-2)] focus:outline-none focus:border-[var(--color-border-strong)] transition-all text-sm"
                   />
                 </div>
               </div>
@@ -201,7 +199,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex items-center justify-center gap-2 py-3.5 px-4 mt-6 text-sm font-semibold rounded-xl text-white bg-gradient-to-r from-[var(--color-brand-500)] to-[var(--color-brand-600)] hover:brightness-110 shadow-[var(--shadow-brand)] active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none"
+              className="w-full flex items-center justify-center gap-2 py-3.5 px-4 mt-6 text-sm font-semibold rounded-full bg-[var(--color-text)] text-[var(--color-bg)] hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none"
             >
               {loading ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -225,7 +223,7 @@ export default function LoginPage() {
                   <button
                     type="button"
                     onClick={() => setIsRegister(false)}
-                    className="font-semibold text-[var(--color-brand-500)] hover:underline"
+                    className="font-semibold text-[var(--color-brand-300)] hover:underline"
                   >
                     Entrar aqui
                   </button>
@@ -236,7 +234,7 @@ export default function LoginPage() {
                   <button
                     type="button"
                     onClick={() => setIsRegister(true)}
-                    className="font-semibold text-[var(--color-brand-500)] hover:underline"
+                    className="font-semibold text-[var(--color-brand-300)] hover:underline"
                   >
                     Crie sua conta grátis
                   </button>
