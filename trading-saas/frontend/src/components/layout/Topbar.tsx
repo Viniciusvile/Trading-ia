@@ -26,6 +26,7 @@ export function Topbar() {
     } catch {}
   }, []);
   const [balance, setBalance] = useState<{ spot: number; futures: number }>({ spot: 0, futures: 0 });
+  const [pnl24h, setPnl24h] = useState(0);
   const [loading, setLoading] = useState(true);
 
   // Multi-account states
@@ -79,15 +80,21 @@ export function Topbar() {
     let active = true;
     async function fetchBalance() {
       try {
-        const res = await api.botBalance();
-        if (active && res && res.success) {
+        const [balRes, sumRes] = await Promise.all([
+          api.botBalance(),
+          api.dashboardSummary()
+        ]);
+        if (active && balRes && balRes.success) {
           setBalance({
-            spot: res.spot ?? 0,
-            futures: res.futures ?? 0,
+            spot: balRes.spot ?? 0,
+            futures: balRes.futures ?? 0,
           });
         }
+        if (active && sumRes && sumRes.success) {
+          setPnl24h(sumRes.pnlToday ?? 0);
+        }
       } catch (e) {
-        console.error("Erro ao carregar saldo:", e);
+        console.error("Erro ao carregar saldo/resumo:", e);
       } finally {
         if (active) setLoading(false);
       }
@@ -107,6 +114,13 @@ export function Topbar() {
     document.documentElement.dataset.theme = next;
     localStorage.setItem("theme", next);
   }
+
+  const totalBalance = balance.spot + balance.futures;
+  const prevBalance = totalBalance - pnl24h;
+  const pnlPercent = prevBalance > 0 ? (pnl24h / prevBalance) * 100 : 0;
+  const isProfit = pnl24h >= 0;
+  const tone = isProfit ? "up" : "down";
+  const formattedPercent = `${isProfit ? "+" : ""}${pnlPercent.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
 
   return (
     <header className="sticky top-0 z-20 bg-[var(--color-bg)]/70 backdrop-blur-xl">
@@ -192,8 +206,8 @@ export function Topbar() {
               {loading ? "Carregando..." : fmtUSD(balance.spot + balance.futures)}
             </span>
           </div>
-          <Badge tone="up" dot size="sm" className="ml-auto">
-            +0,00%
+          <Badge tone={tone} dot size="sm" className="ml-auto">
+            {formattedPercent}
           </Badge>
         </div>
 
