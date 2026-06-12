@@ -253,7 +253,7 @@ export function BalanceChartModal({ open, onClose }: BalanceChartModalProps) {
         </div>
       }
     >
-      <div className="space-y-5">
+      <div className="space-y-4 sm:space-y-5">
         {/* Seção Principal de Saldo (Estilo Fey v2) */}
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 bg-[var(--color-surface-3)]/30 border border-[var(--color-border)] p-5 rounded-2xl">
           <div className="space-y-1">
@@ -373,7 +373,7 @@ export function BalanceChartModal({ open, onClose }: BalanceChartModalProps) {
         </div>
 
         {/* Área do gráfico */}
-        <div className="h-64 w-full bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] p-3 relative flex items-center justify-center">
+        <div className="h-44 sm:h-56 md:h-64 w-full bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] p-3 relative flex items-center justify-center">
           {loading ? (
             <div className="flex flex-col items-center gap-2 text-xs text-muted">
               <div className="w-6 h-6 border-2 border-muted border-t-[var(--color-brand-500)] rounded-full animate-spin" />

@@ -46,7 +46,7 @@ export function Modal({
     <div
       role="dialog"
       aria-modal
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 md:p-10 fade-in"
+      className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-6 md:p-10 fade-in overflow-y-auto"
     >
       <div
         className="fixed inset-0 bg-black/75 backdrop-blur-md"
@@ -55,7 +55,7 @@ export function Modal({
       />
       <div
         className={cn(
-          "relative w-full max-h-[85vh] sm:max-h-[90vh] flex flex-col bg-[var(--color-surface-2)] shadow-[var(--shadow-pop)]",
+          "relative w-full my-auto max-h-[85vh] sm:max-h-[90vh] flex flex-col bg-[var(--color-surface-2)] shadow-[var(--shadow-pop)]",
           "rounded-[var(--radius-lg)]",
           "border border-[var(--color-border)] slide-up overflow-hidden",
           sizes[size],
