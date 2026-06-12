@@ -186,6 +186,35 @@ export default function InicioPage() {
         </div>
       </Card>
 
+      {/* Cards de métricas resumidas — clicáveis: abrem o detalhamento */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <button type="button" onClick={() => setMetricModal("pnl")} className="text-left cursor-pointer">
+          <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
+            <Stat label="P&L hoje" value={loading ? "..." : fmtUSD(pnl24h)} hint="realizado hoje (UTC) · clique p/ detalhes" size="sm" />
+          </Card>
+        </button>
+        <button type="button" onClick={() => setMetricModal("ops")} className="text-left cursor-pointer">
+          <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
+            <Stat label="Operações" value={loading ? "..." : String(opsToday)} hint="hoje · clique p/ detalhes" size="sm" />
+          </Card>
+        </button>
+        <button type="button" onClick={() => setMetricModal("winrate")} className="text-left cursor-pointer">
+          <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
+            <Stat
+              label="Taxa de acerto"
+              value={loading ? "..." : winRate30d != null ? `${Math.round(winRate30d * 100)}%` : "—"}
+              hint={winRate30d != null ? `${trades30d} trades em 30 dias · clique p/ detalhes` : "sem trades em 30 dias"}
+              size="sm"
+            />
+          </Card>
+        </button>
+        <button type="button" onClick={() => router.push("/bots")} className="text-left cursor-pointer">
+          <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
+            <Stat label="Bots ativos" value={`${activeBotsCount} / 3`} hint="rodando agora · clique p/ gerenciar" size="sm" />
+          </Card>
+        </button>
+      </div>
+
       {/* Grid principal estilo "Hello" do Fey: mercado em destaque + feed */}
       <div className="grid lg:grid-cols-5 gap-4">
         {/* ESQUERDA — gráfico real do mercado */}
@@ -257,35 +286,6 @@ export default function InicioPage() {
             </Link>
           </Card>
         </div>
-      </div>
-
-      {/* Cards de métricas resumidas — clicáveis: abrem o detalhamento */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <button type="button" onClick={() => setMetricModal("pnl")} className="text-left cursor-pointer">
-          <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
-            <Stat label="P&L hoje" value={loading ? "..." : fmtUSD(pnl24h)} hint="realizado hoje (UTC) · clique p/ detalhes" size="sm" />
-          </Card>
-        </button>
-        <button type="button" onClick={() => setMetricModal("ops")} className="text-left cursor-pointer">
-          <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
-            <Stat label="Operações" value={loading ? "..." : String(opsToday)} hint="hoje · clique p/ detalhes" size="sm" />
-          </Card>
-        </button>
-        <button type="button" onClick={() => setMetricModal("winrate")} className="text-left cursor-pointer">
-          <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
-            <Stat
-              label="Taxa de acerto"
-              value={loading ? "..." : winRate30d != null ? `${Math.round(winRate30d * 100)}%` : "—"}
-              hint={winRate30d != null ? `${trades30d} trades em 30 dias · clique p/ detalhes` : "sem trades em 30 dias"}
-              size="sm"
-            />
-          </Card>
-        </button>
-        <button type="button" onClick={() => router.push("/bots")} className="text-left cursor-pointer">
-          <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
-            <Stat label="Bots ativos" value={`${activeBotsCount} / 3`} hint="rodando agora · clique p/ gerenciar" size="sm" />
-          </Card>
-        </button>
       </div>
 
       {/* Modais de detalhamento das métricas */}
