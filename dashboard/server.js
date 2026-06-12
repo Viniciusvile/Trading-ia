@@ -371,7 +371,7 @@ const PLAN_PRESETS = {
 
 app.patch('/api/micro-scalper/config', authenticateToken, async (req, res) => {
   try {
-    const { plan, action, max_trade_usdt } = req.body; // action: 'add' | 'remove' | 'toggle'
+    const { plan, action, max_trade_usdt, timeout_enabled } = req.body; // action: 'add' | 'remove' | 'toggle'
 
     // Estado do PRÓPRIO usuário (banco por cima dos defaults globais) — cada
     // conta edita só a sua config; o robô real segue a config do DONO.
@@ -381,6 +381,7 @@ app.patch('/api/micro-scalper/config', authenticateToken, async (req, res) => {
       plans: { ...(merged.plans || {}) },
       ...(merged.max_trade_usdt !== undefined ? { max_trade_usdt: merged.max_trade_usdt } : {}),
       ...(merged.min_trade_usdt !== undefined ? { min_trade_usdt: merged.min_trade_usdt } : {}),
+      ...(merged.timeout_enabled !== undefined ? { timeout_enabled: merged.timeout_enabled } : {}),
     };
 
     if (max_trade_usdt !== undefined) {
@@ -391,6 +392,10 @@ app.patch('/api/micro-scalper/config', authenticateToken, async (req, res) => {
       }
       userCfg.max_trade_usdt = val;
       userCfg.min_trade_usdt = parseFloat((val * 0.6).toFixed(2)); // 60% do max
+    }
+
+    if (timeout_enabled !== undefined) {
+      userCfg.timeout_enabled = !!timeout_enabled;
     }
 
     if (plan && PLAN_PRESETS[plan]) {

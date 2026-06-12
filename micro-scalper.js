@@ -145,7 +145,8 @@ async function main() {
   }
   await db.writeMicroHeartbeat(process.pid).catch(() => {});
   const activeSymbols = mainConfig.active_symbols || [];
-  console.log(`\n🤖 [MULTI-SCALPER] INICIADO — Símbolos: ${activeSymbols.join(", ")}`);
+  const globalTimeoutEnabled = mainConfig.timeout_enabled !== false;
+  console.log(`\n🤖 [MULTI-SCALPER] INICIADO — Símbolos: ${activeSymbols.join(", ")} | Timeout Segurança: ${globalTimeoutEnabled ? "ATIVADO (1h)" : "DESATIVADO"}`);
   
   await client.syncTime();
   
@@ -223,7 +224,7 @@ async function main() {
         const pos = createPosition({
           side: "buy", entryPrice: entryPriceToUse, qty: finalQty,
           tpPct: cfg.tp_pct || 0.015, slPct: cfg.sl_pct || 0.01,
-          openedAt: openedAt, maxHoldMs: cfg.max_hold_ms || mainConfig.max_hold_ms || 3600000
+          openedAt: openedAt, maxHoldMs: globalTimeoutEnabled ? (cfg.max_hold_ms || mainConfig.max_hold_ms || 3600000) : 999999999999
         });
         
         const dbId = logEntry?.id || `POS-SCALPER-${openedAt}`;
@@ -581,7 +582,7 @@ async function main() {
                 s.pos = createPosition({
                   side: "buy", entryPrice, qty: open.qty,
                   tpPct: cfg.tp_pct || 0.015, slPct: cfg.sl_pct || 0.01,
-                  openedAt: now, maxHoldMs: cfg.max_hold_ms || mainConfig.max_hold_ms || 3600000,
+                  openedAt: now, maxHoldMs: globalTimeoutEnabled ? (cfg.max_hold_ms || mainConfig.max_hold_ms || 3600000) : 999999999999,
                 });
                 
                 const dbId = `POS-SCALPER-${now}`;

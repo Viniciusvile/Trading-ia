@@ -101,6 +101,7 @@ export default function BotsPage() {
     max_trade_usdt: 20,
     loop_interval_ms: 5000,
     active_symbols: [] as string[],
+    timeout_enabled: true,
   });
 
   // Logs Modal State
@@ -258,6 +259,7 @@ export default function BotsPage() {
             max_trade_usdt: configData.config.max_trade_usdt || 20,
             loop_interval_ms: configData.config.loop_interval_ms || 5000,
             active_symbols: configData.config.active_symbols || [],
+            timeout_enabled: configData.config.timeout_enabled !== false,
           });
         }
       }
@@ -296,6 +298,7 @@ export default function BotsPage() {
           headers: authHeaders,
           body: JSON.stringify({
             max_trade_usdt: microConfig.max_trade_usdt,
+            timeout_enabled: microConfig.timeout_enabled,
           }),
         }).then(r => r.json());
       }
@@ -833,6 +836,19 @@ export default function BotsPage() {
               value={microConfig.max_trade_usdt}
               onChange={e => setMicroConfig(prev => ({ ...prev, max_trade_usdt: Number(e.target.value) }))}
             />
+
+            <div className="flex items-center justify-between p-3 rounded bg-[var(--color-surface-2)] border border-[var(--color-border)]">
+              <div>
+                <div className="text-xs font-semibold">Timeout de Segurança (1h)</div>
+                <div className="text-[10px] text-muted">Fecha automaticamente após 1 hora para evitar posições presas.</div>
+              </div>
+              <input
+                type="checkbox"
+                checked={microConfig.timeout_enabled}
+                onChange={e => setMicroConfig(prev => ({ ...prev, timeout_enabled: e.target.checked }))}
+                className="w-4 h-4 text-[var(--color-brand-500)] cursor-pointer"
+              />
+            </div>
 
             <div className="text-xs text-muted">
               * O Micro-Scalper roda de forma automatizada operando múltiplos ativos baseados nos presets de sinal do robô (XRP, SOL, etc.). A quantidade comprada respeita o limite financeiro configurado acima.
