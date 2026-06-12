@@ -46,16 +46,16 @@ export function Modal({
     <div
       role="dialog"
       aria-modal
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 fade-in"
+      className="fixed inset-0 z-50 flex items-end sm:items-start justify-center p-0 sm:p-4 md:p-8 fade-in overflow-y-auto"
     >
       <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-md"
+        className="fixed inset-0 bg-black/70 backdrop-blur-md"
         onClick={onClose}
         aria-hidden
       />
       <div
         className={cn(
-          "relative w-full bg-[var(--color-surface-2)] shadow-[var(--shadow-pop)]",
+          "relative w-full sm:my-auto bg-[var(--color-surface-2)] shadow-[var(--shadow-pop)]",
           "rounded-t-[var(--radius-lg)] sm:rounded-[var(--radius-lg)]",
           "border border-[var(--color-border)] slide-up",
           sizes[size],
