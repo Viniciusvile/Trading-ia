@@ -49,6 +49,7 @@ export default function PosicoesPage() {
   const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
   const [reconciling, setReconciling] = useState(false);
   const [reconcileMsg, setReconcileMsg] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   async function handleReconcile() {
     setReconciling(true);
@@ -165,6 +166,35 @@ export default function PosicoesPage() {
       return dateB - dateA;
     });
 
+  const itemsPerPage = 10;
+  const totalPages = Math.max(1, Math.ceil(closedPositions.length / itemsPerPage));
+  const activePage = Math.min(currentPage, totalPages);
+  const paginatedClosedPositions = closedPositions.slice(
+    (activePage - 1) * itemsPerPage,
+    activePage * itemsPerPage
+  );
+
+  const getPageNumbers = () => {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, i) => i + 1);
+    }
+    const pages: (number | string)[] = [];
+    pages.push(1);
+    if (activePage > 3) {
+      pages.push("...");
+    }
+    const start = Math.max(2, activePage - 1);
+    const end = Math.min(totalPages - 1, activePage + 1);
+    for (let i = start; i <= end; i++) {
+      pages.push(i);
+    }
+    if (activePage < totalPages - 2) {
+      pages.push("...");
+    }
+    pages.push(totalPages);
+    return pages;
+  };
+
   // Calculate real-time stats
   let totalUnrealizedPnL = 0;
   const enrichedOpenPositions = openPositions.map((pos) => {
@@ -269,7 +299,7 @@ export default function PosicoesPage() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">
         
         {/* Main Area (3/4 on desktop) */}
-        <div className="lg:col-span-3 space-y-5">
+        <div className="lg:col-span-3 space-y-5 min-w-0">
           
           {/* Stats Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
@@ -440,20 +470,20 @@ export default function PosicoesPage() {
               />
             ) : (
               <div className="overflow-x-auto mt-4">
-                <table className="w-full min-w-[900px] text-left border-collapse">
+                <table className="w-full min-w-[700px] text-left border-collapse">
                   <thead>
                     <tr className="border-b border-[var(--color-border)] text-[10px] font-semibold text-muted uppercase tracking-[0.08em]">
                       <th className="pb-3 font-medium pr-4">Ativo / Tipo</th>
                       <th className="pb-3 font-medium px-4">Lado</th>
                       <th className="pb-3 font-medium px-4">Preço Entrada</th>
-                      <th className="pb-3 font-medium px-4">Quantidade</th>
+                      <th className="pb-3 font-medium px-4 hidden sm:table-cell">Quantidade</th>
                       <th className="pb-3 font-medium px-4">P&L Realizado</th>
-                      <th className="pb-3 font-medium px-4">Status</th>
+                      <th className="pb-3 font-medium px-4 hidden md:table-cell">Status</th>
                       <th className="pb-3 font-medium pl-4">Encerramento</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/10 text-sm">
-                    {closedPositions.map((pos) => {
+                    {paginatedClosedPositions.map((pos) => {
                       const isLong = pos.side === "LONG";
                       const pnlVal = typeof (pos as any).pnl === "number" ? (pos as any).pnl : parseFloat((pos as any).pnl || "0");
                       const isProfit = pnlVal >= 0;
@@ -479,13 +509,13 @@ export default function PosicoesPage() {
                             </span>
                           </td>
                           <td className="py-4 px-4 font-mono">{fmtUSD(pos.entryPrice)}</td>
-                          <td className="py-4 px-4 font-mono text-xs">{pos.quantity}</td>
+                          <td className="py-4 px-4 font-mono text-xs hidden sm:table-cell">{pos.quantity}</td>
                           <td className="py-4 px-4 font-mono">
                             <span className={`font-bold ${isProfit ? "text-up" : "text-down"}`}>
                               {isProfit ? "+" : ""}{fmtUSD(pnlVal)}
                             </span>
                           </td>
-                          <td className="py-4 px-4">
+                          <td className="py-4 px-4 hidden md:table-cell">
                             <Badge tone="neutral">Fechada</Badge>
                           </td>
                           <td className="py-4 pl-4 text-xs text-muted font-mono">
@@ -496,6 +526,59 @@ export default function PosicoesPage() {
                     })}
                   </tbody>
                 </table>
+
+                {/* Pagination Controls */}
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6 pt-4 border-t border-[var(--color-border)] text-xs text-muted">
+                  <div>
+                    Mostrando <span className="font-semibold text-[var(--color-text)]">{(activePage - 1) * itemsPerPage + 1}</span> a{" "}
+                    <span className="font-semibold text-[var(--color-text)]">
+                      {Math.min(activePage * itemsPerPage, closedPositions.length)}
+                    </span>{" "}
+                    de <span className="font-semibold text-[var(--color-text)]">{closedPositions.length}</span> operações
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={activePage === 1}
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      className="h-8 w-8 p-0"
+                    >
+                      <ChevronLeft size={14} />
+                    </Button>
+                    
+                    <div className="flex items-center gap-1">
+                      {getPageNumbers().map((pageNum, idx) => {
+                        if (pageNum === "...") {
+                          return <span key={`ellipsis-${idx}`} className="px-1.5 text-muted select-none">...</span>;
+                        }
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => setCurrentPage(Number(pageNum))}
+                            className={`h-8 min-w-8 px-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                              pageNum === activePage
+                                ? "bg-[var(--color-text)] text-[var(--color-bg)]"
+                                : "text-muted hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]"
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={activePage === totalPages}
+                      onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                      className="h-8 w-8 p-0"
+                    >
+                      <ChevronRight size={14} />
+                    </Button>
+                  </div>
+                </div>
               </div>
             )}
           </Card>
