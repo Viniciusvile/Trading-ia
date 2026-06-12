@@ -5,7 +5,7 @@ import { Modal } from "@/components/ui/Modal";
 import { Card, Stat, Badge } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtUSD } from "@/lib/format";
-import { TrendingUp, TrendingDown, Calendar, Percent } from "lucide-react";
+import { TrendingUp, TrendingDown, Calendar, Award, BarChart2, DollarSign } from "lucide-react";
 import {
   AreaChart,
   Area,
@@ -32,15 +32,20 @@ export function BalanceChartModal({ open, onClose }: BalanceChartModalProps) {
   const [isMounted, setIsMounted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [chartData, setChartData] = useState<ChartPoint[]>([]);
+  const [closedPositions, setClosedPositions] = useState<any[]>([]);
   const [timeframe, setTimeframe] = useState<"7d" | "30d" | "all">("30d");
 
-  // Estatísticas do período
+  // Estatísticas calculadas
   const [stats, setStats] = useState({
     current: 0,
     changeUsd: 0,
     changePct: 0,
     max: 0,
     min: 0,
+    totalTrades: 0,
+    winRate: 0,
+    bestTrade: 0,
+    worstTrade: 0,
   });
 
   useEffect(() => {
@@ -71,6 +76,8 @@ export function BalanceChartModal({ open, onClose }: BalanceChartModalProps) {
                 new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime()
             );
 
+          setClosedPositions(closed);
+
           let balanceTracker = currentBal;
           const rawPoints: ChartPoint[] = [];
 
@@ -91,12 +98,7 @@ export function BalanceChartModal({ open, onClose }: BalanceChartModalProps) {
           });
 
           for (const pos of closed) {
-            // Se a posição foi fechada, removemos o PnL dela para saber o saldo antes
-            const pnl = parseFloat(pos.takeProfitPrice ? String(pos.takeProfitPrice) : "0") - parseFloat(String(pos.entryPrice));
-            // Mas o pnl correto já vem no objeto do banco se estiver gravado.
-            // Para maior robustez, usamos o pnl gravado na posição:
             const actualPnl = parseFloat((pos as any).pnl) || 0;
-            
             balanceTracker -= actualPnl;
             const dateObj = new Date(pos.openedAt);
             rawPoints.push({
@@ -177,10 +179,25 @@ export function BalanceChartModal({ open, onClose }: BalanceChartModalProps) {
     const balances = filtered.map((p) => p.balance);
     const minVal = Math.min(...balances);
     const maxVal = Math.max(...balances);
-    const currentVal = balances[balances.length - 1];
+    const currentVal = chartData[chartData.length - 1].balance; // O saldo atual real da conta é sempre o último ponto real
     const initialVal = balances[0];
     const changeUsd = currentVal - initialVal;
     const changePct = initialVal > 0 ? (changeUsd / initialVal) * 100 : 0;
+
+    // Métricas dos trades fechados no período
+    const periodClosed = closedPositions.filter((p) => {
+      const t = new Date(p.openedAt).getTime();
+      if (timeframe === "7d") return t >= now - 7 * 86400 * 1000;
+      if (timeframe === "30d") return t >= now - 30 * 86400 * 1000;
+      return true;
+    });
+
+    const totalTrades = periodClosed.length;
+    const wins = periodClosed.filter((p) => (parseFloat(p.pnl) || 0) > 0).length;
+    const winRate = totalTrades ? (wins / totalTrades) * 100 : 0;
+    const pnls = periodClosed.map((p) => parseFloat(p.pnl) || 0);
+    const bestTrade = pnls.length ? Math.max(...pnls) : 0;
+    const worstTrade = pnls.length ? Math.min(...pnls) : 0;
 
     setStats({
       current: currentVal,
@@ -188,8 +205,12 @@ export function BalanceChartModal({ open, onClose }: BalanceChartModalProps) {
       changePct,
       max: maxVal,
       min: minVal,
+      totalTrades,
+      winRate,
+      bestTrade,
+      worstTrade,
     });
-  }, [chartData, timeframe]);
+  }, [chartData, timeframe, closedPositions]);
 
   if (!isMounted) return null;
 
@@ -223,25 +244,53 @@ export function BalanceChartModal({ open, onClose }: BalanceChartModalProps) {
           </div>
           <div>
             <h2 className="text-sm font-semibold text-[var(--color-text)]">
-              Evolução do Saldo
+              Desempenho da Carteira
             </h2>
-            <p className="text-[10px] text-muted">
-              Histórico consolidado da conta
+            <p className="text-[10px] text-muted font-medium">
+              Evolução e estatísticas consolidadas
             </p>
           </div>
         </div>
       }
     >
-      <div className="space-y-4">
-        {/* Filtros de período */}
-        <div className="flex items-center justify-between gap-2 border-b border-[var(--color-border)] pb-3">
-          <div className="flex items-center gap-1.5 bg-[var(--color-surface-3)] p-0.5 rounded-lg text-[11px] font-medium">
+      <div className="space-y-5">
+        {/* Seção Principal de Saldo (Estilo Fey v2) */}
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 bg-[var(--color-surface-3)]/30 border border-[var(--color-border)] p-5 rounded-2xl">
+          <div className="space-y-1">
+            <span className="text-[10px] text-muted font-bold uppercase tracking-wider">
+              Saldo Atual Consolidado
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl sm:text-4xl font-extrabold text-[var(--color-text)] tracking-tight tabular-nums">
+                {loading ? "..." : fmtUSD(stats.current)}
+              </span>
+              <Badge tone={isProfit ? "up" : "down"} size="sm" className="font-semibold">
+                {isProfit ? "+" : ""}
+                {stats.changePct.toLocaleString("pt-BR", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+                %
+              </Badge>
+            </div>
+            <div className="text-[11px] text-muted flex items-center gap-1 font-medium">
+              <span>Retorno de</span>
+              <span className={isProfit ? "text-up font-semibold" : "text-down font-semibold"}>
+                {isProfit ? "+" : ""}
+                {fmtUSD(stats.changeUsd)}
+              </span>
+              <span>no período selecionado</span>
+            </div>
+          </div>
+
+          {/* Filtros de período */}
+          <div className="flex items-center gap-1 bg-[var(--color-surface-3)] p-0.5 rounded-lg border border-[var(--color-border)] text-[11px] font-medium h-fit shrink-0">
             <button
               type="button"
               onClick={() => setTimeframe("7d")}
               className={`px-3 py-1 rounded-md transition cursor-pointer ${
                 timeframe === "7d"
-                  ? "bg-[var(--color-surface-2)] text-[var(--color-text)] shadow-sm"
+                  ? "bg-[var(--color-surface-2)] text-[var(--color-text)] shadow-sm font-semibold"
                   : "text-muted hover:text-[var(--color-text)]"
               }`}
             >
@@ -252,7 +301,7 @@ export function BalanceChartModal({ open, onClose }: BalanceChartModalProps) {
               onClick={() => setTimeframe("30d")}
               className={`px-3 py-1 rounded-md transition cursor-pointer ${
                 timeframe === "30d"
-                  ? "bg-[var(--color-surface-2)] text-[var(--color-text)] shadow-sm"
+                  ? "bg-[var(--color-surface-2)] text-[var(--color-text)] shadow-sm font-semibold"
                   : "text-muted hover:text-[var(--color-text)]"
               }`}
             >
@@ -263,48 +312,62 @@ export function BalanceChartModal({ open, onClose }: BalanceChartModalProps) {
               onClick={() => setTimeframe("all")}
               className={`px-3 py-1 rounded-md transition cursor-pointer ${
                 timeframe === "all"
-                  ? "bg-[var(--color-surface-2)] text-[var(--color-text)] shadow-sm"
+                  ? "bg-[var(--color-surface-2)] text-[var(--color-text)] shadow-sm font-semibold"
                   : "text-muted hover:text-[var(--color-text)]"
               }`}
             >
               Tudo
             </button>
           </div>
-
-          <Badge tone={isProfit ? "up" : "down"} dot size="sm">
-            {isProfit ? "+" : ""}
-            {stats.changePct.toLocaleString("pt-BR", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
-            % no período
-          </Badge>
         </div>
 
-        {/* Resumo de estatísticas */}
-        <div className="grid grid-cols-3 gap-3">
-          <Card padding="md" className="bg-[var(--color-surface-3)]/40 border-none">
-            <div className="text-[9px] uppercase tracking-wider text-muted font-semibold mb-1">
-              Saldo Atual
+        {/* Grade de Estatísticas Detalhadas */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <Card padding="sm" className="bg-[var(--color-surface-3)]/20 border-[var(--color-border)]/50">
+            <div className="text-[9px] uppercase tracking-wider text-muted font-bold mb-1 flex items-center gap-1">
+              <Award size={10} className="text-brand-300" /> Taxa de Acerto
             </div>
             <div className="text-sm font-bold text-[var(--color-text)]">
-              {loading ? "..." : fmtUSD(stats.current)}
+              {loading ? "..." : `${Math.round(stats.winRate)}%`}
+            </div>
+            <div className="text-[9px] text-muted mt-0.5 font-medium">
+              {stats.totalTrades} operações no total
             </div>
           </Card>
-          <Card padding="md" className="bg-[var(--color-surface-3)]/40 border-none">
-            <div className="text-[9px] uppercase tracking-wider text-muted font-semibold mb-1">
-              Retorno
+
+          <Card padding="sm" className="bg-[var(--color-surface-3)]/20 border-[var(--color-border)]/50">
+            <div className="text-[9px] uppercase tracking-wider text-muted font-bold mb-1 flex items-center gap-1">
+              <TrendingUp size={10} className="text-up" /> Melhor Operação
             </div>
-            <div className={`text-sm font-bold ${isProfit ? "text-up" : "text-down"}`}>
-              {loading ? "..." : `${isProfit ? "+" : ""}${fmtUSD(stats.changeUsd)}`}
+            <div className="text-sm font-bold text-up">
+              {loading ? "..." : `+${fmtUSD(stats.bestTrade)}`}
+            </div>
+            <div className="text-[9px] text-muted mt-0.5 font-medium">
+              Maior lucro registrado
             </div>
           </Card>
-          <Card padding="md" className="bg-[var(--color-surface-3)]/40 border-none">
-            <div className="text-[9px] uppercase tracking-wider text-muted font-semibold mb-1">
-              Pico do Período
+
+          <Card padding="sm" className="bg-[var(--color-surface-3)]/20 border-[var(--color-border)]/50">
+            <div className="text-[9px] uppercase tracking-wider text-muted font-bold mb-1 flex items-center gap-1">
+              <TrendingDown size={10} className="text-down" /> Pior Operação
+            </div>
+            <div className="text-sm font-bold text-down">
+              {loading ? "..." : fmtUSD(stats.worstTrade)}
+            </div>
+            <div className="text-[9px] text-muted mt-0.5 font-medium">
+              Maior perda registrada
+            </div>
+          </Card>
+
+          <Card padding="sm" className="bg-[var(--color-surface-3)]/20 border-[var(--color-border)]/50">
+            <div className="text-[9px] uppercase tracking-wider text-muted font-bold mb-1 flex items-center gap-1">
+              <BarChart2 size={10} className="text-amber-500" /> Pico da Conta
             </div>
             <div className="text-sm font-bold text-emerald-400">
               {loading ? "..." : fmtUSD(stats.max)}
+            </div>
+            <div className="text-[9px] text-muted mt-0.5 font-medium">
+              Máximo do período
             </div>
           </Card>
         </div>
@@ -325,7 +388,7 @@ export function BalanceChartModal({ open, onClose }: BalanceChartModalProps) {
                 margin={{ top: 10, right: 5, left: -20, bottom: 0 }}
               >
                 <defs>
-                  <linearGradient id="balanceColor" x1="0" y1="0" x2="0" y2="1">
+                  <linearGradient id="balanceColorModal" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={fillColor} stopOpacity={0.25} />
                     <stop offset="95%" stopColor={fillColor} stopOpacity={0.0} />
                   </linearGradient>
@@ -375,9 +438,9 @@ export function BalanceChartModal({ open, onClose }: BalanceChartModalProps) {
                   type="monotone"
                   dataKey="balance"
                   stroke={strokeColor}
-                  strokeWidth={2}
+                  strokeWidth={2.2}
                   fillOpacity={1}
-                  fill="url(#balanceColor)"
+                  fill="url(#balanceColorModal)"
                 />
               </AreaChart>
             </ResponsiveContainer>
