@@ -39,6 +39,11 @@ export async function init() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       active     BOOLEAN NOT NULL DEFAULT true
     );
+    CREATE TABLE IF NOT EXISTS adaptive_heartbeat (
+      id  INTEGER PRIMARY KEY DEFAULT 1,
+      ts  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      pid INTEGER
+    );
     CREATE TABLE IF NOT EXISTS adaptive_reviews (
       id            BIGSERIAL PRIMARY KEY,
       created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -155,6 +160,31 @@ export async function logReview({ tradesAnalyzed, response, applied, reason, old
      VALUES ($1, $2, $3, $4, $5, $6)`,
     [tradesAnalyzed, JSON.stringify(response ?? null), applied, reason, oldVersion, newVersion]
   );
+}
+
+export async function touchHeartbeat() {
+  await getPool().query(
+    `INSERT INTO adaptive_heartbeat (id, ts, pid) VALUES (1, NOW(), $1)
+     ON CONFLICT (id) DO UPDATE SET ts = NOW(), pid = $1`,
+    [process.pid]
+  );
+}
+
+export async function readHeartbeat(maxAgeMs = 12 * 60 * 1000) {
+  const { rows } = await getPool().query("SELECT ts, pid FROM adaptive_heartbeat WHERE id = 1");
+  if (!rows.length) return { alive: false, lastSeen: null, pid: null };
+  const age = Date.now() - new Date(rows[0].ts).getTime();
+  return { alive: age < maxAgeMs, lastSeen: rows[0].ts, pid: rows[0].pid };
+}
+
+export async function getRecentReviews(limit = 10) {
+  const { rows } = await getPool().query(
+    `SELECT id, created_at, trades_analyzed, applied, reason, old_version, new_version,
+            response->>'analysis' AS analysis
+     FROM adaptive_reviews ORDER BY id DESC LIMIT $1`,
+    [limit]
+  );
+  return rows;
 }
 
 export async function getLastReviewAt() {

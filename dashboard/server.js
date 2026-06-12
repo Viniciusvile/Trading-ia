@@ -4,6 +4,7 @@
 import express from 'express';
 import { createServer } from 'node:http';
 import * as db from '../masterbot/db.js';
+import * as adaptiveStore from '../adaptive-bot/lib/store.js';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { fileURLToPath } from 'node:url';
@@ -2895,6 +2896,47 @@ app.get('/api/micro-scalper/status', authenticateToken, async (req, res) => {
     // Ativos ativos NA VISÃO DO USUÁRIO (config dele no banco)
     const activeSymbols = (await getMergedMicroConfig(req.user.id))?.active_symbols || [];
     res.json({ success: true, running, pid, lastSeen: hb.lastSeen, lastSession, activeSymbols });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ─── AdaptiveBot (bot auto-adaptativo com Gemini) ────────────────────────────
+// Somente leitura: o bot roda como processo pm2 próprio (adaptivebot) e este
+// endpoint expõe o estado dele (params ativos, trades, lições e revisões).
+let adaptiveInitPromise = null;
+function ensureAdaptiveInit() {
+  if (!adaptiveInitPromise) adaptiveInitPromise = adaptiveStore.init().catch((e) => { adaptiveInitPromise = null; throw e; });
+  return adaptiveInitPromise;
+}
+
+app.get('/api/adaptive/status', authenticateToken, async (req, res) => {
+  try {
+    await ensureAdaptiveInit();
+    const [hb, active, openTrades, lessons, reviews] = await Promise.all([
+      adaptiveStore.readHeartbeat(),
+      adaptiveStore.getActiveParams(),
+      adaptiveStore.getOpenTrades(),
+      adaptiveStore.getActiveLessons(10),
+      adaptiveStore.getRecentReviews(10),
+    ]);
+    const since30d = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+    const closed = await adaptiveStore.getClosedTradesSince(since30d, 100);
+    const wins = closed.filter((t) => Number(t.return_pct) > 0).length;
+    res.json({
+      success: true,
+      running: hb.alive,
+      lastSeen: hb.lastSeen,
+      paper: true, // execução real ainda fora de escopo — sempre paper
+      params: { version: active.version, ...active.params },
+      openTrades: openTrades.map((t) => ({ id: t.id, symbol: t.symbol, openedAt: t.opened_at, entry: t.data?.entry, stop: t.data?.stop, tp: t.data?.tp })),
+      stats30d: {
+        trades: closed.length,
+        winRate: closed.length ? wins / closed.length : 0,
+        pnlPct: closed.reduce((a, t) => a + (Number(t.return_pct) || 0), 0),
+      },
+      recentTrades: closed.slice(0, 10).map((t) => ({ id: t.id, result: t.result, returnPct: Number(t.return_pct), closedAt: t.closed_at, version: Number(t.params_version) })),
+      lessons: lessons.map((l) => l.lesson),
+      reviews: reviews.map((r) => ({ at: r.created_at, applied: r.applied, reason: r.reason, analysis: r.analysis, newVersion: r.new_version != null ? Number(r.new_version) : null })),
+    });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 

@@ -94,6 +94,7 @@ async function maybeRunReview(candles) {
 }
 
 async function cycle() {
+  await store.touchHeartbeat();
   const candles = await getCandles();
   await manageOpenTrades(candles);
   await maybeOpenTrade(candles);

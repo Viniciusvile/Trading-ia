@@ -61,6 +61,33 @@ export interface BacktestTrade {
   timeframe?: string;
 }
 
+export interface AdaptiveParams {
+  version: number;
+  strategy: string;
+  sl_pct: number;
+  tp_pct: number;
+  ema_period: number;
+  rsi_period: number;
+  min_rsi: number;
+  max_rsi: number;
+  min_dip_pct: number;
+  cooldown_min: number;
+}
+
+export interface AdaptiveStatus {
+  success: boolean;
+  running: boolean;
+  lastSeen?: string | null;
+  paper: boolean;
+  params: AdaptiveParams | null;
+  openTrades: { id: number; symbol: string; openedAt: string; entry: number; stop: number; tp: number }[];
+  stats30d: { trades: number; winRate: number; pnlPct: number };
+  recentTrades: { id: number; result: string; returnPct: number; closedAt: string; version: number }[];
+  lessons: string[];
+  reviews: { at: string; applied: boolean; reason: string; analysis?: string | null; newVersion?: number | null }[];
+  error?: string;
+}
+
 export interface BacktestResult {
   ranAt: number;
   combined: BacktestStats | null;
@@ -225,6 +252,19 @@ export const api = {
 
   microScalperStatus: () =>
     safeJson<{ success: boolean; running: boolean; activeSymbols?: string[] }>("/micro-scalper/status", undefined, { success: false, running: false }),
+
+  adaptiveStatus: () =>
+    safeJson<AdaptiveStatus>("/adaptive/status", undefined, {
+      success: false,
+      running: false,
+      paper: true,
+      params: null,
+      openTrades: [],
+      stats30d: { trades: 0, winRate: 0, pnlPct: 0 },
+      recentTrades: [],
+      lessons: [],
+      reviews: [],
+    }),
 
   dashboardSummary: () =>
     safeJson<{
