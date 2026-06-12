@@ -124,28 +124,36 @@ export default function InicioPage() {
 
   return (
     <div className="space-y-5">
-      {/* Card de saldo destacado (estilo Nubank "seu saldo") */}
+      {/* Hero de saldo (estilo "Hello, the markets are..." do Fey) */}
       <Card padding="lg" className="relative overflow-hidden">
         <div
           aria-hidden
-          className="absolute -top-16 -right-16 h-56 w-56 rounded-full bg-[var(--color-brand-500)]/8 blur-2xl"
+          className="absolute -top-24 left-1/2 -translate-x-1/2 h-64 w-[480px] rounded-full bg-[var(--color-brand-500)]/10 blur-3xl"
         />
         <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 text-xs text-muted">
-              <span>Saldo total da conta</span>
-              <Tooltip content="Soma do que você tem disponível + posições abertas na corretora">
+            <div className="text-[11px] text-muted capitalize">
+              {new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" })}
+            </div>
+            <div className="text-sm text-[var(--color-text-2)] mt-1 flex items-center gap-2">
+              <span>
+                Os mercados estão{" "}
+                <span className={pnl24h > 0 ? "text-up font-semibold" : pnl24h < 0 ? "text-down font-semibold" : "text-[var(--color-text)] font-semibold"}>
+                  {pnl24h > 0 ? "a seu favor" : pnl24h < 0 ? "contra você hoje" : "neutros"}
+                </span>
+              </span>
+              <Tooltip content="Saldo total = disponível + posições abertas na corretora">
                 <CircleHelp size={13} className="text-[var(--color-muted)]" />
               </Tooltip>
             </div>
-            <div className="text-3xl sm:text-4xl font-bold tabular-nums text-[var(--color-text)] mt-1">
+            <div className="text-4xl sm:text-5xl font-bold tabular-nums tracking-tight text-[var(--color-text)] mt-3">
               {loading ? (
-                <div className="h-10 w-48 bg-[var(--color-surface-3)] animate-pulse rounded" />
+                <div className="h-12 w-56 bg-[var(--color-surface-3)] animate-pulse rounded" />
               ) : (
                 fmtUSD(totalBalance)
               )}
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
               <Badge tone={pnl24h >= 0 ? "up" : "down"} dot>
                 {pnl24h >= 0 ? "+" : ""}{fmtUSD(pnl24h)} hoje
               </Badge>
@@ -155,19 +163,33 @@ export default function InicioPage() {
           <div className="flex gap-2">
             <Link
               href="/status"
-              className="inline-flex items-center gap-2 h-10 px-4 rounded-[var(--radius-sm)] text-sm font-medium border border-[var(--color-border-strong)] text-[var(--color-text)] hover:bg-[var(--color-surface-3)] transition"
+              className="inline-flex items-center gap-2 h-10 px-4 rounded-full text-sm font-medium border border-[var(--color-border-strong)] text-[var(--color-text)] hover:bg-[var(--color-surface-3)] transition"
             >
               <Activity size={16} /> Status
             </Link>
             <Link
               href="/mercado"
-              className="inline-flex items-center gap-2 h-10 px-4 rounded-[var(--radius-sm)] text-sm font-medium bg-[var(--color-brand-500)] text-white hover:bg-[var(--color-brand-600)] shadow-[var(--shadow-brand)] transition"
+              className="inline-flex items-center gap-2 h-10 px-5 rounded-full text-sm font-semibold bg-[var(--color-text)] text-[var(--color-bg)] hover:opacity-90 transition"
             >
               Operar <ArrowRight size={16} />
             </Link>
           </div>
         </div>
       </Card>
+
+      {/* Resumo do dia (estilo "Daily recap" do Fey) — reusa dados já carregados */}
+      {activity.length > 0 && (
+        <Card padding="lg" className="bg-gradient-to-br from-[var(--color-surface-3)] to-[var(--color-surface)]">
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted font-semibold mb-2">
+            <Sparkles size={12} className="text-[var(--color-brand-300)]" /> Resumo do dia
+          </div>
+          <p className="text-sm text-[var(--color-text-2)] leading-relaxed">
+            {opsToday > 0
+              ? `Seus robôs abriram ${opsToday} operaç${opsToday > 1 ? "ões" : "ão"} hoje, com resultado realizado de ${fmtUSD(pnl24h)}. Última atividade: ${activity[0].title.toLowerCase()}.`
+              : `Nenhuma operação aberta hoje ainda — os robôs seguem varrendo o mercado. Última atividade: ${activity[0].title.toLowerCase()}.`}
+          </p>
+        </Card>
+      )}
 
       {/* Atalhos circulares (estilo Nubank) */}
       <section>
