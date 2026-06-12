@@ -3,9 +3,8 @@
 import type { ReactNode } from "react";
 import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
-import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
-import { MobileNav } from "./MobileNav";
+import { Dock } from "./Dock";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -35,17 +34,14 @@ export function AppShell({ children }: { children: ReactNode }) {
       return <>{children}</>;
     }
     return (
-      <div className="flex min-h-screen bg-[var(--color-bg)]">
-        <Sidebar />
-        <div className="flex-1 flex flex-col min-w-0">
-          <Topbar />
-          <main className="flex-1 pb-20 lg:pb-6">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-7 fade-in">
-              {children}
-            </div>
-          </main>
-        </div>
-        <MobileNav />
+      <div className="min-h-screen bg-transparent">
+        <Topbar />
+        <main className="pb-28">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 fade-in">
+            {children}
+          </div>
+        </main>
+        <Dock />
       </div>
     );
   }
@@ -72,17 +68,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   // Normal dashboard layout
   return (
-    <div className="flex min-h-screen bg-[var(--color-bg)]">
-      <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0">
-        <Topbar />
-        <main className="flex-1 pb-20 lg:pb-6">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-7 fade-in">
-            {children}
-          </div>
-        </main>
-      </div>
-      <MobileNav />
+    <div className="min-h-screen bg-transparent">
+      <Topbar />
+      <main className="pb-28">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 fade-in">
+          {children}
+        </div>
+      </main>
+      <Dock />
     </div>
   );
 }
