@@ -1,31 +1,19 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  TrendingUp,
-  ShoppingCart,
-  HandCoins,
-  ScanLine,
-  Pause,
-  Bot,
   ArrowRight,
   CircleHelp,
   Activity,
   Sparkles,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { Card, CardHeader, Stat, Badge, Button, Tooltip, Skeleton, Modal } from "@/components/ui";
+import { Card, CardHeader, Stat, Badge, Button, Tooltip, Modal } from "@/components/ui";
+import { Sparkline, AnimatedNumber, PillTabs, SymbolIcon } from "@/components/fx";
 import { fmtUSD } from "@/lib/format";
 import { api } from "@/lib/api";
 import type { SummaryTrade } from "@/lib/api";
-
-const QUICK_ACTIONS = [
-  { icon: ShoppingCart, label: "Comprar", color: "var(--color-up-500)", href: "/mercado" },
-  { icon: HandCoins, label: "Vender", color: "var(--color-down-500)", href: "/posicoes" },
-  { icon: ScanLine, label: "Analisar", color: "var(--color-brand-500)", href: "/mercado" },
-  { icon: Pause, label: "Pausar bot", color: "var(--color-warn-500)", href: "/bots" },
-];
 
 // Tempo relativo em PT-BR para a lista de atividade (ex: "há 5 min")
 function timeAgo(iso: string): string {
@@ -62,6 +50,26 @@ export default function InicioPage() {
   const [stats30d, setStats30d] = useState<{ wins: number; losses: number; totalPnl: number; bestPnl: number; worstPnl: number } | null>(null);
   const [metricModal, setMetricModal] = useState<"pnl" | "ops" | "winrate" | null>(null);
   const router = useRouter();
+
+  // Gráfico real do mercado (klines públicos da Binance, 7 dias em 1h)
+  const [chartSymbol, setChartSymbol] = useState("BTCUSDT");
+  const [chartData, setChartData] = useState<number[]>([]);
+  const [chartChangePct, setChartChangePct] = useState(0);
+
+  useEffect(() => {
+    let chartActive = true;
+    (async () => {
+      try {
+        const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${chartSymbol}&interval=1h&limit=168`);
+        const rows = await res.json();
+        if (!chartActive || !Array.isArray(rows) || rows.length === 0) return;
+        const closes = rows.map((r: (string | number)[]) => parseFloat(String(r[4])));
+        setChartData(closes);
+        setChartChangePct(((closes[closes.length - 1] - closes[0]) / closes[0]) * 100);
+      } catch {}
+    })();
+    return () => { chartActive = false; };
+  }, [chartSymbol]);
 
   useEffect(() => {
     let active = true;
@@ -150,7 +158,7 @@ export default function InicioPage() {
               {loading ? (
                 <div className="h-12 w-56 bg-[var(--color-surface-3)] animate-pulse rounded" />
               ) : (
-                fmtUSD(totalBalance)
+                <AnimatedNumber value={totalBalance} format={fmtUSD} />
               )}
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
@@ -177,45 +185,78 @@ export default function InicioPage() {
         </div>
       </Card>
 
-      {/* Resumo do dia (estilo "Daily recap" do Fey) — reusa dados já carregados */}
-      {activity.length > 0 && (
-        <Card padding="lg" className="bg-gradient-to-br from-[var(--color-surface-3)] to-[var(--color-surface)]">
-          <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted font-semibold mb-2">
-            <Sparkles size={12} className="text-[var(--color-brand-300)]" /> Resumo do dia
+      {/* Grid principal estilo "Hello" do Fey: mercado em destaque + feed */}
+      <div className="grid lg:grid-cols-5 gap-4">
+        {/* ESQUERDA — gráfico real do mercado */}
+        <Card padding="lg" className="lg:col-span-3">
+          <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <SymbolIcon symbol={chartSymbol} size={26} />
+              <span className="text-sm font-semibold text-[var(--color-text)]">{chartSymbol.replace("USDT", "")}</span>
+              <span className={`text-xs font-semibold ${chartChangePct >= 0 ? "text-up" : "text-down"}`}>
+                {chartChangePct >= 0 ? "+" : ""}{chartChangePct.toFixed(2)}% · 7d
+              </span>
+            </div>
+            <PillTabs
+              options={[{ value: "BTCUSDT", label: "BTC" }, { value: "ETHUSDT", label: "ETH" }, { value: "SOLUSDT", label: "SOL" }]}
+              value={chartSymbol}
+              onChange={setChartSymbol}
+            />
           </div>
-          <p className="text-sm text-[var(--color-text-2)] leading-relaxed">
-            {opsToday > 0
-              ? `Seus robôs abriram ${opsToday} operaç${opsToday > 1 ? "ões" : "ão"} hoje, com resultado realizado de ${fmtUSD(pnl24h)}. Última atividade: ${activity[0].title.toLowerCase()}.`
-              : `Nenhuma operação aberta hoje ainda — os robôs seguem varrendo o mercado. Última atividade: ${activity[0].title.toLowerCase()}.`}
-          </p>
+          <Sparkline data={chartData} width={640} height={180} className="w-full h-[180px]" />
+          <div className="mt-4 pt-4 border-t border-[var(--color-border)] grid grid-cols-3 gap-3">
+            <Stat label="Spot USDT" value={fmtUSD(balance.spot)} size="sm" />
+            <Stat label="Futuros USDT" value={fmtUSD(balance.futures)} size="sm" />
+            <Stat label="Posições abertas" value={String(openPositions)} size="sm" />
+          </div>
         </Card>
-      )}
 
-      {/* Atalhos circulares (estilo Nubank) */}
-      <section>
-        <h2 className="text-xs uppercase tracking-wider text-muted font-semibold mb-3 px-1">
-          Atalhos
-        </h2>
-        <div className="grid grid-cols-4 gap-2 sm:gap-4">
-          {QUICK_ACTIONS.map(({ icon: Icon, label, color, href }) => (
+        {/* DIREITA — resumo do dia + feed de atividade */}
+        <div className="lg:col-span-2 space-y-4">
+          {activity.length > 0 && (
+            <Card padding="lg" className="bg-gradient-to-br from-[var(--color-surface-3)] to-[var(--color-surface)]">
+              <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted font-semibold mb-2">
+                <Sparkles size={12} className="text-[var(--color-brand-300)]" /> Resumo do dia
+              </div>
+              <p className="text-sm text-[var(--color-text-2)] leading-relaxed">
+                {opsToday > 0
+                  ? `Seus robôs abriram ${opsToday} operaç${opsToday > 1 ? "ões" : "ão"} hoje, com resultado realizado de ${fmtUSD(pnl24h)}. Última atividade: ${activity[0].title.toLowerCase()}.`
+                  : `Nenhuma operação aberta hoje ainda — os robôs seguem varrendo o mercado. Última atividade: ${activity[0].title.toLowerCase()}.`}
+              </p>
+            </Card>
+          )}
+
+          <Card padding="lg">
+            <CardHeader title="Atividade recente" subtitle="Últimos eventos do sistema" />
+            {activity.length === 0 ? (
+              <p className="text-xs text-muted py-4">
+                {loading ? "Carregando..." : "Nenhuma operação registrada ainda."}
+              </p>
+            ) : (
+              <ul className="space-y-3.5">
+                {activity.map((a) => (
+                  <li key={`${a.kind}-${a.symbol}-${a.time}`} className="flex items-center gap-3">
+                    <SymbolIcon symbol={a.symbol} size={28} />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm text-[var(--color-text)] leading-snug truncate">{a.title}</div>
+                      <div className="text-[11px] text-muted mt-0.5">{timeAgo(a.time)}</div>
+                    </div>
+                    <Badge tone={a.kind === "win" ? "up" : a.kind === "loss" ? "down" : "neutral"} size="sm" className="shrink-0">
+                      {a.kind === "win" ? "lucro" : a.kind === "loss" ? "perda" : "abertura"}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
             <Link
-              key={label}
-              href={href}
-              className="group flex flex-col items-center gap-2 p-2 sm:p-3 rounded-[var(--radius-md)] hover:bg-[var(--color-surface-3)] transition"
+              href="/posicoes"
+              className="mt-4 inline-flex items-center gap-1 text-xs font-medium text-[var(--color-brand-300)] hover:underline"
             >
-              <span
-                className="h-12 w-12 sm:h-14 sm:w-14 flex items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] group-hover:scale-105 transition-transform"
-                style={{ color }}
-              >
-                <Icon size={22} strokeWidth={2.2} />
-              </span>
-              <span className="text-[11px] sm:text-xs font-medium text-[var(--color-text-2)] text-center">
-                {label}
-              </span>
+              Ver tudo <ArrowRight size={13} />
             </Link>
-          ))}
+          </Card>
         </div>
-      </section>
+      </div>
 
       {/* Cards de métricas resumidas — clicáveis: abrem o detalhamento */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -354,135 +395,6 @@ export default function InicioPage() {
         )}
       </Modal>
 
-      <div className="grid lg:grid-cols-3 gap-4">
-        {/* Bot ativo agora */}
-        <Card className="lg:col-span-2" padding="lg">
-          <CardHeader
-            icon={<Bot size={18} className="text-[var(--color-brand-500)]" />}
-            title="Sincronização com Corretora"
-            subtitle="Conexão API Binance via WebSockets ativa"
-            action={
-              <Badge tone="up" dot>
-                Online
-              </Badge>
-            }
-          />
-          <Suspense fallback={<Skeleton height={140} className="rounded-[var(--radius-md)]" />}>
-            <BotMiniChart />
-          </Suspense>
-          <div className="mt-4 grid grid-cols-3 gap-3 pt-4 border-t border-[var(--color-border)]">
-            <Stat label="Spot USDT" value={fmtUSD(balance.spot)} size="sm" />
-            <Stat label="Futuros USDT" value={fmtUSD(balance.futures)} size="sm" />
-            <Stat label="Posições abertas" value={String(openPositions)} size="sm" />
-          </div>
-        </Card>
-
-        {/* Atividade recente (eventos reais das posições) */}
-        <Card padding="lg">
-          <CardHeader title="Atividade recente" subtitle="Últimos eventos do sistema" />
-          {activity.length === 0 ? (
-            <p className="text-xs text-muted py-4">
-              {loading ? "Carregando..." : "Nenhuma operação registrada ainda."}
-            </p>
-          ) : (
-            <ul className="space-y-3">
-              {activity.map((a) => {
-                const Icon = a.kind === "open" ? TrendingUp : a.kind === "win" ? Sparkles : Activity;
-                const toneClass = a.kind === "win" ? "bg-up" : a.kind === "loss" ? "bg-warn" : "bg-brand-soft";
-                return (
-                  <li key={`${a.kind}-${a.symbol}-${a.time}`} className="flex items-start gap-3">
-                    <span
-                      className={
-                        "h-8 w-8 shrink-0 flex items-center justify-center rounded-full " + toneClass
-                      }
-                    >
-                      <Icon size={14} />
-                    </span>
-                    <div className="min-w-0">
-                      <div className="text-sm text-[var(--color-text)] leading-snug">
-                        {a.title}
-                      </div>
-                      <div className="text-[11px] text-muted mt-0.5">
-                        {timeAgo(a.time)}
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          <Link
-            href="/posicoes"
-            className="mt-4 inline-flex items-center gap-1 text-xs font-medium text-[var(--color-brand-500)] hover:underline"
-          >
-            Ver tudo <ArrowRight size={13} />
-          </Link>
-        </Card>
-      </div>
-
-      {/* Faixa "Como funciona" — onboarding */}
-      <Card padding="lg" className="bg-brand-soft border-[var(--color-brand-500)]/30">
-        <div className="flex items-start gap-4">
-          <div className="hidden sm:flex h-10 w-10 items-center justify-center rounded-full bg-[var(--color-brand-500)] text-white">
-            <Sparkles size={18} />
-          </div>
-          <div className="flex-1">
-            <h3 className="text-sm font-semibold text-[var(--color-brand-600)]">
-              Novo por aqui?
-            </h3>
-            <p className="text-xs text-[var(--color-text-2)] mt-1 max-w-xl">
-              O Trading SaaS é o seu painel para acompanhar mercado, controlar
-              robôs de operação e registrar tudo num diário. Comece pela aba{" "}
-              <Link href="/mercado" className="font-semibold underline">
-                Mercado
-              </Link>{" "}
-              ou veja seus{" "}
-              <Link href="/bots" className="font-semibold underline">
-                bots
-              </Link>
-              .
-            </p>
-          </div>
-          <Button variant="primary" size="sm">
-            Fazer tour
-          </Button>
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-function BotMiniChart() {
-  return (
-    <div className="relative h-32 w-full rounded-[var(--radius-md)] bg-gradient-to-br from-[var(--color-brand-500)]/10 to-transparent overflow-hidden border border-[var(--color-border)]">
-      <svg
-        viewBox="0 0 400 120"
-        className="w-full h-full"
-        preserveAspectRatio="none"
-        aria-hidden
-      >
-        <defs>
-          <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--color-brand-500)" stopOpacity="0.32" />
-            <stop offset="100%" stopColor="var(--color-brand-500)" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path
-          d="M0,90 C40,80 80,40 120,55 C160,70 200,30 240,42 C280,54 320,20 360,28 L400,28 L400,120 L0,120 Z"
-          fill="url(#grad)"
-        />
-        <path
-          d="M0,90 C40,80 80,40 120,55 C160,70 200,30 240,42 C280,54 320,20 360,28 L400,28"
-          fill="none"
-          stroke="var(--color-brand-500)"
-          strokeWidth="2.4"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-      <div className="absolute top-2 right-3 text-[10px] text-muted uppercase tracking-wide">
-        evolução 7d
-      </div>
     </div>
   );
 }
