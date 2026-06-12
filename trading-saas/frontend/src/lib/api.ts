@@ -398,6 +398,7 @@ export const api = {
         realStats: { totalTrades: number; winRate: number; profitFactor: number; netProfit: number } | null;
         winRateTarget: number | null;
         lastBacktest: BacktestResult | null;
+        lastBacktestAt?: number | null;
       }[];
     }>("/bot/strategies", undefined, { success: false, strategies: [] }),
 

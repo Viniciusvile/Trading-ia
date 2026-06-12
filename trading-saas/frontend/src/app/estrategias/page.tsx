@@ -39,9 +39,21 @@ interface Strategy {
   sl: any;
   tp: any;
   statsSource?: "real" | "backtest" | "sem-dados";
+  lastBacktestAt?: number | null;
   realStats?: { totalTrades: number; winRate: number; profitFactor: number; netProfit: number } | null;
   winRateTarget?: number | null;
   lastBacktest?: import("@/lib/api").BacktestResult | null;
+}
+
+// Tempo relativo curto em pt-BR (ex.: "há 2h")
+function agoShort(ts?: number | null): string {
+  if (!ts) return "";
+  const min = Math.floor((Date.now() - ts) / 60_000);
+  if (min < 1) return "agora";
+  if (min < 60) return `há ${min}min`;
+  const h = Math.floor(min / 60);
+  if (h < 48) return `há ${h}h`;
+  return `há ${Math.floor(h / 24)}d`;
 }
 
 export default function EstrategiasPage() {
@@ -70,6 +82,15 @@ export default function EstrategiasPage() {
 
   useEffect(() => {
     fetchStrategies();
+    // O servidor reanalisa os backtests a cada 4h — este refetch leve mantém
+    // os cards atualizados sem o usuário precisar recarregar a página.
+    const timer = setInterval(async () => {
+      try {
+        const res = await api.botStrategies();
+        if (res.success && res.strategies) setStrategies(res.strategies);
+      } catch {}
+    }, 60_000);
+    return () => clearInterval(timer);
   }, []);
 
   const handleActivateToggle = async (strat: Strategy) => {
@@ -260,8 +281,15 @@ export default function EstrategiasPage() {
                 <div className="w-full lg:w-auto shrink-0 space-y-2">
                 <div className="flex items-center gap-2">
                   {s.statsSource === "real" && <Badge tone="up" size="sm">Trades reais</Badge>}
-                  {s.statsSource === "backtest" && <Badge tone="neutral" size="sm">Backtest real</Badge>}
+                  {s.statsSource === "backtest" && (
+                    <Badge tone="neutral" size="sm">
+                      Backtest real{s.lastBacktestAt ? ` · ${agoShort(s.lastBacktestAt)}` : ""}
+                    </Badge>
+                  )}
                   {(!s.statsSource || s.statsSource === "sem-dados") && <Badge tone="neutral" size="sm">Sem análise</Badge>}
+                  {s.statsSource === "backtest" && s.lastBacktestAt != null && Date.now() - s.lastBacktestAt < 5 * 60 * 60 * 1000 && (
+                    <Badge tone="up" size="sm" dot>Auto 4h</Badge>
+                  )}
                   {s.lastBacktest?.equityCurve && s.lastBacktest.equityCurve.length > 1 && (
                     <Sparkline
                       data={s.lastBacktest.equityCurve.map((p) => p.equity)}

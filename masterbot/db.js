@@ -640,6 +640,17 @@ export async function listStrategies(userId) {
   return res.rows.map(r => ({ ...r.data, name: r.name, _active: r.is_active }));
 }
 
+/**
+ * Lista estratégias de TODOS os usuários (para o job de reanalise periódica
+ * de backtests). Retorna user_id junto para persistir de volta.
+ */
+export async function getAllStrategies() {
+  const res = await getPool().query(
+    'SELECT user_id, name, data FROM strategies ORDER BY user_id, created_at ASC'
+  );
+  return res.rows.map(r => ({ userId: r.user_id, name: r.name, plan: { ...r.data, name: r.name } }));
+}
+
 /** Cria ou atualiza (upsert) uma estratégia do usuário, casando por nome. */
 export async function upsertStrategy(userId, name, plan) {
   if (!userId) throw new Error('userId obrigatório');

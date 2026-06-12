@@ -1188,6 +1188,7 @@ app.get('/api/bot/strategies', authenticateToken, async (req, res) => {
         mode: p.mode || 'spot',
         leverage: p.leverage || 1,
         active,
+        lastBacktestAt: p.lastBacktest?.ranAt ?? null,
         winRate,
         profitFactor,
         netProfit,
@@ -1335,6 +1336,133 @@ async function fetchHistoricalCandles(symbol, timeframe, total = 1400) {
   return candles;
 }
 
+/**
+ * Roda o backtest completo de um plano (mesma lógica do endpoint manual).
+ * Lança erro para planos inválidos (>6 combos / sem symbols/timeframes).
+ * Retorna o objeto lastBacktest pronto para persistir/responder.
+ */
+async function runPlanBacktest(plan) {
+  if (!Array.isArray(plan.symbols) || !plan.symbols.length ||
+      !Array.isArray(plan.timeframes) || !plan.timeframes.length) {
+    throw new Error('symbols e timeframes são obrigatórios');
+  }
+  const combos = [];
+  for (const symbol of plan.symbols) {
+    for (const timeframe of plan.timeframes) combos.push({ symbol, timeframe });
+  }
+  if (combos.length > 6) {
+    throw new Error('Máximo de 6 combinações ativo×timeframe por análise');
+  }
+
+  const signalFn = createSignalFn(plan);
+  const results = [];
+  let allTrades = [];
+
+  for (const { symbol, timeframe } of combos) {
+    // Cede o event loop entre combos para não congelar os demais endpoints
+    await new Promise(r => setImmediate(r));
+    try {
+      const candles = await fetchHistoricalCandles(symbol, timeframe);
+      if (candles.length < 300) {
+        results.push({ symbol, timeframe, error: 'Histórico insuficiente', stats: null, trades: [] });
+        continue;
+      }
+      const trades = simulateTrades(candles, signalFn)
+        .map(t => ({ ...t, symbol, timeframe }));
+      allTrades = allTrades.concat(trades);
+      results.push({
+        symbol,
+        timeframe,
+        periodStart: candles[0].time,
+        periodEnd: candles[candles.length - 1].time,
+        stats: computeStats(trades),
+        trades: trades.slice(-10),
+      });
+    } catch (comboErr) {
+      results.push({ symbol, timeframe, error: comboErr.message, stats: null, trades: [] });
+    }
+  }
+
+  allTrades.sort((a, b) => a.entryTime - b.entryTime);
+  const combined = computeStats(allTrades);
+  const equityCurve = buildEquityCurve(allTrades);
+  const winRateTarget = plan.winRateTarget != null ? Number(plan.winRateTarget) : null;
+  const approved = combined && winRateTarget != null
+    ? combined.winRate * 100 >= winRateTarget
+    : null;
+
+  // Walk-forward 70/30: compara o desempenho dos 70% iniciais do período com
+  // os 30% finais. Divergência grande sugere overfitting ou mudança de regime.
+  let walkForward = null;
+  const periods = results.filter(r => r.periodStart && r.periodEnd);
+  if (allTrades.length >= 8 && periods.length) {
+    const t0 = Math.min(...periods.map(r => r.periodStart));
+    const t1 = Math.max(...periods.map(r => r.periodEnd));
+    const splitTime = t0 + (t1 - t0) * 0.7;
+    walkForward = {
+      splitTime,
+      inSample: computeStats(allTrades.filter(t => t.entryTime < splitTime)),
+      outOfSample: computeStats(allTrades.filter(t => t.entryTime >= splitTime)),
+    };
+  }
+
+  return {
+    ranAt: Date.now(),
+    combined,
+    equityCurve,
+    winRateTarget,
+    approved,
+    feePctPerSide: 0.1,
+    walkForward,
+    warnings: getPlanWarnings(plan),
+    results,
+    recentTrades: allTrades.slice(-20),
+  };
+}
+
+// ── Reanalise automática dos backtests (a cada 4h) ───────────────────────────
+// O mercado muda: o servidor re-roda o backtest de TODAS as estratégias salvas
+// com candles atualizados e persiste o lastBacktest — os cards da página
+// Estratégias passam a refletir o desempenho recente sem clique manual.
+const BACKTEST_REFRESH_MS = 4 * 60 * 60 * 1000;
+let backtestRefreshRunning = false;
+
+async function refreshAllStrategyBacktests() {
+  if (backtestRefreshRunning) return;
+  backtestRefreshRunning = true;
+  const startedAt = Date.now();
+  let ok = 0, fail = 0;
+  try {
+    const all = await db.getAllStrategies();
+    if (!all.length) return;
+    console.log(`🔁 [Backtest 4h] Reanalisando ${all.length} estratégia(s) com o mercado atual...`);
+    for (const { userId, name, plan } of all) {
+      try {
+        const lastBacktest = await runPlanBacktest(plan);
+        const { _active, ...planData } = plan;
+        planData.lastBacktest = lastBacktest;
+        await db.upsertStrategy(userId, name, planData);
+        ok++;
+      } catch (e) {
+        fail++;
+        console.log(`  ⚠ [Backtest 4h] ${name}: ${e.message}`);
+      }
+      // Pausa entre estratégias para não martelar a API da Binance
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  } catch (e) {
+    console.error('❌ [Backtest 4h] Falha geral:', e.message);
+  } finally {
+    backtestRefreshRunning = false;
+    if (ok || fail) {
+      console.log(`🔁 [Backtest 4h] Concluído: ${ok} ok, ${fail} falha(s) em ${Math.round((Date.now() - startedAt) / 1000)}s`);
+    }
+  }
+}
+
+setTimeout(refreshAllStrategyBacktests, 2 * 60 * 1000); // primeira rodada 2 min após subir
+setInterval(refreshAllStrategyBacktests, BACKTEST_REFRESH_MS);
+
 app.post('/api/bot/backtest', authenticateToken, async (req, res) => {
   try {
     const plan = req.body || {};
@@ -1342,80 +1470,7 @@ app.post('/api/bot/backtest', authenticateToken, async (req, res) => {
         !Array.isArray(plan.timeframes) || !plan.timeframes.length) {
       return res.status(400).json({ success: false, error: 'symbols e timeframes são obrigatórios' });
     }
-    // Limite de carga: máx. 6 combinações símbolo×timeframe por análise
-    const combos = [];
-    for (const symbol of plan.symbols) {
-      for (const timeframe of plan.timeframes) combos.push({ symbol, timeframe });
-    }
-    if (combos.length > 6) {
-      return res.status(400).json({ success: false, error: 'Máximo de 6 combinações ativo×timeframe por análise' });
-    }
-
-    const signalFn = createSignalFn(plan);
-    const results = [];
-    let allTrades = [];
-
-    for (const { symbol, timeframe } of combos) {
-      // Cede o event loop entre combos para não congelar os demais endpoints
-      await new Promise(r => setImmediate(r));
-      try {
-        const candles = await fetchHistoricalCandles(symbol, timeframe);
-        if (candles.length < 300) {
-          results.push({ symbol, timeframe, error: 'Histórico insuficiente', stats: null, trades: [] });
-          continue;
-        }
-        const trades = simulateTrades(candles, signalFn)
-          .map(t => ({ ...t, symbol, timeframe }));
-        allTrades = allTrades.concat(trades);
-        results.push({
-          symbol,
-          timeframe,
-          periodStart: candles[0].time,
-          periodEnd: candles[candles.length - 1].time,
-          stats: computeStats(trades),
-          trades: trades.slice(-10),
-        });
-      } catch (comboErr) {
-        results.push({ symbol, timeframe, error: comboErr.message, stats: null, trades: [] });
-      }
-    }
-
-    allTrades.sort((a, b) => a.entryTime - b.entryTime);
-    const combined = computeStats(allTrades);
-    const equityCurve = buildEquityCurve(allTrades);
-    const winRateTarget = plan.winRateTarget != null ? Number(plan.winRateTarget) : null;
-    const approved = combined && winRateTarget != null
-      ? combined.winRate * 100 >= winRateTarget
-      : null;
-
-    // Walk-forward 70/30: compara o desempenho dos 70% iniciais do período com
-    // os 30% finais. Divergência grande sugere overfitting ou mudança de regime.
-    let walkForward = null;
-    const periods = results.filter(r => r.periodStart && r.periodEnd);
-    if (allTrades.length >= 8 && periods.length) {
-      const t0 = Math.min(...periods.map(r => r.periodStart));
-      const t1 = Math.max(...periods.map(r => r.periodEnd));
-      const splitTime = t0 + (t1 - t0) * 0.7;
-      walkForward = {
-        splitTime,
-        inSample: computeStats(allTrades.filter(t => t.entryTime < splitTime)),
-        outOfSample: computeStats(allTrades.filter(t => t.entryTime >= splitTime)),
-      };
-    }
-
-    const lastBacktest = {
-      ranAt: Date.now(),
-      combined,
-      equityCurve,
-      winRateTarget,
-      approved,
-      feePctPerSide: 0.1,
-      walkForward,
-      warnings: getPlanWarnings(plan),
-      results,
-      recentTrades: allTrades.slice(-20),
-    };
-
+    const lastBacktest = await runPlanBacktest(plan);
     // Persiste o backtest na estratégia DO USUÁRIO (no banco), se ela existir
     if (plan.name) {
       try {
@@ -1424,7 +1479,7 @@ app.post('/api/bot/backtest', authenticateToken, async (req, res) => {
         if (saved) {
           const { _active, ...planData } = saved;
           planData.lastBacktest = lastBacktest;
-          if (winRateTarget != null) planData.winRateTarget = winRateTarget;
+          if (lastBacktest.winRateTarget != null) planData.winRateTarget = lastBacktest.winRateTarget;
           await db.upsertStrategy(req.user.id, plan.name, planData);
           // Reflete no rules.json só se for o dono da conta do bot
           if (await isOwnerUser(req.user.id)) await syncRulesFromOwner(req.user.id);
@@ -1434,7 +1489,8 @@ app.post('/api/bot/backtest', authenticateToken, async (req, res) => {
 
     res.json({ success: true, ...lastBacktest });
   } catch (e) {
-    res.status(500).json({ success: false, error: e.message });
+    const badRequest = /obrigatórios|Máximo de 6/.test(e.message || '');
+    res.status(badRequest ? 400 : 500).json({ success: false, error: e.message });
   }
 });
 
