@@ -16,6 +16,8 @@
     "dashboard": "node dashboard/server.js",
     "tv": "node src/cli/index.js",
     "scalp:micro": "node micro-scalper.js",
+    "adaptive": "node adaptive-bot/bot.js",
+    "test:adaptive": "node --test adaptive-bot/lib/params.test.js adaptive-bot/lib/features.test.js adaptive-bot/lib/signal.test.js adaptive-bot/lib/gemini.test.js adaptive-bot/lib/learner.test.js adaptive-bot/lib/store.test.js",
     "test": "node --test tests/e2e.test.js tests/pine_analyze.test.js",
     "test:e2e": "node --test tests/e2e.test.js",
     "test:unit": "node --test tests/pine_analyze.test.js tests/cli.test.js",
