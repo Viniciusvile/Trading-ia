@@ -16,3 +16,4 @@ frontend/next-env.d.ts
 # OS / logs
 *.log
 .DS_Store
+backend/celerybeat-schedule

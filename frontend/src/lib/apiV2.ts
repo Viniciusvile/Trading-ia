@@ -141,4 +141,33 @@ export const apiV2 = {
   botMasterStop: () => v2<{ success: boolean }>("/bot/master/stop", { method: "POST" }, { success: false }),
   microScalperStart: () => v2<{ success: boolean }>("/bot/micro/start", { method: "POST" }, { success: false }),
   microScalperStop: () => v2<{ success: boolean }>("/bot/micro/stop", { method: "POST" }, { success: false }),
+
+  // ─── Fatia H: Contas Binance (multi-conta) ───
+  accountsList: () =>
+    v2<{ success: boolean; accounts: unknown[] }>("/accounts", undefined, { success: false, accounts: [] }),
+  accountCreate: (params: { name: string; apiKey: string; secretKey: string; isTestnet: boolean }) =>
+    v2<{ success: boolean; id?: string }>("/accounts", { method: "POST", body: JSON.stringify(params) }, { success: false }),
+  accountActivate: (id: string) =>
+    v2<{ success: boolean }>(`/accounts/${encodeURIComponent(id)}/activate`, { method: "POST" }, { success: false }),
+  accountDelete: (id: string) =>
+    v2<{ success: boolean }>(`/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }, { success: false }),
+
+  // ─── Fatia C: Posições (leitura) ───
+  botPositions: () =>
+    v2<{ success: boolean; positions: unknown[] }>(
+      "/bot/positions",
+      undefined,
+      { success: false, positions: [] },
+    ),
+
+  // ─── Fatia B: Dashboard (resumo, calculado das posições reais) ───
+  dashboardSummary: (tzOffset?: number) =>
+    v2<{ success: boolean }>(
+      typeof tzOffset === "number" ? `/dashboard/summary?tzOffset=${tzOffset}` : "/dashboard/summary",
+      undefined,
+      {
+        success: false, pnlToday: 0, operationsToday: 0, winRate30d: null,
+        totalTrades30d: 0, openPositions: 0, recentActivity: [],
+      } as unknown as { success: boolean },
+    ),
 };

@@ -326,7 +326,9 @@ export const api = {
         }),
 
   dashboardSummary: (tzOffset?: number) =>
-    safeJson<{
+    BACKEND_FLAGS.dashboard
+      ? (apiV2.dashboardSummary(tzOffset) as ReturnType<typeof safeJson>)
+      : safeJson<{
       success: boolean;
       pnlToday: number;
       operationsToday: number;
@@ -532,7 +534,9 @@ export const api = {
     }, { success: false, error: "Falha na requisição" }),
 
   botPositions: () =>
-    safeJson<{
+    BACKEND_FLAGS.positions
+      ? (apiV2.botPositions() as ReturnType<typeof safeJson>)
+      : safeJson<{
       success: boolean;
       positions: {
         id: string;
@@ -570,33 +574,44 @@ export const api = {
 
   // ─── Multi-Account API Endpoints ───
   accountsList: () =>
-    safeJson<{
-      success: boolean;
-      accounts: {
-        id: string;
-        name: string;
-        apiKey: string;
-        isActive: boolean;
-        isTestnet: boolean;
-        createdAt: string;
-      }[];
-    }>("/accounts", undefined, { success: false, accounts: [] }),
+    BACKEND_FLAGS.accounts
+      ? (apiV2.accountsList() as Promise<{
+          success: boolean;
+          accounts: { id: string; name: string; apiKey: string; isActive: boolean; isTestnet: boolean; createdAt: string }[];
+        }>)
+      : safeJson<{
+          success: boolean;
+          accounts: {
+            id: string;
+            name: string;
+            apiKey: string;
+            isActive: boolean;
+            isTestnet: boolean;
+            createdAt: string;
+          }[];
+        }>("/accounts", undefined, { success: false, accounts: [] }),
 
   accountCreate: (params: { name: string; apiKey: string; secretKey: string; isTestnet: boolean }) =>
-    safeJson<{ success: boolean; id?: string; error?: string }>("/accounts", {
-      method: "POST",
-      body: JSON.stringify(params),
-    }, { success: false, error: "Falha ao criar conta" }),
+    BACKEND_FLAGS.accounts
+      ? apiV2.accountCreate(params)
+      : safeJson<{ success: boolean; id?: string; error?: string }>("/accounts", {
+          method: "POST",
+          body: JSON.stringify(params),
+        }, { success: false, error: "Falha ao criar conta" }),
 
   accountActivate: (id: string) =>
-    safeJson<{ success: boolean; error?: string }>(`/accounts/${encodeURIComponent(id)}/activate`, {
-      method: "POST",
-    }, { success: false, error: "Falha ao ativar conta" }),
+    BACKEND_FLAGS.accounts
+      ? apiV2.accountActivate(id)
+      : safeJson<{ success: boolean; error?: string }>(`/accounts/${encodeURIComponent(id)}/activate`, {
+          method: "POST",
+        }, { success: false, error: "Falha ao ativar conta" }),
 
   accountDelete: (id: string) =>
-    safeJson<{ success: boolean; error?: string }>(`/accounts/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    }, { success: false, error: "Falha ao deletar conta" }),
+    BACKEND_FLAGS.accounts
+      ? apiV2.accountDelete(id)
+      : safeJson<{ success: boolean; error?: string }>(`/accounts/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        }, { success: false, error: "Falha ao deletar conta" }),
 
   // ─── Authentication Endpoints ───
   login: (params: { email: string; password?: string }) =>

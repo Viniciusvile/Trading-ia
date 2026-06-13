@@ -15,6 +15,7 @@ from app.deps import get_current_user
 from app.models.user import User
 from app.models.master import MasterConfig
 from app.models.bot_state import UserBotState
+from app.models.position import Position
 
 router = APIRouter()
 
@@ -134,3 +135,38 @@ def adaptive_status(current_user: User = Depends(get_current_user), db: Session 
         "lessons": [],
         "reviews": [],
     }
+
+
+@router.get("/positions")
+def list_positions(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Lista posicoes (abertas e fechadas) do usuario, no shape que a UI espera."""
+    rows = (
+        db.query(Position)
+        .filter(Position.user_id == current_user.id)
+        .order_by(Position.opened_at.desc().nullslast())
+        .all()
+    )
+    positions = []
+    for p in rows:
+        d = p.data or {}
+        positions.append({
+            "id": p.id,
+            "symbol": p.symbol,
+            "timeframe": p.timeframe or "",
+            "side": p.side or "",
+            "entryPrice": p.entry_price or 0,
+            "exitPrice": p.exit_price,
+            "quantity": p.quantity or 0,
+            "stopPrice": p.stop_price or 0,
+            "takeProfitPrice": p.take_profit_price or 0,
+            "pnl": p.pnl,
+            "orderId": d.get("orderId") or "",
+            "ocoOrderListId": d.get("ocoOrderListId"),
+            "openedAt": p.opened_at.isoformat() if p.opened_at else "",
+            "closedAt": p.closed_at.isoformat() if p.closed_at else None,
+            "exitReason": d.get("exitReason"),
+            "status": p.status,
+            "strategy": p.strategy,
+            "plan": p.plan,
+        })
+    return {"success": True, "positions": positions}

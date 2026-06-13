@@ -10,6 +10,7 @@ export const BACKEND_FLAGS = {
   strategies: false,// Fatia E — CRUD de estratégias
   bots: false,      // Fatia F — status/start/stop bots
   backtest: false,  // Fatia G — backtest
+  accounts: false,  // Fatia H — contas Binance (multi-conta). Liga junto com auth (JWT Python).
 } as const;
 
 export type BackendFlag = keyof typeof BACKEND_FLAGS;
