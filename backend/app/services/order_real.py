@@ -72,15 +72,20 @@ def place_oco_sell(client: Client, symbol: str, quantity: str, tp_price: float,
     """OCO de venda: TP (limit) + SL (stop-limit) juntos. Espelha placeOCO do legado."""
     prec = precision if precision is not None else auto_precision(tp_price)
     sl_limit = stop_limit_price if stop_limit_price is not None else stop_price
+    # API nova da Binance (above/below): para um OCO de SELL,
+    #   above = TP (LIMIT_MAKER, preço acima do mercado)
+    #   below = SL (STOP_LOSS_LIMIT: stopPrice dispara, price é o limite de venda)
     try:
         res = client.create_oco_order(
             symbol=symbol,
             side="SELL",
             quantity=quantity,
-            price=f"{tp_price:.{prec}f}",            # alvo de lucro
-            stopPrice=f"{stop_price:.{prec}f}",       # ativador do stop
-            stopLimitPrice=f"{sl_limit:.{prec}f}",    # preço real de venda no stop
-            stopLimitTimeInForce="GTC",
+            aboveType="LIMIT_MAKER",
+            abovePrice=f"{tp_price:.{prec}f}",
+            belowType="STOP_LOSS_LIMIT",
+            belowStopPrice=f"{stop_price:.{prec}f}",
+            belowPrice=f"{sl_limit:.{prec}f}",
+            belowTimeInForce="GTC",
         )
         return {"ok": True, "orderListId": res.get("orderListId"), "raw": res}
     except BinanceAPIException as e:
@@ -88,8 +93,9 @@ def place_oco_sell(client: Client, symbol: str, quantity: str, tp_price: float,
 
 
 def cancel_oco(client: Client, symbol: str, order_list_id) -> dict:
+    # DELETE /api/v3/orderList (a lib nao expoe cancel_order_list nomeado).
     try:
-        res = client.cancel_order_list(symbol=symbol, orderListId=int(order_list_id))
+        res = client.v3_delete_order_list(symbol=symbol, orderListId=int(order_list_id))
         return {"ok": True, "raw": res}
     except BinanceAPIException as e:
         return {"ok": False, "error": e.message}
