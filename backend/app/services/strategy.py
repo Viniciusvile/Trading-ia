@@ -1,0 +1,40 @@
+from sqlalchemy.orm import Session
+from fastapi import HTTPException
+from app.models.strategy import Strategy
+from app.models.user import User
+from app.schemas.strategy import StrategyCreate, StrategyConditions
+
+def create_strategy(db: Session, user: User, data: StrategyCreate) -> Strategy:
+    existing = db.query(Strategy).filter(Strategy.user_id == user.id).count()
+    if existing >= user.max_bots:
+        raise HTTPException(status_code=403, detail=f"Limite de {user.max_bots} estratégias atingido")
+    strategy = Strategy(
+        user_id=user.id,
+        name=data.name,
+        symbol=data.symbol,
+        timeframe=data.timeframe,
+        conditions_json=data.conditions.model_dump_json(),
+    )
+    db.add(strategy)
+    db.commit()
+    db.refresh(strategy)
+    return strategy
+
+def list_strategies(db: Session, user: User) -> list[Strategy]:
+    return db.query(Strategy).filter(Strategy.user_id == user.id).all()
+
+def get_strategy(db: Session, user: User, strategy_id: str) -> Strategy:
+    s = db.query(Strategy).filter(Strategy.id == strategy_id, Strategy.user_id == user.id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Estratégia não encontrada")
+    return s
+
+def delete_strategy(db: Session, user: User, strategy_id: str) -> None:
+    s = get_strategy(db, user, strategy_id)
+    if s.is_active:
+        raise HTTPException(status_code=400, detail="Pause o bot antes de deletar a estratégia")
+    db.delete(s)
+    db.commit()
+
+def parse_conditions(strategy: Strategy) -> StrategyConditions:
+    return StrategyConditions.model_validate_json(strategy.conditions_json)

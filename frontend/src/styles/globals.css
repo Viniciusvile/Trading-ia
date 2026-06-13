@@ -1,0 +1,220 @@
+@import "tailwindcss";
+
+/* ============================================================
+   DESIGN TOKENS — Trading SaaS (estilo Fey: dark premium)
+   Fundo quase-preto + bordas translúcidas + acento indigo discreto
+   DARK É O TEMA PADRÃO; claro é opcional via [data-theme="light"]
+   ============================================================ */
+
+@theme {
+  /* ===== Acento (indigo Fey — discreto) ===== */
+  --color-brand-50:  #EEF0FE;
+  --color-brand-100: #DDE1FD;
+  --color-brand-200: #BCC3FB;
+  --color-brand-300: #9AA5F8;
+  --color-brand-400: #8490F5;
+  --color-brand-500: #6E7BF2;
+  --color-brand-600: #5865E8;
+  --color-brand-700: #4550C9;
+  --color-brand-800: #353EA0;
+  --color-brand-900: #272E78;
+
+  /* ===== Verde (ganhos) — dessaturado ===== */
+  --color-up-50:  #0E1F18;
+  --color-up-100: #11271E;
+  --color-up-300: #34D399;
+  --color-up-500: #34D399;
+  --color-up-600: #2EBD8A;
+  --color-up-700: #25A578;
+
+  /* ===== Vermelho (perdas) — dessaturado ===== */
+  --color-down-50:  #251214;
+  --color-down-100: #2D1518;
+  --color-down-300: #F87171;
+  --color-down-500: #F26D6D;
+  --color-down-600: #E25858;
+  --color-down-700: #C94B4B;
+
+  /* ===== Amarelo (alerta) ===== */
+  --color-warn-50:  #261D0C;
+  --color-warn-100: #2E240F;
+  --color-warn-500: #E8B33C;
+  --color-warn-600: #D2A032;
+
+  /* ===== Neutros (DARK padrão — estilo Fey) ===== */
+  --color-bg:        #050507;
+  --color-surface:   #0B0C0F;
+  --color-surface-2: #101114;
+  --color-surface-3: #16181D;
+  --color-border:    rgba(255, 255, 255, 0.07);
+  --color-border-strong: rgba(255, 255, 255, 0.14);
+  --color-text:      #F2F3F5;
+  --color-text-2:    #B6BAC3;
+  --color-muted:     #7A7F8A;
+  --color-muted-2:   #4D525C;
+
+  /* ===== Tipografia ===== */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", Menlo, monospace;
+
+  /* ===== Sombras (profundas, dark) ===== */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-card-hover: 0 4px 16px rgba(0, 0, 0, 0.5), 0 12px 32px rgba(0, 0, 0, 0.45);
+  --shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.65);
+  --shadow-brand: 0 8px 24px rgba(110, 123, 242, 0.25);
+
+  /* ===== Raios (cantos generosos) ===== */
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+}
+
+/* ============================================================
+   Tema claro (opcional — toggle via [data-theme="light"])
+   O padrão do sistema agora é DARK (estilo Fey).
+   ============================================================ */
+[data-theme="light"] {
+  --color-bg:        #F4F5F8;
+  --color-surface:   #FFFFFF;
+  --color-surface-2: #F8F9FC;
+  --color-surface-3: #EEF0F5;
+  --color-border:    #E3E6EE;
+  --color-border-strong: #C9CEDC;
+  --color-text:      #101218;
+  --color-text-2:    #3A3F4C;
+  --color-muted:     #6E7480;
+  --color-muted-2:   #9AA0AC;
+
+  --color-up-50:  #ECFDF5;
+  --color-up-100: #D1FAE5;
+  --color-down-50:  #FEF2F2;
+  --color-down-100: #FEE2E2;
+  --color-warn-50:  #FFFBEB;
+  --color-warn-100: #FEF3C7;
+
+  --shadow-card: 0 1px 2px rgba(16, 18, 24, 0.05), 0 2px 8px rgba(16, 18, 24, 0.06);
+  --shadow-card-hover: 0 4px 12px rgba(16, 18, 24, 0.08), 0 8px 24px rgba(16, 18, 24, 0.08);
+  --shadow-pop: 0 12px 32px rgba(16, 18, 24, 0.14);
+}
+
+/* ============================================================
+   Reset & base
+   ============================================================ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 500px at 50% -10%, rgba(110, 123, 242, 0.06), transparent 60%),
+    var(--color-bg);
+  background-attachment: fixed;
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4, h5 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Scrollbar fininha estilo fintech */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 999px;
+  border: 2px solid var(--color-bg);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--color-border-strong); }
+
+/* ============================================================
+   Utilitárias semânticas (uso global)
+   ============================================================ */
+.surface { background: var(--color-surface); }
+.surface-2 { background: var(--color-surface-2); }
+.surface-3 { background: var(--color-surface-3); }
+
+.text-up    { color: var(--color-up-300); }
+.text-down  { color: var(--color-down-300); }
+.text-warn  { color: var(--color-warn-500); }
+.text-muted { color: var(--color-muted); }
+[data-theme="light"] .text-up   { color: var(--color-up-600); }
+[data-theme="light"] .text-down { color: var(--color-down-600); }
+[data-theme="light"] .text-warn { color: var(--color-warn-600); }
+
+.bg-up   { background: var(--color-up-50);   color: var(--color-up-300); }
+.bg-down { background: var(--color-down-50); color: var(--color-down-300); }
+.bg-warn { background: var(--color-warn-50); color: var(--color-warn-500); }
+.bg-brand-soft { background: rgba(110, 123, 242, 0.12); color: var(--color-brand-300); }
+[data-theme="light"] .bg-up   { color: var(--color-up-700); }
+[data-theme="light"] .bg-down { color: var(--color-down-700); }
+[data-theme="light"] .bg-warn { color: var(--color-warn-600); }
+[data-theme="light"] .bg-brand-soft { background: rgba(88, 101, 232, 0.10); color: var(--color-brand-700); }
+
+/* Skeleton shimmer */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-3) 0%,
+    var(--color-surface-2) 50%,
+    var(--color-surface-3) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+  border-radius: var(--radius-sm);
+}
+
+/* Anel de foco unificado (acessibilidade) */
+:where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* Microanimação padrão */
+@media (prefers-reduced-motion: no-preference) {
+  .fade-in    { animation: fade-in 200ms ease-out both; }
+  .slide-up   { animation: slide-up 260ms ease-out both; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
