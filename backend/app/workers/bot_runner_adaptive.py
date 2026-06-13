@@ -14,6 +14,8 @@ from sqlalchemy import text
 from app.database import _get_session_factory
 from app.services import scalper_signals as sig
 
+# Adaptive opera num simbolo global; so roda se o dono ligou o bot.
+OWNER_ID = "17a63e02-c89b-4952-9768-f88371d1202a"
 SYMBOL = "BTCUSDT"
 INTERVAL = Client.KLINE_INTERVAL_5MINUTE
 CANDLE_LIMIT = 250
@@ -56,6 +58,9 @@ def run_adaptive():
     db = _get_session_factory()()
     client = Client()
     try:
+        from app.models.bot_state import is_bot_enabled
+        if not is_bot_enabled(db, OWNER_ID, "adaptive_enabled"):
+            return {"status": "skipped", "reason": "adaptive desligado"}
         row = db.execute(text(
             "SELECT version, params FROM adaptive_params WHERE is_active = true ORDER BY version DESC LIMIT 1"
         )).fetchone()

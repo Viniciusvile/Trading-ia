@@ -14,10 +14,59 @@ from app.database import get_db
 from app.deps import get_current_user
 from app.models.user import User
 from app.models.master import MasterConfig
+from app.models.bot_state import UserBotState
 
 router = APIRouter()
 
 HEARTBEAT_FRESH_SECONDS = 360  # bots de 5min: considera vivo se heartbeat < 6min
+
+
+def _set_bot_enabled(db: Session, user_id: str, flag: str, enabled: bool) -> None:
+    """Liga/desliga um bot para o usuario (flag tipo 'master_enabled')."""
+    st = db.get(UserBotState, user_id)
+    if st is None:
+        st = UserBotState(user_id=user_id, data={})
+        db.add(st)
+    new_data = dict(st.data or {})
+    new_data[flag] = enabled
+    st.data = new_data
+    db.commit()
+
+
+@router.post("/master/start")
+def master_start(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _set_bot_enabled(db, current_user.id, "master_enabled", True)
+    return {"success": True}
+
+
+@router.post("/master/stop")
+def master_stop(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _set_bot_enabled(db, current_user.id, "master_enabled", False)
+    return {"success": True}
+
+
+@router.post("/micro/start")
+def micro_start(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _set_bot_enabled(db, current_user.id, "micro_enabled", True)
+    return {"success": True}
+
+
+@router.post("/micro/stop")
+def micro_stop(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _set_bot_enabled(db, current_user.id, "micro_enabled", False)
+    return {"success": True}
+
+
+@router.post("/adaptive/start")
+def adaptive_start(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _set_bot_enabled(db, current_user.id, "adaptive_enabled", True)
+    return {"success": True}
+
+
+@router.post("/adaptive/stop")
+def adaptive_stop(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _set_bot_enabled(db, current_user.id, "adaptive_enabled", False)
+    return {"success": True}
 
 
 @router.get("/master/status")

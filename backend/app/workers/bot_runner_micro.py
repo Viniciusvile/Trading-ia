@@ -10,7 +10,9 @@ from celery import shared_task
 from binance.client import Client
 
 from app.database import _get_session_factory
+from app.models.user import User  # noqa: F401  (registra 'users' p/ FK)
 from app.models.micro import UserMicroConfig, MicroSession, MicroHeartbeat
+from app.models.bot_state import is_bot_enabled
 from app.services import micro_scalper as scalper
 
 # O scalper opera em candles curtos (5m por padrao no legado).
@@ -35,6 +37,8 @@ def run_micro_scalper():
     try:
         configs = db.query(UserMicroConfig).all()
         for cfg in configs:
+            if not is_bot_enabled(db, cfg.user_id, "micro_enabled"):
+                continue  # so opera para quem ligou o scalper
             data = cfg.data or {}
             plans = data.get("plans") or {}
             for symbol in scalper.active_symbols(data):

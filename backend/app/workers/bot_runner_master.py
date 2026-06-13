@@ -13,6 +13,7 @@ from binance.client import Client
 from app.database import _get_session_factory
 from app.models.user import User  # noqa: F401  (registra a tabela 'users' p/ resolver a FK)
 from app.models.master import MasterPlan, MasterConfig
+from app.models.bot_state import is_bot_enabled
 from app.services import masterbot as mbot
 
 TIMEFRAME_MAP = {
@@ -54,6 +55,8 @@ def run_masterbot():
     try:
         configs = db.query(MasterConfig).all()
         for cfg in configs:
+            if not is_bot_enabled(db, cfg.user_id, "master_enabled"):
+                continue  # so opera para quem ligou o MasterBot
             rules = _rules_for_user(db, cfg.user_id)
             user_results = []
             for symbol in rules["watchlist"]:
