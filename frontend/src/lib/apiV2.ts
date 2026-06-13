@@ -66,4 +66,40 @@ export const apiV2 = {
     );
     return { bars };
   },
+
+  // ─── Fatia D: Auth (login/registro/me) ───
+  // O Python responde {access_token} / UserResponse; a UI espera {success, token, user, error}.
+  login: async (params: { email: string; password?: string }) => {
+    try {
+      const r = await v2<{ access_token?: string }>("/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email: params.email, password: params.password ?? "" }),
+      });
+      if (!r.access_token) return { success: false, error: "Falha na autenticação" };
+      return { success: true, token: r.access_token };
+    } catch {
+      return { success: false, error: "Falha na autenticação" };
+    }
+  },
+
+  register: async (params: { email: string; password?: string }) => {
+    try {
+      const user = await v2<{ id: string; email: string }>("/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ email: params.email, password: params.password ?? "" }),
+      });
+      return { success: true, user };
+    } catch {
+      return { success: false, error: "Falha no registro" };
+    }
+  },
+
+  me: async () => {
+    try {
+      const user = await v2<{ id: string; email: string }>("/auth/me");
+      return { success: true, user };
+    } catch {
+      return { success: false };
+    }
+  },
 };

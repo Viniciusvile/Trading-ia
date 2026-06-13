@@ -574,19 +574,25 @@ export const api = {
 
   // ─── Authentication Endpoints ───
   login: (params: { email: string; password?: string }) =>
-    safeJson<{ success: boolean; token?: string; user?: any; error?: string }>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify(params),
-    }, { success: false, error: "Falha na autenticação" }),
+    BACKEND_FLAGS.auth
+      ? apiV2.login(params)
+      : safeJson<{ success: boolean; token?: string; user?: any; error?: string }>("/auth/login", {
+          method: "POST",
+          body: JSON.stringify(params),
+        }, { success: false, error: "Falha na autenticação" }),
 
   register: (params: { email: string; password?: string }) =>
-    safeJson<{ success: boolean; token?: string; user?: any; error?: string }>("/auth/register", {
-      method: "POST",
-      body: JSON.stringify(params),
-    }, { success: false, error: "Falha no registro" }),
+    BACKEND_FLAGS.auth
+      ? apiV2.register(params)
+      : safeJson<{ success: boolean; token?: string; user?: any; error?: string }>("/auth/register", {
+          method: "POST",
+          body: JSON.stringify(params),
+        }, { success: false, error: "Falha no registro" }),
 
   me: () =>
-    safeJson<{ success: boolean; user?: any }>("/auth/me", undefined, { success: false }),
+    BACKEND_FLAGS.auth
+      ? apiV2.me()
+      : safeJson<{ success: boolean; user?: any }>("/auth/me", undefined, { success: false }),
 
   // ─── Notifications Endpoints ───
   notifications: (limit?: number) =>
