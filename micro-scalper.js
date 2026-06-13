@@ -513,6 +513,7 @@ async function main() {
                   entryPrice: s.pos.entryPrice,
                   exitPrice: exitPx,
                   pnl: pnlUsdt,
+                  exitReason: reason,
                   ocoOrderListId: s.pos.ocoId ? Number(s.pos.ocoId) : null,
                   timeframe: "5m",
                   closedAt: new Date(now).toISOString()

@@ -48,7 +48,18 @@ export default function InicioPage() {
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [todayTrades, setTodayTrades] = useState<SummaryTrade[]>([]);
   const [todayOpened, setTodayOpened] = useState<SummaryTrade[]>([]);
-  const [stats30d, setStats30d] = useState<{ wins: number; losses: number; totalPnl: number; bestPnl: number; worstPnl: number } | null>(null);
+  const [stats30d, setStats30d] = useState<{
+    wins: number;
+    losses: number;
+    totalPnl: number;
+    bestPnl: number;
+    worstPnl: number;
+    avgDurationMin?: number;
+    timeoutCount?: number;
+    tpCount?: number;
+    slCount?: number;
+    totalClosed?: number;
+  } | null>(null);
   const [metricModal, setMetricModal] = useState<"pnl" | "ops" | "winrate" | null>(null);
   const router = useRouter();
 
@@ -395,8 +406,42 @@ export default function InicioPage() {
               <div className="flex justify-between"><span className="text-muted">Pior operação</span><span className="font-medium text-[var(--color-text-down)]">{fmtUSD(stats30d.worstPnl)}</span></div>
               <div className="flex justify-between"><span className="text-muted">Taxa de acerto</span><span className="font-medium">{winRate30d != null ? `${Math.round(winRate30d * 100)}%` : "—"}</span></div>
             </div>
+
+            {/* Nova Seção: Diagnóstico de Duração e Tipo de Fechamento */}
+            <div className="pt-3.5 border-t border-[var(--color-border)]">
+              <div className="text-[10px] text-muted uppercase tracking-wider font-semibold mb-2 flex items-center gap-1">
+                ⏱️ Duração & Motivos de Fechamento
+              </div>
+              <div className="text-xs text-[var(--color-text-2)] space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-muted">Duração média por trade</span>
+                  <span className="font-medium text-[var(--color-text)]">
+                    {stats30d.avgDurationMin != null ? `${Math.round(stats30d.avgDurationMin)} minutos` : "—"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted">Fechados por Timeout (trava)</span>
+                  <span className="font-medium text-[var(--color-text)]">
+                    {stats30d.timeoutCount != null && stats30d.totalClosed ? `${stats30d.timeoutCount} (${Math.round((stats30d.timeoutCount / stats30d.totalClosed) * 100)}%)` : "0 (0%)"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted">Fechados por Take Profit (TP)</span>
+                  <span className="font-medium text-[var(--color-text-up)]">
+                    {stats30d.tpCount != null && stats30d.totalClosed ? `${stats30d.tpCount} (${Math.round((stats30d.tpCount / stats30d.totalClosed) * 100)}%)` : "0 (0%)"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted">Fechados por Stop Loss (SL)</span>
+                  <span className="font-medium text-[var(--color-text-down)]">
+                    {stats30d.slCount != null && stats30d.totalClosed ? `${stats30d.slCount} (${Math.round((stats30d.slCount / stats30d.totalClosed) * 100)}%)` : "0 (0%)"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
             <p className="text-[10px] text-muted">
-              Vitória = operação fechada com lucro. A taxa considera todas as posições fechadas com resultado nos últimos 30 dias, somando todos os robôs.
+              A taxa e as durações consideram todas as posições fechadas com resultado nos últimos 30 dias, somando todos os robôs ativos.
             </p>
           </div>
         )}

@@ -289,7 +289,18 @@ export const api = {
       recentActivity: { time: string; kind: "open" | "win" | "loss"; symbol: string; title: string }[];
       todayTrades?: SummaryTrade[];
       todayOpened?: SummaryTrade[];
-      stats30d?: { wins: number; losses: number; totalPnl: number; bestPnl: number; worstPnl: number } | null;
+      stats30d?: {
+        wins: number;
+        losses: number;
+        totalPnl: number;
+        bestPnl: number;
+        worstPnl: number;
+        avgDurationMin?: number;
+        timeoutCount?: number;
+        tpCount?: number;
+        slCount?: number;
+        totalClosed?: number;
+      } | null;
     }>("/dashboard/summary", undefined, {
       success: false,
       pnlToday: 0,

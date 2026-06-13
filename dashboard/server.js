@@ -2809,12 +2809,59 @@ app.get('/api/dashboard/summary', authenticateToken, async (req, res) => {
       .map(toTrade)
       .sort((a, b) => new Date(b.openedAt) - new Date(a.openedAt));
     const pnls30 = closed30.map(p => parseFloat(p.pnl) || 0);
+
+    // Cálculos de durações e motivos de saída nos últimos 30 dias
+    let totalDurationMs = 0;
+    let durationCount = 0;
+    let timeoutCount = 0;
+    let tpCount = 0;
+    let slCount = 0;
+
+    closed30.forEach(p => {
+      // Duração
+      if (p.openedAt && p.closedAt) {
+        const durationMin = (new Date(p.closedAt).getTime() - new Date(p.openedAt).getTime()) / 60000;
+        if (durationMin > 0) {
+          totalDurationMs += durationMin * 60000;
+          durationCount++;
+        }
+      }
+
+      // Motivo do fechamento
+      const pnlVal = parseFloat(p.pnl) || 0;
+      const exitReason = (p.exitReason || p.reason || '').toLowerCase();
+
+      if (exitReason.includes('timeout')) {
+        timeoutCount++;
+      } else if (exitReason.includes('tp') || exitReason.includes('profit') || exitReason.includes('oco_filled') || exitReason.includes('binance_oco') || exitReason.includes('oco')) {
+        tpCount++;
+      } else if (exitReason.includes('sl') || exitReason.includes('loss')) {
+        slCount++;
+      } else {
+        // Fallback heurístico
+        const durationMin = p.openedAt && p.closedAt ? (new Date(p.closedAt).getTime() - new Date(p.openedAt).getTime()) / 60000 : 0;
+        const isNearTimeout = (durationMin >= 58 && durationMin <= 62) || (durationMin >= 28 && durationMin <= 32);
+        if (isNearTimeout) {
+          timeoutCount++;
+        } else if (pnlVal > 0) {
+          tpCount++;
+        } else {
+          slCount++;
+        }
+      }
+    });
+
     const stats30d = closed30.length ? {
       wins: wins30,
       losses: closed30.filter(p => parseFloat(p.pnl) < 0).length,
       totalPnl: pnls30.reduce((a, b) => a + b, 0),
       bestPnl: Math.max(...pnls30),
       worstPnl: Math.min(...pnls30),
+      avgDurationMin: durationCount > 0 ? (totalDurationMs / durationCount / 60000) : 0,
+      timeoutCount,
+      tpCount,
+      slCount,
+      totalClosed: closed30.length
     } : null;
 
     res.json({
