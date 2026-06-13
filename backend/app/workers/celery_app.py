@@ -9,6 +9,7 @@ celery = Celery(
     include=[
         "app.workers.bot_runner",
         "app.workers.bot_runner_micro",
+        "app.workers.bot_runner_master",
     ],
 )
 
@@ -23,6 +24,11 @@ celery.conf.update(
         "micro-scalper-paper": {
             "task": "run_micro_scalper",
             "schedule": 60.0,
+        },
+        # MasterBot em PAPER: ciclo a cada 5min (legado usa 10min; estrategias mais pesadas).
+        "masterbot-paper": {
+            "task": "run_masterbot",
+            "schedule": 300.0,
         },
     },
 )

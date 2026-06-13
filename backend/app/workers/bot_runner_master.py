@@ -11,6 +11,7 @@ from celery import shared_task
 from binance.client import Client
 
 from app.database import _get_session_factory
+from app.models.user import User  # noqa: F401  (registra a tabela 'users' p/ resolver a FK)
 from app.models.master import MasterPlan, MasterConfig
 from app.services import masterbot as mbot
 
@@ -54,6 +55,7 @@ def run_masterbot():
         configs = db.query(MasterConfig).all()
         for cfg in configs:
             rules = _rules_for_user(db, cfg.user_id)
+            user_results = []
             for symbol in rules["watchlist"]:
                 plan = mbot.get_plan_for_symbol(symbol, rules, "master")
                 if not plan:
@@ -63,12 +65,19 @@ def run_masterbot():
                     candles = _fetch_candles(client, symbol, tf)
                     d = mbot.decide_signal_for_plan(plan, candles)
                 except Exception as e:
-                    decisions.append({"user": cfg.user_id, "symbol": symbol, "error": str(e)})
+                    user_results.append({"symbol": symbol, "error": str(e)})
                     continue
-                decisions.append({
-                    "user": cfg.user_id, "symbol": symbol, "plan": plan.get("name"),
-                    "action": d["action"], "side": d.get("side"), "reason": d.get("reason"),
-                })
+                rec = {"symbol": symbol, "plan": plan.get("name"), "strategy": plan.get("strategy"),
+                       "action": d["action"], "side": d.get("side"), "reason": d.get("reason")}
+                user_results.append(rec)
+                decisions.append({"user": cfg.user_id, **rec})
+
+            # grava o ultimo status (paper) no master_config.data.lastStatus do usuario
+            now = datetime.now(timezone.utc).isoformat()
+            new_data = dict(cfg.data or {})
+            new_data["lastStatus"] = {"status": "waiting", "lastRun": now, "results": user_results}
+            cfg.data = new_data
+        db.commit()
         return {"status": "ok", "ts": datetime.now(timezone.utc).isoformat(), "decisions": decisions}
     finally:
         db.close()
