@@ -101,6 +101,33 @@ def cancel_oco(client: Client, symbol: str, order_list_id) -> dict:
         return {"ok": False, "error": e.message}
 
 
+def get_oco(client: Client, order_list_id) -> dict:
+    """Consulta o estado de uma OCO. Retorna {ok, status, filled_price, raw}.
+
+    status do orderList: 'EXECUTING' (ativa) | 'ALL_DONE' (TP ou SL bateu) | 'REJECT'.
+    Se ALL_DONE, busca a ordem FILLED para descobrir o preco real de saida.
+    """
+    try:
+        res = client.v3_get_order_list(orderListId=int(order_list_id))
+    except BinanceAPIException as e:
+        return {"ok": False, "error": e.message}
+    status = res.get("listOrderStatus") or res.get("listStatusType")
+    filled_price = None
+    if status == "ALL_DONE":
+        symbol = res.get("symbol")
+        for refo in res.get("orders", []):
+            try:
+                o = client.get_order(symbol=symbol, orderId=refo["orderId"])
+            except BinanceAPIException:
+                continue
+            if o.get("status") == "FILLED":
+                eq = float(o.get("executedQty", 0) or 0)
+                qq = float(o.get("cummulativeQuoteQty", 0) or 0)
+                filled_price = (qq / eq) if eq > 0 else float(o.get("price") or o.get("stopPrice") or 0)
+                break
+    return {"ok": True, "status": status, "filled_price": filled_price, "raw": res}
+
+
 def get_free_balance(client: Client, asset: str) -> float:
     account = client.get_account()
     row = next((b for b in account.get("balances", []) if b["asset"] == asset), None)
