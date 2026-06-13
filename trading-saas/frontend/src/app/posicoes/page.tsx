@@ -511,9 +511,18 @@ export default function PosicoesPage() {
                           <td className="py-4 px-4 font-mono">{fmtUSD(pos.entryPrice)}</td>
                           <td className="py-4 px-4 font-mono text-xs hidden sm:table-cell">{pos.quantity}</td>
                           <td className="py-4 px-4 font-mono">
-                            <span className={`font-bold ${isProfit ? "text-up" : "text-down"}`}>
+                            <div className={`font-bold ${isProfit ? "text-up" : "text-down"}`}>
                               {isProfit ? "+" : ""}{fmtUSD(pnlVal)}
-                            </span>
+                            </div>
+                            {(() => {
+                              const cost = pos.entryPrice * pos.quantity;
+                              const pnlPct = cost ? (pnlVal / cost) * 100 : 0;
+                              return (
+                                <div className={`text-xs ${isProfit ? "text-up" : "text-down"}`}>
+                                  {isProfit ? "+" : ""}{pnlPct.toFixed(2)}%
+                                </div>
+                              );
+                            })()}
                           </td>
                           <td className="py-4 px-4 hidden md:table-cell">
                             <Badge tone="neutral">Fechada</Badge>
