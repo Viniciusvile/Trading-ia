@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Bot, Pause, Play, AlertTriangle, FileText, Settings, Zap, HelpCircle } from "lucide-react";
+import { Bot, Pause, Play, AlertTriangle, FileText, Settings, Zap, HelpCircle, CheckCircle2, XCircle, Info } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardHeader, Button, Badge, Stat, Tooltip, Modal, Input } from "@/components/ui";
 import { AnimatedNumber, SymbolIcon, PillTabs } from "@/components/fx";
@@ -116,6 +116,8 @@ export default function BotsPage() {
 
   // Decision history state
   const [decisionHistory, setDecisionHistory] = useState<any[]>([]);
+  const [decisionDetailsOpen, setDecisionDetailsOpen] = useState(false);
+  const [selectedDecision, setSelectedDecision] = useState<any | null>(null);
 
   // Headers com JWT para os fetch diretos (endpoints exigem login)
   const legacyAuthHeaders = (): Record<string, string> => {
@@ -590,7 +592,11 @@ export default function BotsPage() {
                     initial={{ opacity: 0, x: -8 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: Math.min(idx * 0.04, 0.4), duration: 0.25, ease: "easeOut" }}
-                    className="flex items-center gap-3 py-3 text-xs"
+                    className="flex items-center gap-3 py-3 text-xs cursor-pointer hover:bg-[rgba(255,255,255,0.03)] px-3 -mx-3 rounded-lg transition-all"
+                    onClick={() => {
+                      setSelectedDecision(item);
+                      setDecisionDetailsOpen(true);
+                    }}
                   >
                     <SymbolIcon symbol={item.symbol} size={30} />
                     <div className="min-w-0 flex-1">
@@ -805,6 +811,145 @@ export default function BotsPage() {
             </>
           )}
         </div>
+      </Modal>
+ 
+      {/* Decision Details Modal */}
+      <Modal
+        open={decisionDetailsOpen}
+        onClose={() => setDecisionDetailsOpen(false)}
+        title="Detalhes da Decisão Técnica"
+        description="Checklist detalhado dos critérios técnicos e segurança que determinaram a ação do robô."
+        footer={
+          <Button variant="primary" onClick={() => setDecisionDetailsOpen(false)}>
+            Fechar
+          </Button>
+        }
+      >
+        {selectedDecision ? (
+          <div className="space-y-4 text-xs text-[var(--color-text-2)] leading-relaxed">
+            <div className="flex items-center justify-between border-b border-[var(--color-border)] pb-3">
+              <div className="flex items-center gap-3">
+                <SymbolIcon symbol={selectedDecision.symbol} size={36} />
+                <div>
+                  <h4 className="text-sm font-semibold text-[var(--color-text)]">
+                    {String(selectedDecision.symbol || "").replace("USDT", "")} / USDT
+                  </h4>
+                  <div className="text-[10px] text-muted">
+                    {selectedDecision.kind === "master" ? "MasterBot" : "Micro Scalper"}
+                    {selectedDecision.timeframe ? ` · ${selectedDecision.timeframe}` : ""}
+                    {selectedDecision.strategy ? ` · ${labelFor(selectedDecision.strategy)}` : ""}
+                  </div>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-muted">Preço analisado</div>
+                <div className="text-sm font-bold text-[var(--color-text)]">
+                  {selectedDecision.price != null ? fmtUSD(selectedDecision.price) : (selectedDecision.entryPrice != null ? fmtUSD(selectedDecision.entryPrice) : "—")}
+                </div>
+              </div>
+            </div>
+
+            {/* Status Banner */}
+            {selectedDecision.kind === "master" ? (
+              selectedDecision.allPass ? (
+                <div className="p-3 rounded-lg border border-emerald-950/20 bg-emerald-500/10 text-emerald-400 flex items-start gap-2.5">
+                  <CheckCircle2 size={16} className="shrink-0 mt-0.5 text-emerald-400" />
+                  <div>
+                    <strong className="block text-xs font-semibold">Sinal Aprovado para Entrada</strong>
+                    Todos os critérios técnicos e travas de segurança foram validados com sucesso para este ativo.
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3 rounded-lg border border-red-950/20 bg-red-500/10 text-red-400 flex items-start gap-2.5">
+                  <XCircle size={16} className="shrink-0 mt-0.5 text-red-400" />
+                  <div>
+                    <strong className="block text-xs font-semibold">Decisão: Neutro / Sinal Reprovado</strong>
+                    O sinal foi ignorado porque um ou mais critérios técnicos ou regras de segurança não foram satisfeitos.
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="p-3 rounded-lg border border-blue-950/20 bg-blue-500/10 text-blue-400 flex items-start gap-2.5">
+                <Info size={16} className="shrink-0 mt-0.5 text-blue-400" />
+                <div>
+                  <strong className="block text-xs font-semibold">
+                    {selectedDecision.event === "entry" ? "Entrada Executada" : "Saída Executada"}
+                  </strong>
+                  {selectedDecision.event === "entry" 
+                    ? `Ordem de Compra enviada via Scalper pelo sinal: ${labelFor(selectedDecision.signal)}.`
+                    : `Ordem de Venda enviada via Scalper. Motivo: ${labelFor(selectedDecision.reason)}.`}
+                </div>
+              </div>
+            )}
+
+            {/* Technical Checklist */}
+            <div>
+              <h5 className="text-xs font-semibold text-[var(--color-text)] mb-2 uppercase tracking-wider text-muted">
+                Critérios Analisados
+              </h5>
+              {selectedDecision.conditions && selectedDecision.conditions.length > 0 ? (
+                <div className="border border-[var(--color-border)] rounded-lg overflow-hidden divide-y divide-[var(--color-border)] bg-[var(--color-surface-2)]">
+                  {selectedDecision.conditions.map((cond: any, cIdx: number) => (
+                    <div key={cIdx} className="flex items-center justify-between p-2.5 hover:bg-[rgba(255,255,255,0.01)] transition-colors">
+                      <div className="min-w-0 flex-1 pr-3">
+                        <span className="font-medium text-[var(--color-text)] block truncate">
+                          {cond.label}
+                        </span>
+                        <div className="text-[9px] text-muted flex items-center gap-1.5 mt-0.5">
+                          <span>Requerido: <span className="font-mono text-[var(--color-text-2)]">{cond.required}</span></span>
+                          <span>·</span>
+                          <span>Atual: <span className="font-mono text-[var(--color-text-2)]">{cond.actual}</span></span>
+                        </div>
+                      </div>
+                      <div className="shrink-0">
+                        {cond.pass ? (
+                          <Badge tone="up" size="sm" className="font-semibold px-2 py-0.5 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
+                            Aprovado
+                          </Badge>
+                        ) : (
+                          <Badge tone="down" size="sm" className="font-semibold px-2 py-0.5 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block"></span>
+                            Reprovado
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : selectedDecision.kind === "master" ? (
+                <div className="p-4 border border-[var(--color-border)] rounded-lg text-center text-muted bg-[var(--color-surface-2)]">
+                  Nenhum checklist de filtros gravado para este ciclo (sinal antigo ou aguardando próximo ciclo).
+                </div>
+              ) : (
+                <div className="p-4 border border-[var(--color-border)] rounded-lg text-muted bg-[var(--color-surface-2)] space-y-1.5">
+                  <p>
+                    O robô <strong>Micro Scalper</strong> opera de forma reativa a eventos rápidos no gráfico de ticks/1m. Ele executa de forma direta e sem filtros adicionais de concorrência macro.
+                  </p>
+                  <div className="text-[10px] text-muted mt-2">
+                    • Sinal: <span className="font-mono text-[var(--color-text)]">{selectedDecision.signal || "N/A"}</span> <br />
+                    {selectedDecision.event === "exit" && (
+                      <>
+                        • Motivo: <span className="font-mono text-[var(--color-text)]">{selectedDecision.reason || "N/A"}</span> <br />
+                        • P&L: <span className={`font-mono font-bold ${selectedDecision.pnlPct > 0 ? "text-up" : "text-down"}`}>
+                          {(selectedDecision.pnlPct * 100).toFixed(2)}%
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Additional details */}
+            <div className="flex items-center justify-between text-[10px] text-muted pt-2 border-t border-[var(--color-border)]">
+              <span>Horário da varredura: {selectedDecision.time ? new Date(selectedDecision.time).toLocaleString("pt-BR") : (selectedDecision.t ? new Date(selectedDecision.t).toLocaleString("pt-BR") : "—")}</span>
+              {selectedDecision.plan && (
+                <span>Plano: <strong className="text-[var(--color-text)]">{selectedDecision.plan}</strong></span>
+              )}
+            </div>
+          </div>
+        ) : null}
       </Modal>
 
       {/* Config Modal */}

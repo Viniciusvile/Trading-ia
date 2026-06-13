@@ -253,6 +253,12 @@ export const api = {
         signal: string;
         price?: number | null;
         strategy?: string | null;
+        conditions?: {
+          label: string;
+          pass: boolean;
+          required: string | number;
+          actual: string | number;
+        }[];
       }[];
     }>("/bot/master/status", undefined, { success: false, isAlive: false }),
 

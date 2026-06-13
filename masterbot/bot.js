@@ -2248,6 +2248,7 @@ async function writeLoopStatus(status = "running", results = [], isFutures = fal
         ? parseFloat((((r.price - r.indicators.vwap) / r.indicators.vwap) * 100).toFixed(2))
         : null,
       strategy: r.strategy || null,
+      conditions: r.conditions || [],
     }))
   };
   
