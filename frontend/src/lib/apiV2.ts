@@ -142,6 +142,26 @@ export const apiV2 = {
   microScalperStart: () => v2<{ success: boolean }>("/bot/micro/start", { method: "POST" }, { success: false }),
   microScalperStop: () => v2<{ success: boolean }>("/bot/micro/stop", { method: "POST" }, { success: false }),
 
+  // log de trades do scalper (paper) e PATCH de config — substituem os fetch /api/legacy diretos
+  microScalperLog: (limit = 25) =>
+    v2<{ success: boolean; trades: unknown[] }>(
+      `/micro-scalper/log?limit=${limit}`,
+      undefined,
+      { success: false, trades: [] },
+    ),
+  microScalperConfigSave: (patch: Record<string, unknown>) =>
+    v2<{ success: boolean }>(
+      "/micro-scalper/config",
+      { method: "PATCH", body: JSON.stringify(patch) },
+      { success: false },
+    ),
+  botConfigSave: (patch: Record<string, unknown>) =>
+    v2<{ success: boolean }>(
+      "/bot/config",
+      { method: "PATCH", body: JSON.stringify(patch) },
+      { success: false },
+    ),
+
   // ─── Fatia H: Contas Binance (multi-conta) ───
   accountsList: () =>
     v2<{ success: boolean; accounts: unknown[] }>("/accounts", undefined, { success: false, accounts: [] }),
@@ -151,6 +171,26 @@ export const apiV2 = {
     v2<{ success: boolean }>(`/accounts/${encodeURIComponent(id)}/activate`, { method: "POST" }, { success: false }),
   accountDelete: (id: string) =>
     v2<{ success: boolean }>(`/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }, { success: false }),
+
+  // ─── Fatia E: Estratégias do MasterBot (planos master_plans) ───
+  botStrategies: () =>
+    v2<{ success: boolean; strategies: unknown[] }>(
+      "/bot/strategies",
+      undefined,
+      { success: false, strategies: [] },
+    ),
+  botStrategyCreate: (strat: Record<string, unknown>) =>
+    v2<{ success: boolean; strategy?: unknown }>(
+      "/bot/strategies",
+      { method: "POST", body: JSON.stringify(strat) },
+      { success: false },
+    ),
+  botStrategyActivate: (name: string) =>
+    v2<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}/activate`, { method: "POST" }, { success: false }),
+  botStrategyDeactivate: (name: string) =>
+    v2<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}/deactivate`, { method: "POST" }, { success: false }),
+  botStrategyDelete: (name: string) =>
+    v2<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}`, { method: "DELETE" }, { success: false }),
 
   // ─── Fatia C: Posições (leitura) ───
   botPositions: () =>

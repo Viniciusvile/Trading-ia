@@ -10,8 +10,9 @@ user_micro_config / micro_sessions / micro_heartbeat.
 """
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Body
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.database import get_db
 from app.deps import get_current_user
@@ -59,3 +60,25 @@ def log(limit: int = Query(25), current_user: User = Depends(get_current_user), 
             trades.append({**t, "symbol": s.symbol})
     trades.sort(key=lambda x: x.get("t", ""), reverse=True)
     return {"success": True, "trades": trades[:limit]}
+
+
+@router.patch("/config")
+def update_config(
+    body: dict = Body(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Mescla as chaves enviadas (ex.: max_trade_usdt, timeout_enabled) em user_micro_config.data."""
+    cfg = db.get(UserMicroConfig, current_user.id)
+    if not cfg:
+        cfg = UserMicroConfig(user_id=current_user.id, data={})
+        db.add(cfg)
+    data = dict(cfg.data or {})
+    allowed = {"max_trade_usdt", "timeout_enabled", "loop_interval_ms", "active_symbols"}
+    for k, v in (body or {}).items():
+        if k in allowed:
+            data[k] = v
+    cfg.data = data
+    flag_modified(cfg, "data")
+    db.commit()
+    return {"success": True, "config": data}

@@ -119,12 +119,6 @@ export default function BotsPage() {
   const [decisionDetailsOpen, setDecisionDetailsOpen] = useState(false);
   const [selectedDecision, setSelectedDecision] = useState<any | null>(null);
 
-  // Headers com JWT para os fetch diretos (endpoints exigem login)
-  const legacyAuthHeaders = (): Record<string, string> => {
-    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  };
-
   // Function to load all bot statuses
   const refreshStatuses = async () => {
     try {
@@ -132,7 +126,7 @@ export default function BotsPage() {
         api.botMasterStatus(),
         api.microScalperStatus(),
         api.botFuturesStatus(),
-        fetch("/api/legacy/micro-scalper/log?limit=5", { headers: legacyAuthHeaders() }).then(r => r.json()).catch(() => null),
+        api.microScalperLog(5).catch(() => null),
       ]);
 
       setBots(prev => prev.map(bot => {
@@ -282,31 +276,17 @@ export default function BotsPage() {
     setSavingConfig(true);
 
     try {
-      // O endpoint /bot/config agora exige login (ativa plano por usuário) —
-      // anexa o JWT igual ao cliente api.ts, senão dá "Token ausente".
-      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-      const authHeaders: Record<string, string> = {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      };
-
-      let res;
+      // Salva via api.ts (delega para o backend Python quando a flag bots liga;
+      // mantém o legado enquanto OFF). O JWT é anexado pelo próprio cliente.
+      let res: { success: boolean; error?: string } | undefined;
       if (selectedBotId === "masterbot" || selectedBotId === "futures") {
-        res = await fetch("/api/legacy/bot/config", {
-          method: "PATCH",
-          headers: authHeaders,
-          body: JSON.stringify(masterConfig),
-        }).then(r => r.json());
+        res = await api.botConfigSave(masterConfig);
       } else if (selectedBotId === "micro-scalper") {
         // Endpoint EXCLUSIVO do Micro Scalper — não toca nas configs do MasterBot
-        res = await fetch("/api/legacy/micro-scalper/config", {
-          method: "PATCH",
-          headers: authHeaders,
-          body: JSON.stringify({
-            max_trade_usdt: microConfig.max_trade_usdt,
-            timeout_enabled: microConfig.timeout_enabled,
-          }),
-        }).then(r => r.json());
+        res = await api.microScalperConfigSave({
+          max_trade_usdt: microConfig.max_trade_usdt,
+          timeout_enabled: microConfig.timeout_enabled,
+        });
       }
 
       if (res && res.success) {
@@ -332,7 +312,7 @@ export default function BotsPage() {
 
     try {
       if (botId === "micro-scalper") {
-        const logData = await fetch("/api/legacy/micro-scalper/log?limit=25", { headers: legacyAuthHeaders() }).then(r => r.json());
+        const logData = await api.microScalperLog(25);
         if (logData.success && logData.trades) {
           const lines = logData.trades.map((tr: any) => {
             const timeStr = new Date(tr.t).toLocaleTimeString();

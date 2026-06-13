@@ -310,6 +310,21 @@ export const api = {
       ? apiV2.microScalperStatus()
       : safeJson<{ success: boolean; running: boolean; activeSymbols?: string[] }>("/micro-scalper/status", undefined, { success: false, running: false }),
 
+  microScalperLog: (limit = 25) =>
+    BACKEND_FLAGS.bots
+      ? apiV2.microScalperLog(limit)
+      : safeJson<{ success: boolean; trades: { t: string; event?: string; symbol?: string; qty?: number; entryPrice?: number; signal?: string; ok?: boolean }[] }>(`/micro-scalper/log?limit=${limit}`, undefined, { success: false, trades: [] }),
+
+  microScalperConfigSave: (patch: Record<string, unknown>) =>
+    BACKEND_FLAGS.bots
+      ? apiV2.microScalperConfigSave(patch)
+      : safeJson<{ success: boolean; error?: string }>("/micro-scalper/config", { method: "PATCH", body: JSON.stringify(patch) }, { success: false }),
+
+  botConfigSave: (patch: Record<string, unknown>) =>
+    BACKEND_FLAGS.bots
+      ? apiV2.botConfigSave(patch)
+      : safeJson<{ success: boolean; error?: string }>("/bot/config", { method: "PATCH", body: JSON.stringify(patch) }, { success: false }),
+
   adaptiveStatus: () =>
     BACKEND_FLAGS.bots
       ? (apiV2.adaptiveStatus() as Promise<AdaptiveStatus>)
@@ -452,7 +467,9 @@ export const api = {
     ),
 
   botStrategies: () =>
-    safeJson<{
+    BACKEND_FLAGS.strategies
+      ? (apiV2.botStrategies() as ReturnType<typeof safeJson>)
+      : safeJson<{
       success: boolean;
       strategies: {
         name: string;
@@ -479,25 +496,33 @@ export const api = {
     }>("/bot/strategies", undefined, { success: false, strategies: [] }),
 
   botStrategyCreate: (strat: any) =>
-    safeJson<{ success: boolean; strategy?: any }>("/bot/strategies", {
-      method: "POST",
-      body: JSON.stringify(strat),
-    }, { success: false }),
+    BACKEND_FLAGS.strategies
+      ? apiV2.botStrategyCreate(strat)
+      : safeJson<{ success: boolean; strategy?: any }>("/bot/strategies", {
+          method: "POST",
+          body: JSON.stringify(strat),
+        }, { success: false }),
 
   botStrategyActivate: (name: string) =>
-    safeJson<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}/activate`, {
-      method: "POST",
-    }, { success: false }),
+    BACKEND_FLAGS.strategies
+      ? apiV2.botStrategyActivate(name)
+      : safeJson<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}/activate`, {
+          method: "POST",
+        }, { success: false }),
 
   botStrategyDeactivate: (name: string) =>
-    safeJson<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}/deactivate`, {
-      method: "POST",
-    }, { success: false }),
+    BACKEND_FLAGS.strategies
+      ? apiV2.botStrategyDeactivate(name)
+      : safeJson<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}/deactivate`, {
+          method: "POST",
+        }, { success: false }),
 
   botStrategyDelete: (name: string) =>
-    safeJson<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-    }, { success: false }),
+    BACKEND_FLAGS.strategies
+      ? apiV2.botStrategyDelete(name)
+      : safeJson<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}`, {
+          method: "DELETE",
+        }, { success: false }),
 
   // ─── Compartilhamento & Importação de estratégias ───
   botStrategyShare: (name: string) =>
