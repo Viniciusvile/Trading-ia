@@ -39,3 +39,23 @@ def test_active_symbols_from_active_list():
 
 def test_active_symbols_fallback_to_plans():
     assert set(m.active_symbols({"plans": {"BTCUSDT": {}, "SOLUSDT": {}}})) == {"BTCUSDT", "SOLUSDT"}
+
+
+def test_turbo_reversion_parity_with_legacy_xrp_entry():
+    """Paridade de execucao: reproduz um entry real do legado (XRPUSDT migrado).
+
+    O legado registrou entry=1.1304, sl=1.1190959..., tp=1.1524428 com o plano
+    turbo-reversion sl_pct=0.01/tp_pct=0.0195. O port deve disparar o mesmo sinal
+    e calcular o mesmo sl/tp a partir do entryPrice.
+    """
+    plan = {"strategy_mode": "turbo-reversion", "sl_pct": 0.01, "tp_pct": 0.0195,
+            "bb_length": 20, "bb_mult": 1.8, "rsi_period": 14, "rsi_limit": 35, "vol_mult": 1.3}
+    closes = [1.20] * 20 + [1.19, 1.17, 1.15, 1.135, 1.1304]
+    candles = [{"open": c, "high": c + 0.001, "low": c - 0.001, "close": c, "volume": 1000, "vol": 1000} for c in closes]
+    candles[-1]["vol"] = 5000
+    candles[-1]["volume"] = 5000
+    d = m.decide_signal_for_symbol(plan, candles)
+    assert d["action"] == "buy"
+    assert d["reason"] == "turbo-reversion-bottom"
+    assert abs(d["slPrice"] - 1.1304 * 0.99) < 1e-9
+    assert abs(d["tpPrice"] - 1.1304 * 1.0195) < 1e-9
