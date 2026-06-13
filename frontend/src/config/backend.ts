@@ -2,7 +2,7 @@
 // Cada flag decide se um grupo de chamadas vai ao backend Python (/api/v2)
 // ou continua no legado (/api/legacy). Permite rollback instantâneo por área.
 export const BACKEND_FLAGS = {
-  market: false,    // Fatia A — cotações/candles
+  market: true,    // Fatia A — cotações/candles
   dashboard: false, // Fatia B — resumo do dashboard (leitura)
   trades: false,    // Fatia B — histórico de trades (leitura)
   positions: false, // Fatia C — posições (leitura, depois escrita)

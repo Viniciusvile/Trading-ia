@@ -6,6 +6,9 @@
  * Em dev local sem servidor: as funções devolvem dados vazios para a UI não quebrar.
  */
 
+import { BACKEND_FLAGS } from "@/config/backend";
+import { apiV2 } from "./apiV2";
+
 const BASE = "/api/legacy";
 
 export interface ScalperPlan {
@@ -178,15 +181,17 @@ export const api = {
   health: () => safeJson<{ ok: boolean }>("/health", undefined, { ok: false }),
 
   quote: (symbol: string) =>
-    safeJson<{
-      symbol: string;
-      last: number;
-      change: number;
-      changePct: number;
-      high: number;
-      low: number;
-      volume: number;
-    } | null>(`/quote?symbol=${encodeURIComponent(symbol)}`, undefined, null),
+    BACKEND_FLAGS.market
+      ? apiV2.quote(symbol)
+      : safeJson<{
+          symbol: string;
+          last: number;
+          change: number;
+          changePct: number;
+          high: number;
+          low: number;
+          volume: number;
+        } | null>(`/quote?symbol=${encodeURIComponent(symbol)}`, undefined, null),
 
   state: () =>
     safeJson<{
@@ -196,13 +201,15 @@ export const api = {
     } | null>("/state", undefined, null),
 
   ohlcv: (symbol: string, timeframe = "1D", count = 30) =>
-    safeJson<{
-      bars: { time: number; open: number; high: number; low: number; close: number; volume: number }[];
-    } | null>(
-      `/ohlcv?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}&count=${count}`,
-      undefined,
-      null,
-    ),
+    BACKEND_FLAGS.market
+      ? apiV2.ohlcv(symbol, timeframe, count)
+      : safeJson<{
+          bars: { time: number; open: number; high: number; low: number; close: number; volume: number }[];
+        } | null>(
+          `/ohlcv?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}&count=${count}`,
+          undefined,
+          null,
+        ),
 
   indicators: () =>
     safeJson<Record<string, number | string>>("/indicators", undefined, {}),
