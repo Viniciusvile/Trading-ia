@@ -1296,6 +1296,206 @@ app.delete('/api/bot/strategies/:name', authenticateToken, async (req, res) => {
   }
 });
 
+// ── COMPARTILHAMENTO & IMPORTAÇÃO DE ESTRATÉGIAS ─────────────────
+// Publica uma estratégia do usuário e devolve um código curto (SH-XXXXXX) que
+// outra pessoa pode usar para importar uma cópia.
+app.post('/api/bot/strategies/:name/share', authenticateToken, async (req, res) => {
+  try {
+    const { name } = req.params;
+    const plan = (await db.listStrategies(req.user.id)).find(p => p.name === name);
+    if (!plan) {
+      return res.status(404).json({ success: false, error: 'Estratégia não encontrada' });
+    }
+
+    const code = await db.createSharedStrategy(req.user.id, plan);
+    res.json({ success: true, code });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Recupera a configuração de uma estratégia compartilhada para pré-visualizar
+// antes de importar.
+app.get('/api/bot/strategies/shared/:code', authenticateToken, async (req, res) => {
+  try {
+    const shared = await db.getSharedStrategy(req.params.code);
+    if (!shared) {
+      return res.status(404).json({ success: false, error: 'Código de compartilhamento inválido ou expirado' });
+    }
+    res.json({ success: true, strategy: shared });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Importador inteligente: recebe uma URL do TradingView ou o código Pine Script
+// cru, extrai os parâmetros usando o Gemini e devolve um modelo de estratégia
+// pronto para o usuário revisar e salvar.
+app.post('/api/bot/strategies/import-tradingview', authenticateToken, async (req, res) => {
+  try {
+    const { url, rawPineScript } = req.body || {};
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(400).json({ success: false, error: 'Chave de API do Gemini não configurada no servidor' });
+    }
+
+    let pineScript = (rawPineScript || '').trim();
+
+    // Se só veio a URL, tenta extrair o Pine Script da página pública.
+    if (!pineScript && url) {
+      try {
+        pineScript = await scrapePineScriptFromUrl(url);
+      } catch (err) {
+        return res.status(422).json({
+          success: false,
+          error: 'Não foi possível extrair o Pine Script da URL (o TradingView pode estar bloqueando o acesso). Cole o código diretamente.',
+        });
+      }
+    }
+
+    if (!pineScript) {
+      return res.status(400).json({ success: false, error: 'Informe a URL do TradingView ou cole o código Pine Script' });
+    }
+
+    const mapped = await mapPineScriptWithGemini(pineScript, apiKey);
+    res.json({ success: true, strategy: mapped });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * Faz fetch de uma página pública do TradingView e tenta extrair o código
+ * Pine Script. O TradingView frequentemente bloqueia bots (Cloudflare), então
+ * o caller deve sempre oferecer a alternativa de colar o código manualmente.
+ */
+async function scrapePineScriptFromUrl(url) {
+  if (!/^https?:\/\//i.test(url)) throw new Error('URL inválida');
+
+  const resp = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml',
+    },
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const html = await resp.text();
+
+  // O TradingView embute o código-fonte do script em um bloco JSON dentro da
+  // página (chave "source"/"scriptSource"). Tenta extrair de algumas formas.
+  const patterns = [
+    /"scriptSource"\s*:\s*"((?:[^"\\]|\\.)*)"/,
+    /"source"\s*:\s*"((?:[^"\\]|\\.)*)"/,
+  ];
+  for (const re of patterns) {
+    const m = html.match(re);
+    if (m && m[1]) {
+      try {
+        // O conteúdo está como string JSON escapada.
+        const decoded = JSON.parse(`"${m[1]}"`);
+        if (decoded && /(study|indicator|strategy)\s*\(/.test(decoded)) return decoded;
+      } catch {}
+    }
+  }
+
+  // Fallback: procura por um bloco <pre>/<code> com cara de Pine Script.
+  const codeBlock = html.match(/(\/\/@version=\d[\s\S]+?)(?:<\/pre>|<\/code>|<\/script>)/i);
+  if (codeBlock && codeBlock[1] && codeBlock[1].length > 40) {
+    return codeBlock[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim();
+  }
+
+  throw new Error('Pine Script não encontrado na página');
+}
+
+/**
+ * Envia o Pine Script ao Gemini com o prompt do "compilador de estratégias" e
+ * devolve o objeto estruturado (name, description, strategy, filters, sl, tp).
+ */
+async function mapPineScriptWithGemini(pineScript, apiKey) {
+  const systemPrompt = `Você é um compilador de estratégias de trading automatizadas.
+Analise o script em Pine Script (TradingView) fornecido e extraia:
+1. Indicadores utilizados (ex: RSI, Bandas de Bollinger, Médias Móveis, MACD, etc.).
+2. Parâmetros numéricos associados (ex: período do RSI, desvio padrão das BBs, comprimento das EMAs).
+3. Condições e gatilhos de Entrada (compra/venda).
+4. Valores de Stop Loss (SL) e Take Profit (TP), mapeando-os como porcentagem decimal.
+
+Retorne APENAS um objeto JSON válido, sem markdown ou explicações externas, no seguinte formato:
+{
+  "name": "Nome sugerido",
+  "description": "Breve descrição do comportamento do script",
+  "strategy": "rsi-bb" ou "moving-average" ou "custom",
+  "filters": {
+     // Ex: "rsi": {"period": 14, "overbought": 70, "oversold": 30}
+  },
+  "sl": { "type": "percentage", "value": 1.5 },
+  "tp": { "type": "percentage", "value": 3.0 }
+}
+
+### Pine Script:
+\`\`\`
+${pineScript.slice(0, 20000)}
+\`\`\``;
+
+  // gemini-2.5-flash conforme o plano; se indisponível, cai para 1.5-flash.
+  const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+  let lastErr = null;
+
+  for (const model of models) {
+    try {
+      const resp = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: systemPrompt }] }],
+            generationConfig: { temperature: 0.2, responseMimeType: 'application/json' },
+          }),
+        }
+      );
+      const data = await resp.json();
+      if (data.error) { lastErr = new Error(data.error.message); continue; }
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) { lastErr = new Error('Resposta vazia do Gemini'); continue; }
+
+      const parsed = parseGeminiJson(text);
+      return normalizeImportedStrategy(parsed);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('Falha ao analisar o script com a IA');
+}
+
+/** Extrai o objeto JSON da resposta do Gemini, tolerando cercas markdown. */
+function parseGeminiJson(text) {
+  let t = text.trim();
+  // Remove cercas ```json ... ``` se a IA ignorar a instrução.
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) t = fence[1].trim();
+  // Recorta do primeiro { ao último } caso haja texto extra ao redor.
+  const first = t.indexOf('{');
+  const last = t.lastIndexOf('}');
+  if (first >= 0 && last > first) t = t.slice(first, last + 1);
+  return JSON.parse(t);
+}
+
+/** Garante os campos esperados pelo formulário de criação de estratégia. */
+function normalizeImportedStrategy(raw) {
+  const out = raw && typeof raw === 'object' ? raw : {};
+  return {
+    name: typeof out.name === 'string' && out.name.trim() ? out.name.trim() : 'Estratégia Importada',
+    description: typeof out.description === 'string' ? out.description : '',
+    strategy: typeof out.strategy === 'string' ? out.strategy : 'custom',
+    symbols: Array.isArray(out.symbols) && out.symbols.length ? out.symbols : ['BTCUSDT'],
+    timeframes: Array.isArray(out.timeframes) && out.timeframes.length ? out.timeframes : ['1H'],
+    mode: out.mode === 'futures' ? 'futures' : 'spot',
+    filters: out.filters && typeof out.filters === 'object' ? out.filters : {},
+    sl: out.sl && typeof out.sl === 'object' ? out.sl : { type: 'percentage', value: 1.5 },
+    tp: out.tp && typeof out.tp === 'object' ? out.tp : { type: 'percentage', value: 3.0 },
+  };
+}
+
 // ── BACKTEST ────────────────────────────────────────────────────
 // Cache de candles em memória (evita martelar a API pública da Binance)
 const candleCache = new Map(); // `${symbol}:${tf}` → { candles, fetchedAt }

@@ -8,6 +8,7 @@
  */
 
 import pg from 'pg';
+import { randomBytes } from 'node:crypto';
 const { Pool } = pg;
 
 let _pool = null;
@@ -144,6 +145,19 @@ export async function initDb() {
       );
       CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
       CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
+
+      -- Estratégias publicadas para compartilhamento P2P. Guarda só o MODELO de
+      -- configuração da estratégia (não chaves nem dados sensíveis do dono), de
+      -- forma que qualquer um com o código possa importar uma CÓPIA.
+      CREATE TABLE IF NOT EXISTS shared_strategies (
+        code         VARCHAR(20) PRIMARY KEY,
+        owner_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name         VARCHAR(120) NOT NULL,
+        description  TEXT,
+        data         JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at   TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_shared_strategies_owner ON shared_strategies(owner_id);
     `);
 
     // Migrações dinâmicas para adicionar account_id e user_id
@@ -863,6 +877,71 @@ export async function seedStrategiesForUser(userId, plans, activePlanName = null
     client.release();
   }
   return inserted;
+}
+
+// ─── Estratégias compartilhadas (P2P) ───────────────────────────────────────
+
+/** Gera um código de compartilhamento curto e único (ex: SH-9A2F8B). */
+function generateShareCode() {
+  const hex = randomBytes(3).toString('hex').toUpperCase(); // 6 chars
+  return `SH-${hex}`;
+}
+
+/**
+ * Publica uma estratégia para compartilhamento. Salva apenas o modelo de
+ * configuração (sem dados de execução do dono, como lastBacktest/realStats).
+ * Retorna o código gerado.
+ */
+export async function createSharedStrategy(ownerId, plan) {
+  if (!ownerId || !plan?.name) throw new Error('ownerId e estratégia obrigatórios');
+
+  // Mantém só os campos de configuração que fazem sentido copiar.
+  const data = {
+    symbols: plan.symbols || [],
+    timeframes: plan.timeframes || [],
+    strategy: plan.strategy || 'warrior',
+    mode: plan.mode || 'spot',
+    leverage: plan.leverage || 1,
+    filters: plan.filters || {},
+    sl: plan.sl || { type: 'atr', multiplier: 1.5 },
+    tp: plan.tp || { type: 'atr', multiplier: 2.0 },
+    winRateTarget: plan.winRateTarget ?? null,
+  };
+
+  // Tenta algumas vezes para evitar colisão (raríssima) na chave primária.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = generateShareCode();
+    try {
+      await getPool().query(
+        `INSERT INTO shared_strategies (code, owner_id, name, description, data)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [code, ownerId, plan.name, plan.description || null, JSON.stringify(data)]
+      );
+      return code;
+    } catch (e) {
+      if (e.code === '23505') continue; // unique_violation: tenta outro código
+      throw e;
+    }
+  }
+  throw new Error('Não foi possível gerar um código de compartilhamento único');
+}
+
+/** Recupera uma estratégia compartilhada pelo código, ou null. */
+export async function getSharedStrategy(code) {
+  if (!code) return null;
+  const res = await getPool().query(
+    'SELECT code, name, description, data, created_at FROM shared_strategies WHERE code = $1',
+    [code.trim().toUpperCase()]
+  );
+  if (!res.rows.length) return null;
+  const r = res.rows[0];
+  return {
+    code: r.code,
+    name: r.name,
+    description: r.description,
+    createdAt: r.created_at,
+    ...r.data,
+  };
 }
 
 // ─── Micro Scalper config por usuário ────────────────────────────────────────

@@ -440,6 +440,28 @@ export const api = {
       method: "DELETE",
     }, { success: false }),
 
+  // ─── Compartilhamento & Importação de estratégias ───
+  botStrategyShare: (name: string) =>
+    safeJson<{ success: boolean; code?: string; error?: string }>(
+      `/bot/strategies/${encodeURIComponent(name)}/share`,
+      { method: "POST" },
+      { success: false, error: "Falha ao compartilhar estratégia" },
+    ),
+
+  botStrategySharedGet: (code: string) =>
+    safeJson<{ success: boolean; strategy?: ImportedStrategy & { code: string }; error?: string }>(
+      `/bot/strategies/shared/${encodeURIComponent(code)}`,
+      undefined,
+      { success: false, error: "Código inválido" },
+    ),
+
+  botStrategyImportTradingView: (payload: { url?: string; rawPineScript?: string }) =>
+    safeJson<{ success: boolean; strategy?: ImportedStrategy; error?: string }>(
+      "/bot/strategies/import-tradingview",
+      { method: "POST", body: JSON.stringify(payload) },
+      { success: false, error: "Falha ao analisar o script" },
+    ),
+
   botBacktest: (plan: any) =>
     safeJson<{ success: boolean; error?: string } & Partial<BacktestResult>>("/bot/backtest", {
       method: "POST",
@@ -553,6 +575,21 @@ export const api = {
       { success: false }
     ),
 };
+
+/** Modelo de estratégia devolvido pelo importador (IA / código P2P). */
+export interface ImportedStrategy {
+  name: string;
+  description: string;
+  strategy: string;
+  symbols: string[];
+  timeframes: string[];
+  mode: string;
+  leverage?: number;
+  filters: Record<string, any>;
+  sl: any;
+  tp: any;
+  winRateTarget?: number | null;
+}
 
 export interface SystemNotification {
   id: string;

@@ -9,6 +9,8 @@ import {
   Square,
   BarChart3,
   SlidersHorizontal,
+  Share2,
+  ArrowDownToLine,
   X,
 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
@@ -17,6 +19,8 @@ import { fmtPct, fmtUSD } from "@/lib/format";
 import { api } from "@/lib/api";
 import type { BacktestResult } from "@/lib/api";
 import { StrategyWizard } from "@/components/strategy/StrategyWizard";
+import { ShareStrategyModal } from "@/components/strategy/ShareStrategyModal";
+import { ImportStrategyModal } from "@/components/strategy/ImportStrategyModal";
 import { BacktestReport } from "@/components/strategy/BacktestReport";
 import { ScalperSection } from "@/components/strategy/ScalperSection";
 import { AdaptiveSection } from "@/components/strategy/AdaptiveSection";
@@ -65,6 +69,9 @@ export default function EstrategiasPage() {
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null);
   const [reanalyzing, setReanalyzing] = useState(false);
   const [reanalyzeError, setReanalyzeError] = useState<string | null>(null);
+  const [sharingStrategy, setSharingStrategy] = useState<string | null>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importInitialCode, setImportInitialCode] = useState<string | undefined>(undefined);
 
   const fetchStrategies = async () => {
     setLoading(true);
@@ -91,6 +98,17 @@ export default function EstrategiasPage() {
       } catch {}
     }, 60_000);
     return () => clearInterval(timer);
+  }, []);
+
+  // Abertura automática do importador via link de compartilhamento
+  // (ex.: /estrategias?importar=SH-9A2F8B).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const code = new URLSearchParams(window.location.search).get("importar");
+    if (code) {
+      setImportInitialCode(code);
+      setShowImportModal(true);
+    }
   }, []);
 
   const handleActivateToggle = async (strat: Strategy) => {
@@ -157,14 +175,24 @@ export default function EstrategiasPage() {
           title="Estratégias"
           description="Monitore, ative e crie conjuntos de regras automatizadas para seus bots."
         />
-        <Button 
-          variant="primary" 
-          size="md" 
-          onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-2 self-start sm:self-auto shadow-md"
-        >
-          <Plus size={16} /> Nova Estratégia
-        </Button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <Button
+            variant="outline"
+            size="md"
+            onClick={() => { setImportInitialCode(undefined); setShowImportModal(true); }}
+            className="flex items-center gap-2"
+          >
+            <ArrowDownToLine size={16} /> Importar
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-2 shadow-md"
+          >
+            <Plus size={16} /> Nova Estratégia
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -248,6 +276,14 @@ export default function EstrategiasPage() {
                   <Button variant="outline" size="sm" onClick={() => openStats(s)}>
                     <BarChart3 size={14} /> Estatísticas
                   </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSharingStrategy(s.name)}
+                    title="Compartilhar estratégia"
+                  >
+                    <Share2 size={14} />
+                  </Button>
                   <Button variant="ghost" size="sm" onClick={() => handleDelete(s.name)} className="text-[var(--color-text-down)] hover:bg-[var(--color-text-down)]/10">
                     <Trash2 size={14} />
                   </Button>
@@ -330,6 +366,23 @@ export default function EstrategiasPage() {
         <StrategyWizard
           initial={editingStrategy}
           onClose={() => setEditingStrategy(null)}
+          onSaved={fetchStrategies}
+        />
+      )}
+
+      {/* COMPARTILHAR — gera código/link P2P para a estratégia */}
+      {sharingStrategy && (
+        <ShareStrategyModal
+          strategyName={sharingStrategy}
+          onClose={() => setSharingStrategy(null)}
+        />
+      )}
+
+      {/* IMPORTAR — código P2P ou análise por IA de Pine Script / TradingView */}
+      {showImportModal && (
+        <ImportStrategyModal
+          initialCode={importInitialCode}
+          onClose={() => { setShowImportModal(false); setImportInitialCode(undefined); }}
           onSaved={fetchStrategies}
         />
       )}
