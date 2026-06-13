@@ -1346,9 +1346,13 @@ app.post('/api/bot/strategies/import-tradingview', authenticateToken, async (req
       try {
         pineScript = await scrapePineScriptFromUrl(url);
       } catch (err) {
+        // Diferencia os motivos para dar uma orientação útil ao usuário —
+        // a saída sempre que o scrape falha é colar o código manualmente.
         return res.status(422).json({
           success: false,
-          error: 'Não foi possível extrair o Pine Script da URL (o TradingView pode estar bloqueando o acesso). Cole o código diretamente.',
+          reason: err.reason || 'scrape_failed',
+          error: err.userMessage ||
+            'Não foi possível ler o código pela URL. Muitos scripts do TradingView são protegidos ou bloqueiam acesso automático — abra o script, copie o Pine Script e cole no campo abaixo.',
         });
       }
     }
@@ -1364,35 +1368,68 @@ app.post('/api/bot/strategies/import-tradingview', authenticateToken, async (req
   }
 });
 
+/** Cria um Error com metadados (motivo + mensagem amigável) para o handler. */
+function scrapeError(reason, userMessage) {
+  const e = new Error(userMessage);
+  e.reason = reason;
+  e.userMessage = userMessage;
+  return e;
+}
+
 /**
  * Faz fetch de uma página pública do TradingView e tenta extrair o código
- * Pine Script. O TradingView frequentemente bloqueia bots (Cloudflare), então
- * o caller deve sempre oferecer a alternativa de colar o código manualmente.
+ * Pine Script. O TradingView segue redirects (/v/ → /script/) e frequentemente
+ * bloqueia bots (Cloudflare/captcha) ou esconde o código de scripts protegidos,
+ * então o caller deve sempre oferecer a alternativa de colar o código.
  */
 async function scrapePineScriptFromUrl(url) {
-  if (!/^https?:\/\//i.test(url)) throw new Error('URL inválida');
+  if (!/^https?:\/\//i.test(url)) {
+    throw scrapeError('invalid_url', 'A URL informada é inválida. Cole um link do TradingView (https://...) ou o código Pine Script.');
+  }
 
-  const resp = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml',
-    },
-  });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const html = await resp.text();
+  // Timeout defensivo — o TradingView pode pendurar a conexão.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  let html;
+  try {
+    const resp = await fetch(url, {
+      redirect: 'follow', // /v/CODE/ responde 301 para a página /script/...
+      signal: ctrl.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+      },
+    });
+    if (!resp.ok) {
+      throw scrapeError('http_error', `O TradingView respondeu com erro (HTTP ${resp.status}). Copie o Pine Script e cole no campo abaixo.`);
+    }
+    html = await resp.text();
+  } catch (e) {
+    if (e.reason) throw e; // já é um scrapeError
+    throw scrapeError('fetch_failed', 'Não foi possível acessar a URL do TradingView. Copie o Pine Script e cole no campo abaixo.');
+  } finally {
+    clearTimeout(timer);
+  }
+
+  // Página de proteção anti-bot (Cloudflare/captcha) — não tem o código.
+  if (/just a moment|cf-browser-verification|captcha|access denied|enable javascript/i.test(html)) {
+    throw scrapeError('blocked',
+      'O TradingView bloqueou o acesso automático a esta página (proteção anti-bot). Abra o script, copie o Pine Script e cole no campo abaixo.');
+  }
 
   // O TradingView embute o código-fonte do script em um bloco JSON dentro da
   // página (chave "source"/"scriptSource"). Tenta extrair de algumas formas.
   const patterns = [
     /"scriptSource"\s*:\s*"((?:[^"\\]|\\.)*)"/,
     /"source"\s*:\s*"((?:[^"\\]|\\.)*)"/,
+    /"script_source"\s*:\s*"((?:[^"\\]|\\.)*)"/,
   ];
   for (const re of patterns) {
     const m = html.match(re);
     if (m && m[1]) {
       try {
-        // O conteúdo está como string JSON escapada.
-        const decoded = JSON.parse(`"${m[1]}"`);
+        const decoded = JSON.parse(`"${m[1]}"`); // string JSON escapada
         if (decoded && /(study|indicator|strategy)\s*\(/.test(decoded)) return decoded;
       } catch {}
     }
@@ -1404,7 +1441,9 @@ async function scrapePineScriptFromUrl(url) {
     return codeBlock[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim();
   }
 
-  throw new Error('Pine Script não encontrado na página');
+  // Página carregou mas sem código — provavelmente script protegido/closed-source.
+  throw scrapeError('not_found',
+    'Este script parece ser protegido (closed-source) — o TradingView não publica o código dele. Se você tem acesso, copie o Pine Script e cole no campo abaixo.');
 }
 
 /**

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sparkles, KeyRound, FileCode2, ArrowLeft, Check } from "lucide-react";
 import { Modal, Button, Input } from "@/components/ui";
 import { api, type ImportedStrategy } from "@/lib/api";
@@ -53,10 +53,13 @@ export function ImportStrategyModal({ onClose, onSaved, initialCode }: ImportStr
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Quando o scrape da URL falha, destacamos o campo de colar código.
+  const [highlightPaste, setHighlightPaste] = useState(false);
 
   // Resultado mapeado → tela de revisão
   const [preview, setPreview] = useState<ImportedStrategy | null>(null);
   const [saving, setSaving] = useState(false);
+  const pasteRef = useRef<HTMLTextAreaElement>(null);
 
   // Se veio com código no link, busca automaticamente ao abrir.
   useEffect(() => {
@@ -105,6 +108,7 @@ export function ImportStrategyModal({ onClose, onSaved, initialCode }: ImportStr
     }
     setLoading(true);
     setError(null);
+    setHighlightPaste(false);
     try {
       const res = await api.botStrategyImportTradingView({
         url: url.trim() || undefined,
@@ -114,6 +118,12 @@ export function ImportStrategyModal({ onClose, onSaved, initialCode }: ImportStr
         setPreview(res.strategy);
       } else {
         setError(res.error || "Não foi possível analisar o script.");
+        // Falha ao ler pela URL (bloqueio/script protegido): direciona o
+        // usuário ao campo de colar o código, que sempre funciona.
+        if (!pineScript.trim() && url.trim()) {
+          setHighlightPaste(true);
+          requestAnimationFrame(() => pasteRef.current?.focus());
+        }
       }
     } catch {
       setError("Falha ao analisar o script.");
@@ -306,24 +316,40 @@ export function ImportStrategyModal({ onClose, onSaved, initialCode }: ImportStr
             <div>
               <label className="block text-xs font-medium text-[var(--color-text-2)] mb-1.5">
                 Ou cole o código Pine Script diretamente
+                <span className="text-muted font-normal"> (mais confiável)</span>
               </label>
               <textarea
-                className="w-full min-h-[120px] rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2 text-xs font-mono text-[var(--color-text)] outline-none focus:border-[var(--color-brand-500)] focus:ring-2 focus:ring-[var(--color-brand-500)]/15"
+                ref={pasteRef}
+                className={`w-full min-h-[120px] rounded-[var(--radius-sm)] border bg-[var(--color-surface)] px-3 py-2 text-xs font-mono text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-brand-500)] focus:ring-2 focus:ring-[var(--color-brand-500)]/15 ${
+                  highlightPaste
+                    ? "border-[var(--color-brand-500)] ring-2 ring-[var(--color-brand-500)]/20"
+                    : "border-[var(--color-border-strong)]"
+                }`}
                 placeholder="//@version=5&#10;indicator(...)"
                 value={pineScript}
-                onChange={(e) => setPineScript(e.target.value)}
+                onChange={(e) => { setPineScript(e.target.value); if (highlightPaste) setHighlightPaste(false); }}
               />
               <p className="text-[10px] text-muted mt-1">
-                Se o TradingView bloquear o link, cole o código aqui — a IA analisa do mesmo jeito.
+                Muitos scripts são protegidos e o TradingView bloqueia leitura automática. Abra o
+                script no TradingView, copie o código-fonte (Pine Editor) e cole aqui — a IA analisa
+                do mesmo jeito.
               </p>
             </div>
             <Button fullWidth loading={loading} onClick={analyzeWithAI} leftIcon={<Sparkles size={14} />}>
-              Analisar com IA
+              {pineScript.trim() ? "Analisar código com IA" : "Analisar com IA"}
             </Button>
           </div>
         )}
 
-        {error && <p className="text-xs text-[var(--color-text-down)]">{error}</p>}
+        {error && (
+          <div className={`text-xs rounded-[var(--radius-sm)] p-2.5 ${
+            highlightPaste
+              ? "bg-[var(--color-brand-500)]/10 text-[var(--color-text-2)] border border-[var(--color-brand-500)]/30"
+              : "text-[var(--color-text-down)]"
+          }`}>
+            {error}
+          </div>
+        )}
       </div>
     </Modal>
   );

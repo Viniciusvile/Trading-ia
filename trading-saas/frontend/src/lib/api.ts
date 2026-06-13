@@ -150,6 +150,30 @@ async function safeJson<T>(path: string, init?: RequestInit, fallback?: T): Prom
   }
 }
 
+/**
+ * Como safeJson, mas devolve o corpo JSON MESMO em respostas 4xx — usado em
+ * endpoints onde a mensagem de erro do servidor (ex.: "script protegido, cole
+ * o código") é importante para o usuário e não pode ser engolida pelo fallback.
+ */
+async function jsonAllowError<T>(path: string, init?: RequestInit, fallback?: T): Promise<T> {
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(init?.headers as Record<string, string> ?? {}),
+    };
+    if (typeof window !== "undefined") {
+      const token = localStorage.getItem("token");
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    }
+    const res = await fetch(`${BASE}${path}`, { ...init, headers, cache: "no-store" });
+    // Tenta sempre ler JSON; se a resposta não for JSON, cai no fallback.
+    return (await res.json()) as T;
+  } catch (err) {
+    if (fallback !== undefined) return fallback;
+    throw err;
+  }
+}
+
 export const api = {
   health: () => safeJson<{ ok: boolean }>("/health", undefined, { ok: false }),
 
@@ -449,14 +473,14 @@ export const api = {
     ),
 
   botStrategySharedGet: (code: string) =>
-    safeJson<{ success: boolean; strategy?: ImportedStrategy & { code: string }; error?: string }>(
+    jsonAllowError<{ success: boolean; strategy?: ImportedStrategy & { code: string }; error?: string }>(
       `/bot/strategies/shared/${encodeURIComponent(code)}`,
       undefined,
       { success: false, error: "Código inválido" },
     ),
 
   botStrategyImportTradingView: (payload: { url?: string; rawPineScript?: string }) =>
-    safeJson<{ success: boolean; strategy?: ImportedStrategy; error?: string }>(
+    jsonAllowError<{ success: boolean; strategy?: ImportedStrategy; error?: string; reason?: string }>(
       "/bot/strategies/import-tradingview",
       { method: "POST", body: JSON.stringify(payload) },
       { success: false, error: "Falha ao analisar o script" },
