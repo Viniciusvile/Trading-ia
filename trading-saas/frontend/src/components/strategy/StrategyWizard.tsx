@@ -26,6 +26,46 @@ const BASES = [
 const SYMBOL_OPTIONS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "LTCUSDT", "AVAXUSDT"];
 const TF_OPTIONS = ["15m", "1H", "4H", "1D"];
 
+/**
+ * Metadados dos filtros que o motor (applyPlanFilters) reconhece. Usado para
+ * renderizar dinamicamente os indicadores de uma estratégia CUSTOM importada —
+ * cada filtro presente vira um controle editável, com nome legível em PT-BR.
+ */
+type FilterKind = "bool" | "number";
+interface FilterMeta {
+  label: string;
+  hint?: string;
+  kind: FilterKind;
+  min?: number;
+  max?: number;
+  step?: number;
+}
+const FILTER_META: Record<string, FilterMeta> = {
+  ema_triple: { label: "EMA Tripla (tendência)", hint: "EMA9 > EMA21 > EMA55 > EMA200", kind: "bool" },
+  macd_positive: { label: "MACD positivo", hint: "Histograma do MACD > 0", kind: "bool" },
+  macd_growing: { label: "MACD acelerando", hint: "Histograma do MACD crescente", kind: "bool" },
+  di_direction: { label: "DI+ > DI- (direção comprada)", kind: "bool" },
+  bb_range: { label: "Bollinger comprimido (range)", kind: "bool" },
+  rsi_range_mid: { label: "RSI neutro (range)", kind: "bool" },
+  adx_min: { label: "ADX mínimo (força de tendência)", kind: "number", min: 10, max: 40, step: 1 },
+  adx_max: { label: "ADX máximo (sem tendência forte)", kind: "number", min: 10, max: 40, step: 1 },
+  rsi_min: { label: "RSI mínimo", kind: "number", min: 0, max: 100, step: 1 },
+  rsi_max: { label: "RSI máximo (zona de compra)", kind: "number", min: 0, max: 100, step: 1 },
+  rsi_period: { label: "RSI período", kind: "number", min: 2, max: 50, step: 1 },
+  volume_mult: { label: "Volume relativo mín.", hint: "× média de 20 candles", kind: "number", min: 1, max: 3, step: 0.1 },
+  volume_max_mult: { label: "Volume relativo máx.", kind: "number", min: 1, max: 5, step: 0.1 },
+  bb_period: { label: "Bollinger período", kind: "number", min: 5, max: 50, step: 1 },
+  bb_mult: { label: "Bollinger desvio padrão", kind: "number", min: 1, max: 4, step: 0.1 },
+  bb_pct_b_min: { label: "%B mínimo (posição nas bandas)", kind: "number", min: 0, max: 1, step: 0.05 },
+  bb_pct_b_max: { label: "%B máximo (perto da banda inferior)", kind: "number", min: 0, max: 1, step: 0.05 },
+  supertrend_period: { label: "Supertrend período", kind: "number", min: 5, max: 30, step: 1 },
+  supertrend_mult: { label: "Supertrend multiplicador", kind: "number", min: 1, max: 6, step: 0.1 },
+  choppiness_min: { label: "Choppiness mínimo (lateral)", kind: "number", min: 30, max: 60, step: 1 },
+};
+function metaFor(key: string): FilterMeta {
+  return FILTER_META[key] || { label: key.replace(/_/g, " "), kind: typeof key === "string" ? "number" : "number" };
+}
+
 /** Estratégia existente para edição (personalização) — pré-preenche o wizard. */
 export interface StrategyInitial {
   name: string;
@@ -52,6 +92,10 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
   // Edição pula direto para o passo de personalização
   const [step, setStep] = useState<1 | 2 | 3>(isEditing ? 2 : 1);
 
+  // Estratégia importada do TradingView: lógica "custom" (qualquer coisa que não
+  // seja uma das bases nativas). Nesse caso renderizamos os filtros REAIS dela.
+  const isCustom = !!initial?.strategy && initial.strategy !== "warrior" && initial.strategy !== "range-v2";
+
   // Passo 1
   const [strategyType, setStrategyType] = useState<"warrior" | "range-v2">(
     initial?.strategy === "range-v2" ? "range-v2" : "warrior"
@@ -77,6 +121,22 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
   const [choppinessMin, setChoppinessMin] = useState(Number(f.choppiness_min ?? 45));
   const [rsiLongMax, setRsiLongMax] = useState(Number(f.rsi_long_max ?? 42));
   const [rsiShortMin, setRsiShortMin] = useState(Number(f.rsi_short_min ?? 58));
+  // Filtros dinâmicos de uma estratégia CUSTOM importada (preserva os reais).
+  const [customFilters, setCustomFilters] = useState<Record<string, number | boolean>>(
+    isCustom && initial?.filters && typeof initial.filters === "object"
+      ? { ...(initial.filters as Record<string, number | boolean>) }
+      : {}
+  );
+  // SL/TP de estratégia importada costumam ser percentuais (type: pct/percentage).
+  const slIsPct = isCustom && (initial?.sl?.type === "pct" || (initial?.sl as any)?.type === "percentage");
+  const tpIsPct = isCustom && (initial?.tp?.type === "pct" || (initial?.tp as any)?.type === "percentage");
+  const [slPct, setSlPct] = useState<number>(Number((initial?.sl as any)?.value ?? 1.5));
+  const [tpPct, setTpPct] = useState<number>(Number((initial?.tp as any)?.value ?? 3.0));
+
+  const setCustomFilter = (key: string, value: number | boolean) =>
+    setCustomFilters((prev) => ({ ...prev, [key]: value }));
+  const removeCustomFilter = (key: string) =>
+    setCustomFilters((prev) => { const next = { ...prev }; delete next[key]; return next; });
 
   // Passo 3
   const reqIdRef = useRef(0);
@@ -88,6 +148,24 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
   const comboCount = symbols.length * timeframes.length;
 
   const buildPlan = () => {
+    // Estratégia importada: preserva a lógica "custom" e seus filtros reais,
+    // em vez de reescrevê-los com os defaults de warrior/range.
+    if (isCustom) {
+      return {
+        name: name.replace(/\s+/g, "_"),
+        description,
+        symbols,
+        timeframes,
+        strategy: initial!.strategy!, // mantém "custom" (ou o que veio)
+        mode,
+        leverage: mode === "futures" ? leverage : 1,
+        sl: slIsPct ? { type: "pct", value: slPct } : { type: "atr", multiplier: slMultiplier },
+        tp: tpIsPct ? { type: "pct", value: tpPct } : { type: "atr", multiplier: tpMultiplier },
+        filters: customFilters,
+        winRateTarget,
+      };
+    }
+
     const filters: Record<string, number | boolean> = {};
     if (strategyType === "warrior") {
       if (emaTriple) filters.ema_triple = true;
@@ -300,15 +378,46 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
 
             {/* SL/TP */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-[var(--color-border)] pt-4">
-              <div className="space-y-1">
-                <div className="flex justify-between text-xs font-medium">
-                  <span className="text-[var(--color-text)]">Stop Loss (ATR)</span>
-                  <span className="text-[var(--color-brand-500)]">{slMultiplier}x</span>
+              {isCustom && slIsPct ? (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs font-medium">
+                    <span className="text-[var(--color-text)]">Stop Loss (%)</span>
+                    <span className="text-[var(--color-brand-500)]">{slPct}%</span>
+                  </div>
+                  <input type="range" min={0.2} max={10} step={0.1} value={slPct}
+                    onChange={(e) => setSlPct(parseFloat(e.target.value))} className="w-full accent-[var(--color-brand-500)]" />
                 </div>
-                <input type="range" min={0.5} max={4} step={0.1} value={slMultiplier}
-                  onChange={(e) => setSlMultiplier(parseFloat(e.target.value))} className="w-full accent-[var(--color-brand-500)]" />
-              </div>
-              {strategyType === "warrior" ? (
+              ) : (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs font-medium">
+                    <span className="text-[var(--color-text)]">Stop Loss (ATR)</span>
+                    <span className="text-[var(--color-brand-500)]">{slMultiplier}x</span>
+                  </div>
+                  <input type="range" min={0.5} max={4} step={0.1} value={slMultiplier}
+                    onChange={(e) => setSlMultiplier(parseFloat(e.target.value))} className="w-full accent-[var(--color-brand-500)]" />
+                </div>
+              )}
+              {isCustom ? (
+                tpIsPct ? (
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs font-medium">
+                      <span className="text-[var(--color-text)]">Take Profit (%)</span>
+                      <span className="text-[var(--color-brand-500)]">{tpPct}%</span>
+                    </div>
+                    <input type="range" min={0.4} max={20} step={0.1} value={tpPct}
+                      onChange={(e) => setTpPct(parseFloat(e.target.value))} className="w-full accent-[var(--color-brand-500)]" />
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs font-medium">
+                      <span className="text-[var(--color-text)]">Take Profit (ATR)</span>
+                      <span className="text-[var(--color-brand-500)]">{tpMultiplier}x</span>
+                    </div>
+                    <input type="range" min={0.5} max={6} step={0.1} value={tpMultiplier}
+                      onChange={(e) => setTpMultiplier(parseFloat(e.target.value))} className="w-full accent-[var(--color-brand-500)]" />
+                  </div>
+                )
+              ) : strategyType === "warrior" ? (
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs font-medium">
                     <span className="text-[var(--color-text)]">Take Profit (ATR)</span>
@@ -327,9 +436,64 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
 
             {/* Filtros específicos */}
             <div className="space-y-3 border-t border-[var(--color-border)] pt-4">
-              <label className="text-xs font-medium text-[var(--color-text)] block">Filtros da estratégia</label>
+              <label className="text-xs font-medium text-[var(--color-text)] block">
+                {isCustom ? "Indicadores detectados" : "Filtros da estratégia"}
+              </label>
+              {isCustom && (
+                <p className="text-[10px] text-muted -mt-2">
+                  Indicadores extraídos do Pine Script importado. Ajuste os valores como quiser — o bot usa exatamente estes filtros.
+                </p>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {strategyType === "warrior" ? (
+                {isCustom ? (
+                  Object.keys(customFilters).length === 0 ? (
+                    <p className="text-xs text-muted col-span-full">
+                      Nenhum indicador mapeável foi detectado neste script. Você pode adicionar filtros manualmente reimportando ou usando uma estratégia base.
+                    </p>
+                  ) : (
+                    Object.entries(customFilters).map(([key, val]) => {
+                      const meta = metaFor(key);
+                      if (meta.kind === "bool") {
+                        return (
+                          <label key={key} className="flex items-start gap-3 p-3 bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={!!val}
+                              onChange={(e) => setCustomFilter(key, e.target.checked)}
+                              className="mt-0.5 accent-[var(--color-brand-500)]"
+                            />
+                            <div>
+                              <span className="text-xs font-semibold text-[var(--color-text)] block">{meta.label}</span>
+                              {meta.hint && <span className="text-[10px] text-muted">{meta.hint}</span>}
+                            </div>
+                          </label>
+                        );
+                      }
+                      const num = Number(val);
+                      const min = meta.min ?? 0;
+                      const max = meta.max ?? Math.max(100, num * 2);
+                      const step = meta.step ?? 1;
+                      return (
+                        <div key={key} className="p-3 bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] space-y-2">
+                          <div className="flex justify-between text-xs">
+                            <span className="font-semibold text-[var(--color-text)]">{meta.label}</span>
+                            <span className="font-bold text-[var(--color-brand-500)]">{Number.isInteger(num) ? num : num.toFixed(2)}</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={min}
+                            max={max}
+                            step={step}
+                            value={num}
+                            onChange={(e) => setCustomFilter(key, parseFloat(e.target.value))}
+                            className="w-full accent-[var(--color-brand-500)]"
+                          />
+                          {meta.hint && <p className="text-[10px] text-muted">{meta.hint}</p>}
+                        </div>
+                      );
+                    })
+                  )
+                ) : strategyType === "warrior" ? (
                   <>
                     <label className="flex items-start gap-3 p-3 bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] cursor-pointer">
                       <input type="checkbox" checked={emaTriple} onChange={(e) => setEmaTriple(e.target.checked)} className="mt-0.5 accent-[var(--color-brand-500)]" />
