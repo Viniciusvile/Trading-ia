@@ -534,7 +534,34 @@ export const api = {
 
   me: () =>
     safeJson<{ success: boolean; user?: any }>("/auth/me", undefined, { success: false }),
+
+  // ─── Notifications Endpoints ───
+  notifications: (limit?: number) =>
+    safeJson<{ success: boolean; notifications: SystemNotification[] }>(
+      `/notifications${limit ? `?limit=${limit}` : ""}`,
+      undefined,
+      { success: false, notifications: [] }
+    ),
+
+  notificationsRead: (ids?: string[]) =>
+    safeJson<{ success: boolean }>(
+      "/notifications/read",
+      {
+        method: "POST",
+        body: ids ? JSON.stringify({ ids }) : undefined,
+      },
+      { success: false }
+    ),
 };
+
+export interface SystemNotification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'success' | 'warning' | 'error';
+  isRead: boolean;
+  createdAt: string;
+}
 
 export type Quote = NonNullable<Awaited<ReturnType<typeof api.quote>>>;
 export type StrategyResults = NonNullable<Awaited<ReturnType<typeof api.strategyResults>>>;

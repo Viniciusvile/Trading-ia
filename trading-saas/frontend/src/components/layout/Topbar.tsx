@@ -2,11 +2,11 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Moon, Sun, Search, Bell, ChevronDown, Check, LogOut, TrendingUp } from "lucide-react";
+import { Moon, Sun, Search, Bell, ChevronDown, Check, LogOut, TrendingUp, CheckCheck, Inbox } from "lucide-react";
 import { navItems } from "@/config/navigation";
 import { Badge } from "@/components/ui";
 import { fmtUSD } from "@/lib/format";
-import { api } from "@/lib/api";
+import { api, type SystemNotification } from "@/lib/api";
 import { BalanceChartModal } from "@/components/fx";
 
 export function Topbar() {
@@ -66,6 +66,38 @@ export function Topbar() {
     };
   }, []);
 
+
+  // Notifications states
+  const [notifications, setNotifications] = useState<SystemNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+
+  async function handleMarkAllAsRead() {
+    try {
+      const res = await api.notificationsRead();
+      if (res.success) {
+        setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+        setUnreadCount(0);
+      }
+    } catch (e) {
+      console.error("Erro ao marcar todas como lidas:", e);
+    }
+  }
+
+  async function handleMarkAsRead(id: string) {
+    try {
+      const res = await api.notificationsRead([id]);
+      if (res.success) {
+        setNotifications(prev =>
+          prev.map(n => n.id === id ? { ...n, isRead: true } : n)
+        );
+        setUnreadCount(prev => Math.max(0, prev - 1));
+      }
+    } catch (e) {
+      console.error("Erro ao marcar notificação como lida:", e);
+    }
+  }
+
   async function handleSwitchAccount(id: string) {
     try {
       const res = await api.accountActivate(id);
@@ -80,11 +112,12 @@ export function Topbar() {
 
   useEffect(() => {
     let active = true;
-    async function fetchBalance() {
+    async function fetchData() {
       try {
-        const [balRes, sumRes] = await Promise.all([
+        const [balRes, sumRes, notifRes] = await Promise.all([
           api.botBalance(),
-          api.dashboardSummary(new Date().getTimezoneOffset())
+          api.dashboardSummary(new Date().getTimezoneOffset()),
+          api.notifications(20)
         ]);
         if (active && balRes && balRes.success) {
           setBalance({
@@ -95,15 +128,19 @@ export function Topbar() {
         if (active && sumRes && sumRes.success) {
           setPnl24h(sumRes.pnlToday ?? 0);
         }
+        if (active && notifRes && notifRes.success) {
+          setNotifications(notifRes.notifications);
+          setUnreadCount(notifRes.notifications.filter(n => !n.isRead).length);
+        }
       } catch (e) {
-        console.error("Erro ao carregar saldo/resumo:", e);
+        console.error("Erro ao carregar dados do topbar:", e);
       } finally {
         if (active) setLoading(false);
       }
     }
 
-    fetchBalance();
-    const timer = setInterval(fetchBalance, 15000);
+    fetchData();
+    const timer = setInterval(fetchData, 15000);
     return () => {
       active = false;
       clearInterval(timer);
@@ -224,17 +261,91 @@ export function Topbar() {
         >
           <Search size={18} />
         </button>
+      <div className="relative">
         <button
           type="button"
           aria-label="Notificações"
-          className="relative h-9 w-9 flex items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] transition"
+          onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+          className="relative h-9 w-9 flex items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] transition cursor-pointer"
         >
           <Bell size={18} />
-          <span
-            aria-hidden
-            className="absolute top-2 right-2 h-1.5 w-1.5 rounded-full bg-[var(--color-down-500)]"
-          />
+          {unreadCount > 0 && (
+            <span
+              className="absolute top-2 right-2 h-1.5 w-1.5 rounded-full bg-[var(--color-down-500)] animate-pulse"
+            />
+          )}
         </button>
+
+        {isNotificationsOpen && (
+          <>
+            <div 
+              className="fixed inset-0 z-30" 
+              onClick={() => setIsNotificationsOpen(false)}
+            />
+            <div className="absolute right-0 mt-2 w-80 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)]/90 backdrop-blur-xl shadow-2xl p-4 space-y-3 z-40 animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-sm text-[var(--color-text)]">Notificações</span>
+                {unreadCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleMarkAllAsRead}
+                    className="text-[10px] font-medium text-[var(--color-brand-500)] hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <CheckCheck size={12} />
+                    Marcar todas como lidas
+                  </button>
+                )}
+              </div>
+
+              <div className="max-h-72 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                {notifications.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-muted flex flex-col items-center justify-center gap-2">
+                    <Inbox size={20} className="text-muted/50" />
+                    <span>Nenhuma notificação por enquanto</span>
+                  </div>
+                ) : (
+                  notifications.map((n) => {
+                    const isSuccess = n.type === 'success';
+                    const isError = n.type === 'error';
+                    const toneColor = isSuccess 
+                      ? "text-[var(--color-text-up)]" 
+                      : isError 
+                        ? "text-[var(--color-text-down)]" 
+                        : "text-[var(--color-brand-500)]";
+                    
+                    return (
+                      <div 
+                        key={n.id} 
+                        onClick={() => handleMarkAsRead(n.id)}
+                        className={`p-2.5 rounded-lg border border-transparent transition text-left cursor-pointer ${
+                          n.isRead 
+                            ? "bg-[var(--color-surface-1)]/40 hover:bg-[var(--color-surface-1)]/60" 
+                            : "bg-[var(--color-surface-3)] border-[var(--color-border)] hover:bg-[var(--color-surface-3)]/80"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="font-semibold text-[11px] flex items-center gap-1.5 truncate">
+                            {!n.isRead && (
+                              <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-down-500)] shrink-0" />
+                            )}
+                            <span className={toneColor}>{n.title}</span>
+                          </div>
+                          <span className="text-[9px] text-muted shrink-0">
+                            {new Date(n.createdAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-[var(--color-text-2)] mt-1 leading-relaxed">
+                          {n.message}
+                        </p>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
         <button
           type="button"
           onClick={toggleTheme}

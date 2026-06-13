@@ -3445,6 +3445,27 @@ app.delete('/api/accounts/:id', authenticateToken, async (req, res) => {
 });
 
 
+// ── NOTIFICATIONS ENDPOINTS (v2 standard isolation) ──────────────────────────
+app.get('/api/notifications', authenticateToken, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit, 10) || 50;
+    const list = await db.listNotifications(req.user.id, limit);
+    res.json({ success: true, notifications: list });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/notifications/read', authenticateToken, async (req, res) => {
+  try {
+    const { ids } = req.body || {};
+    await db.markNotificationsAsRead(req.user.id, ids);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ── FALLBACK ─────────────────────────────────────────────────────
 app.get('/*splat', (_req, res) => res.sendFile(join(__dirname, 'index.html')));
 

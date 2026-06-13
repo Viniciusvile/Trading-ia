@@ -132,6 +132,18 @@ export async function initDb() {
         data       JSONB NOT NULL DEFAULT '{}'::jsonb,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS notifications (
+        id         BIGSERIAL PRIMARY KEY,
+        user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title      VARCHAR(150) NOT NULL,
+        message    TEXT NOT NULL,
+        type       VARCHAR(50) NOT NULL DEFAULT 'info',
+        is_read    BOOLEAN DEFAULT false,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+      CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
     `);
 
     // Migrações dinâmicas para adicionar account_id e user_id
@@ -220,16 +232,45 @@ export async function loadPositions(userId = null) {
 export async function savePosition(pos, userId = null) {
   const accId = await getActiveAccountId(userId);
   if (!accId) return;
-  await getPool().query(
-    `INSERT INTO positions (id, symbol, status, data, account_id)
-     VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (id) DO UPDATE
-       SET symbol = EXCLUDED.symbol,
-           status = EXCLUDED.status,
-           data   = EXCLUDED.data,
-           account_id = EXCLUDED.account_id`,
-    [pos.id, pos.symbol, pos.status, JSON.stringify(pos), accId]
-  );
+
+  const client = await getPool().connect();
+  try {
+    const existing = await client.query('SELECT status FROM positions WHERE id = $1', [pos.id]);
+    const wasOpen = existing.rows.length && existing.rows[0].status === 'open';
+    const isOpening = pos.status === 'open' && (!existing.rows.length || existing.rows[0].status !== 'open');
+    const isClosing = pos.status === 'closed' && wasOpen;
+
+    await client.query(
+      `INSERT INTO positions (id, symbol, status, data, account_id)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (id) DO UPDATE
+         SET symbol = EXCLUDED.symbol,
+             status = EXCLUDED.status,
+             data   = EXCLUDED.data,
+             account_id = EXCLUDED.account_id`,
+      [pos.id, pos.symbol, pos.status, JSON.stringify(pos), accId]
+    );
+
+    const ownerId = userId || (await getUserIdFromAccount(accId)) || (await getOwnerUserId());
+    if (ownerId) {
+      if (isOpening) {
+        await createNotification(
+          ownerId,
+          `Operação Iniciada: ${pos.symbol}`,
+          `Posição aberta em ${pos.symbol} (${pos.timeframe || '5m'}) a $${pos.entryPrice}. Quantidade: ${pos.quantity}.`,
+          'info'
+        );
+      } else if (isClosing) {
+        const pnl = pos.pnl || 0;
+        const pnlTxt = pnl >= 0 ? `+US$ ${pnl.toFixed(2)}` : `-US$ ${Math.abs(pnl).toFixed(2)}`;
+        const type = pnl >= 0 ? 'success' : 'error';
+        const msg = `Posição em ${pos.symbol} foi encerrada. P&L Realizado: ${pnlTxt}. Motivo: ${pos.exitReason || 'desconhecido'}.`;
+        await createNotification(ownerId, `Operação Encerrada: ${pos.symbol}`, msg, type);
+      }
+    }
+  } finally {
+    client.release();
+  }
 }
 
 /**
@@ -244,6 +285,11 @@ export async function savePositions(positions, userId = null) {
   try {
     await client.query('BEGIN');
     for (const pos of positions) {
+      const existing = await client.query('SELECT status FROM positions WHERE id = $1', [pos.id]);
+      const wasOpen = existing.rows.length && existing.rows[0].status === 'open';
+      const isOpening = pos.status === 'open' && (!existing.rows.length || existing.rows[0].status !== 'open');
+      const isClosing = pos.status === 'closed' && wasOpen;
+
       await client.query(
         `INSERT INTO positions (id, symbol, status, data, account_id)
          VALUES ($1, $2, $3, $4, $5)
@@ -254,6 +300,24 @@ export async function savePositions(positions, userId = null) {
                account_id = EXCLUDED.account_id`,
         [pos.id, pos.symbol, pos.status, JSON.stringify(pos), accId]
       );
+
+      const ownerId = userId || (await getUserIdFromAccount(accId)) || (await getOwnerUserId());
+      if (ownerId) {
+        if (isOpening) {
+          await createNotification(
+            ownerId,
+            `Operação Iniciada: ${pos.symbol}`,
+            `Posição aberta em ${pos.symbol} (${pos.timeframe || '5m'}) a $${pos.entryPrice}. Quantidade: ${pos.quantity}.`,
+            'info'
+          );
+        } else if (isClosing) {
+          const pnl = pos.pnl || 0;
+          const pnlTxt = pnl >= 0 ? `+US$ ${pnl.toFixed(2)}` : `-US$ ${Math.abs(pnl).toFixed(2)}`;
+          const type = pnl >= 0 ? 'success' : 'error';
+          const msg = `Posição em ${pos.symbol} foi encerrada. P&L Realizado: ${pnlTxt}. Motivo: ${pos.exitReason || 'desconhecido'}.`;
+          await createNotification(ownerId, `Operação Encerrada: ${pos.symbol}`, msg, type);
+        }
+      }
     }
     await client.query('COMMIT');
   } catch (e) {
@@ -300,12 +364,24 @@ export async function addPosition(
 
   const accId = await getActiveAccountId(userId);
   if (!accId) return;
-  await getPool().query(
+  const res = await getPool().query(
     `INSERT INTO positions (id, symbol, status, data, account_id)
      VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (id) DO NOTHING`,
     [pos.id, pos.symbol, pos.status, JSON.stringify(pos), accId]
   );
+
+  if (res.rowCount > 0) {
+    const ownerId = userId || (await getUserIdFromAccount(accId)) || (await getOwnerUserId());
+    if (ownerId) {
+      await createNotification(
+        ownerId,
+        `Operação Iniciada: ${symbol}`,
+        `Posição aberta em ${symbol} (${timeframe}) a $${entryPrice}. Quantidade: ${quantity}.`,
+        'info'
+      );
+    }
+  }
 
   console.log(
     `📌 [${symbol}] Posição registrada: entrada $${entryPrice}, ` +
@@ -887,4 +963,73 @@ export async function getUserById(id) {
     [id]
   );
   return res.rows[0] || null;
+}
+
+// ─── Notifications (v2 standard isolation) ───────────────────────────────────
+
+export async function createNotification(userId, title, message, type = 'info') {
+  if (!userId) return;
+  try {
+    await getPool().query(
+      `INSERT INTO notifications (user_id, title, message, type)
+       VALUES ($1, $2, $3, $4)`,
+      [userId, title, message, type]
+    );
+  } catch (e) {
+    console.error('❌ Erro ao criar notificação:', e.message);
+  }
+}
+
+export async function listNotifications(userId, limit = 50) {
+  if (!userId) return [];
+  try {
+    const res = await getPool().query(
+      `SELECT id, title, message, type, is_read as "isRead", created_at as "createdAt"
+       FROM notifications
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [userId, limit]
+    );
+    return res.rows;
+  } catch (e) {
+    console.error('❌ Erro ao listar notificações:', e.message);
+    return [];
+  }
+}
+
+export async function markNotificationsAsRead(userId, notificationIds = null) {
+  if (!userId) return;
+  try {
+    if (notificationIds && Array.isArray(notificationIds) && notificationIds.length > 0) {
+      await getPool().query(
+        `UPDATE notifications
+         SET is_read = true
+         WHERE user_id = $1 AND id = ANY($2::bigint[])`,
+        [userId, notificationIds]
+      );
+    } else {
+      await getPool().query(
+        `UPDATE notifications
+         SET is_read = true
+         WHERE user_id = $1`,
+        [userId]
+      );
+    }
+  } catch (e) {
+    console.error('❌ Erro ao marcar notificações como lidas:', e.message);
+  }
+}
+
+export async function getUserIdFromAccount(accountId) {
+  if (!accountId) return null;
+  try {
+    const res = await getPool().query(
+      `SELECT user_id FROM accounts WHERE id = $1`,
+      [accountId]
+    );
+    return res.rows[0]?.user_id || null;
+  } catch (e) {
+    return null;
+  }
 }
