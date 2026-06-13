@@ -135,4 +135,10 @@ export const apiV2 = {
         recentTrades: [], lessons: [], reviews: [],
       } as unknown as { success: boolean; running: boolean },
     ),
+
+  // start/stop dos bots (alternam a flag *_enabled por usuario no Python)
+  botMasterStart: () => v2<{ success: boolean }>("/bot/master/start", { method: "POST" }, { success: false }),
+  botMasterStop: () => v2<{ success: boolean }>("/bot/master/stop", { method: "POST" }, { success: false }),
+  microScalperStart: () => v2<{ success: boolean }>("/bot/micro/start", { method: "POST" }, { success: false }),
+  microScalperStop: () => v2<{ success: boolean }>("/bot/micro/stop", { method: "POST" }, { success: false }),
 };

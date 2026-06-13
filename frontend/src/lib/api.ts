@@ -296,10 +296,14 @@ export const api = {
         }>("/bot/master/status", undefined, { success: false, isAlive: false }),
 
   botMasterStart: () =>
-    safeJson<{ success: boolean; error?: string }>("/bot/master/start", { method: "POST" }),
+    BACKEND_FLAGS.bots
+      ? apiV2.botMasterStart()
+      : safeJson<{ success: boolean; error?: string }>("/bot/master/start", { method: "POST" }),
 
   botMasterStop: () =>
-    safeJson<{ success: boolean; error?: string }>("/bot/master/stop", { method: "POST" }),
+    BACKEND_FLAGS.bots
+      ? apiV2.botMasterStop()
+      : safeJson<{ success: boolean; error?: string }>("/bot/master/stop", { method: "POST" }),
 
   microScalperStatus: () =>
     BACKEND_FLAGS.bots
@@ -355,10 +359,14 @@ export const api = {
     }),
 
   microScalperStart: () =>
-    safeJson<{ success: boolean; error?: string }>("/micro-scalper/start", { method: "POST" }),
+    BACKEND_FLAGS.bots
+      ? apiV2.microScalperStart()
+      : safeJson<{ success: boolean; error?: string }>("/micro-scalper/start", { method: "POST" }),
 
   microScalperStop: () =>
-    safeJson<{ success: boolean; error?: string }>("/micro-scalper/stop", { method: "POST" }),
+    BACKEND_FLAGS.bots
+      ? apiV2.microScalperStop()
+      : safeJson<{ success: boolean; error?: string }>("/micro-scalper/stop", { method: "POST" }),
 
   botFuturesStatus: () =>
     safeJson<{ success: boolean; isAlive: boolean; status?: string }>("/bot/futures/status", undefined, { success: false, isAlive: false }),
