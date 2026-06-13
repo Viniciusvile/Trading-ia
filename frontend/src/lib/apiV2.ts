@@ -102,4 +102,19 @@ export const apiV2 = {
       return { success: false };
     }
   },
+
+  // ─── Fatia F (parcial): Micro-Scalper (leitura de estado) ───
+  microScalperStatus: () =>
+    v2<{ success: boolean; running: boolean; activeSymbols?: string[] }>(
+      "/micro-scalper/status",
+      undefined,
+      { success: false, running: false },
+    ),
+
+  microScalperConfig: () =>
+    v2<{ success: boolean; config: unknown }>(
+      "/micro-scalper/config",
+      undefined,
+      { success: false, config: null },
+    ),
 };

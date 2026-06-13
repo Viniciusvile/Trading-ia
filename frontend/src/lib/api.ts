@@ -300,7 +300,9 @@ export const api = {
     safeJson<{ success: boolean; error?: string }>("/bot/master/stop", { method: "POST" }),
 
   microScalperStatus: () =>
-    safeJson<{ success: boolean; running: boolean; activeSymbols?: string[] }>("/micro-scalper/status", undefined, { success: false, running: false }),
+    BACKEND_FLAGS.bots
+      ? apiV2.microScalperStatus()
+      : safeJson<{ success: boolean; running: boolean; activeSymbols?: string[] }>("/micro-scalper/status", undefined, { success: false, running: false }),
 
   adaptiveStatus: () =>
     safeJson<AdaptiveStatus>("/adaptive/status", undefined, {
@@ -364,17 +366,29 @@ export const api = {
     safeJson<{ success: boolean; error?: string }>("/bot/futures/stop", { method: "POST" }),
 
   microScalperConfig: () =>
-    safeJson<{
-      success: boolean;
-      config: {
-        active_symbols: string[];
-        max_trade_usdt?: number;
-        min_trade_usdt?: number;
-        daily_profit_target_usdt?: number;
-        loop_interval_ms?: number;
-        plans: Record<string, ScalperPlan>;
-      } | null;
-    }>("/micro-scalper/config", undefined, { success: false, config: null }),
+    BACKEND_FLAGS.bots
+      ? (apiV2.microScalperConfig() as Promise<{
+          success: boolean;
+          config: {
+            active_symbols: string[];
+            max_trade_usdt?: number;
+            min_trade_usdt?: number;
+            daily_profit_target_usdt?: number;
+            loop_interval_ms?: number;
+            plans: Record<string, ScalperPlan>;
+          } | null;
+        }>)
+      : safeJson<{
+          success: boolean;
+          config: {
+            active_symbols: string[];
+            max_trade_usdt?: number;
+            min_trade_usdt?: number;
+            daily_profit_target_usdt?: number;
+            loop_interval_ms?: number;
+            plans: Record<string, ScalperPlan>;
+          } | null;
+        }>("/micro-scalper/config", undefined, { success: false, config: null }),
 
   microScalperStrategySave: (payload: {
     symbol: string;
