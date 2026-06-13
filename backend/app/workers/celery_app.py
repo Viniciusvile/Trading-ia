@@ -10,6 +10,7 @@ celery = Celery(
         "app.workers.bot_runner",
         "app.workers.bot_runner_micro",
         "app.workers.bot_runner_master",
+        "app.workers.bot_runner_adaptive",
     ],
 )
 
@@ -28,6 +29,11 @@ celery.conf.update(
         # MasterBot em PAPER: ciclo a cada 5min (legado usa 10min; estrategias mais pesadas).
         "masterbot-paper": {
             "task": "run_masterbot",
+            "schedule": 300.0,
+        },
+        # Adaptive-Bot em PAPER (sem learner): ciclo a cada 5min (legado usa 5min).
+        "adaptive-paper": {
+            "task": "run_adaptive",
             "schedule": 300.0,
         },
     },
