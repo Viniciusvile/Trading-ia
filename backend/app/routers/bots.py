@@ -210,6 +210,68 @@ def update_master_config(
     return {"success": True, "config": data}
 
 
+@router.get("/config")
+def get_master_config(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Config geral do MasterBot + groupPlans (todos os planos do user) + activePlans (ativos).
+
+    É o que o modal de Configurações do MasterBot consome para listar as estratégias.
+    """
+    cfg = db.get(MasterConfig, current_user.id)
+    data = (cfg.data if cfg else {}) or {}
+    plans = (
+        db.query(MasterPlan)
+        .filter(MasterPlan.user_id == current_user.id)
+        .order_by(MasterPlan.created_at.asc())
+        .all()
+    )
+    group_plans = [
+        {
+            "name": p.name,
+            "description": (p.data or {}).get("description", ""),
+            "symbols": (p.data or {}).get("symbols", []),
+        }
+        for p in plans
+    ]
+    active_plans = [p.name for p in plans if p.is_active]
+    return {
+        "success": True,
+        "strategyKey": data.get("strategy", "warrior"),
+        "symbol": data.get("symbol", "BTCUSDT"),
+        "timeframe": data.get("timeframe", "4H"),
+        "portfolio": data.get("portfolio", 200),
+        "maxTrade": data.get("maxTrade", 20),
+        "paperTrading": data.get("paperTrading", True),
+        "dailyMaxLoss": data.get("dailyMaxLoss", 0),
+        "activePlan": data.get("activePlan"),
+        "activePlans": active_plans,
+        "loopInterval": data.get("loopInterval", "1h"),
+        "groupPlans": group_plans,
+    }
+
+
+@router.get("/master/raw-log")
+def master_raw_log(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Log textual do ultimo ciclo do MasterBot (de master_config.data.lastStatus)."""
+    cfg = db.get(MasterConfig, current_user.id)
+    data = (cfg.data if cfg else {}) or {}
+    last = data.get("lastStatus") or {}
+    lines: list[str] = []
+    last_run = last.get("lastRun")
+    if last_run:
+        lines.append(f"Último ciclo: {last_run}")
+    for r in last.get("results", []):
+        action = r.get("action", "")
+        sym = r.get("symbol", "")
+        side = r.get("side", "")
+        reason = r.get("reason", "")
+        plan = r.get("plan", "")
+        verb = "ENTRAR" if action == "enter" else "aguardar"
+        lines.append(f"[{sym}] {plan} ({r.get('strategy','')}) -> {verb} {side} {('· ' + reason) if reason else ''}".strip())
+    if not lines:
+        lines.append("Sem atividade recente do MasterBot (paper).")
+    return {"success": True, "lines": lines}
+
+
 # ─── Estratégias do MasterBot (planos) — leem/escrevem master_plans ───
 
 def _plan_to_ui(plan: MasterPlan) -> dict:

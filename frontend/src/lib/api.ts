@@ -240,7 +240,9 @@ export const api = {
   alertDelete: () => safeJson("/alerts", { method: "DELETE" }),
 
   botConfig: () =>
-    safeJson<{
+    BACKEND_FLAGS.bots
+      ? (apiV2.botConfig() as ReturnType<typeof safeJson>)
+      : safeJson<{
       success: boolean;
       strategyKey: string;
       symbol: string;
@@ -259,7 +261,9 @@ export const api = {
     safeJson<{ success: boolean; trades?: any[] }>("/bot/log", undefined, { success: false }),
 
   botMasterRawLog: () =>
-    safeJson<{ success: boolean; lines: string[]; message?: string }>("/bot/master/raw-log", undefined, { success: false, lines: [] }),
+    BACKEND_FLAGS.bots
+      ? apiV2.botMasterRawLog()
+      : safeJson<{ success: boolean; lines: string[]; message?: string }>("/bot/master/raw-log", undefined, { success: false, lines: [] }),
 
   botEmergencySell: () =>
     BACKEND_FLAGS.positions

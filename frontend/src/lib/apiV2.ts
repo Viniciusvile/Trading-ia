@@ -172,6 +172,16 @@ export const apiV2 = {
   accountDelete: (id: string) =>
     v2<{ success: boolean }>(`/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }, { success: false }),
 
+  // ─── Config do MasterBot (modal de configurações: groupPlans + activePlans) ───
+  botConfig: () =>
+    v2<{ success: boolean } | null>("/bot/config", undefined, null),
+  botMasterRawLog: () =>
+    v2<{ success: boolean; lines: string[]; message?: string }>(
+      "/bot/master/raw-log",
+      undefined,
+      { success: false, lines: [] },
+    ),
+
   // ─── Fatia F5: escrita de posições (PAPER) + saldo + futures stub + backtest stub ───
   botBalance: () =>
     v2<{ success: boolean; spot?: number; futures?: number }>(
