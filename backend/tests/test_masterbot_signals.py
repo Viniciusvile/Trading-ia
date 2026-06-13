@@ -49,6 +49,37 @@ def test_calc_plan_stop_tp_applies_min_floor():
     assert approx(r["tp"], 100 * (1 + mb.MIN_TP_PCT))
 
 
+RANGE_CLOSES = [110, 109, 108, 107, 106, 105, 104, 103, 102, 101, 100, 99, 98, 97, 96,
+                95, 94, 93, 92, 91, 90, 89, 88, 89, 90, 89, 88, 89, 90]
+RANGE_CANDLES = [
+    {"open": c, "high": c + 0.5, "low": c - 0.5, "close": c, "volume": 1000,
+     "time": 1700000000000 + i * 3600000}
+    for i, c in enumerate(RANGE_CLOSES)
+]
+
+
+def test_range_v2_indicators_match_legacy():
+    r = mb.run_safety_check_range_v2(RANGE_CANDLES, {})
+    ind = r["indicators"]
+    assert approx(ind["rsi"], 28.57142857142857)
+    assert approx(ind["stoch"]["k"], 31.25)
+    assert approx(ind["stoch"]["d"], 17.63888888888889)
+    assert approx(ind["stoch"]["prevK"], 16.666666666666664)
+    assert approx(ind["support"], 87.5)
+    assert approx(ind["resistance"], 105.5)
+
+
+def test_range_v2_no_entry_when_stoch_above_30():
+    # K=31.25 > 30 -> nao dispara LONG (paridade: side=null no legado)
+    r = mb.run_safety_check_range_v2(RANGE_CANDLES, {})
+    assert r["side"] is None
+    assert r["allPass"] is False
+
+
+def test_calc_stochastic_none_when_insufficient():
+    assert mb.calc_stochastic(RANGE_CANDLES[:5], 14, 3) is None
+
+
 def test_warrior_fails_on_downtrend():
     down = list(reversed(CLOSES))
     candles = [{"open": c, "high": c + 1, "low": c - 1, "close": c, "volume": 1000, "time": 1700000000000 + i * 3600000}

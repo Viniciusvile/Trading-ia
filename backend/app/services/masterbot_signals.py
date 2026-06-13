@@ -118,6 +118,103 @@ def calc_plan_stop_tp(price: float, atr: float, plan: dict, side: str = "LONG") 
     return {"stop": stop, "tp": tpp}
 
 
+def calc_stochastic(candles: list[Candle], k_period: int = 14, d_period: int = 3) -> dict | None:
+    """Stochastic (%K/%D + valores previos), igual ao bot.js."""
+    if len(candles) < k_period + d_period:
+        return None
+
+    def get_k(subset: list[Candle]) -> float:
+        close = subset[-1]["close"]
+        high = max(c["high"] for c in subset)
+        low = min(c["low"] for c in subset)
+        return 50.0 if high == low else ((close - low) / (high - low)) * 100
+
+    ks = []
+    for i in range(len(candles) - d_period - 1, len(candles)):
+        ks.append(get_k(candles[i - k_period + 1: i + 1]))
+
+    k = ks[-1]
+    d = sum(ks[-d_period:]) / d_period
+    prev_k = ks[-2]
+    prev_d = sum(ks[-d_period - 1: -1]) / d_period
+    return {"k": k, "d": d, "prevK": prev_k, "prevD": prev_d}
+
+
+def run_safety_check_range_v2(candles: list[Candle], plan_filters: dict | None = None) -> dict:
+    """Gatilho 'range-v2' (mean reversion com S/R), igual ao bot.js.
+
+    LONG: preco perto do suporte + RSI baixo + stoch K<30 com cross up.
+    SHORT: espelho na resistencia. Valida R:R minimo (rejeita se baixo).
+    """
+    pf = plan_filters or {}
+    last = candles[-1]
+    price = last["close"]
+    closes = [c["close"] for c in candles]
+    atr = calc_atr(candles, 14)
+    rsi = calc_rsi(closes, 14)
+    stoch = calc_stochastic(candles, 14, 3)
+
+    sr_bars = pf.get("sr_bars", 24)
+    sr_atr_mult = pf.get("sr_atr_mult", 1.5)
+    sr_window = candles[-sr_bars:]
+    resistance = max(c["high"] for c in sr_window)
+    support = min(c["low"] for c in sr_window)
+
+    side = None
+    stop_price = None
+    take_profit_price = None
+
+    is_rsi_long = rsi is not None and rsi < pf.get("rsi_long_max", 42)
+    is_rsi_short = rsi is not None and rsi > pf.get("rsi_short_min", 58)
+    is_stoch_long = (
+        stoch is not None and stoch["k"] < pf.get("stoch_k_long_max", 30)
+        and stoch["k"] > stoch["d"] and stoch["prevK"] <= stoch["prevD"]
+    )
+    is_stoch_short = (
+        stoch is not None and stoch["k"] > pf.get("stoch_k_short_min", 70)
+        and stoch["k"] < stoch["d"] and stoch["prevK"] >= stoch["prevD"]
+    )
+
+    entry_atr_buffer = (atr or 0) * sr_atr_mult
+    in_long_zone = price <= support + entry_atr_buffer
+    in_short_zone = price >= resistance - entry_atr_buffer
+
+    if in_long_zone and is_rsi_long and is_stoch_long:
+        side = "LONG"
+        stop_price = support - (atr * 0.3)
+        take_profit_price = resistance - (atr * 0.3)
+    elif in_short_zone and is_rsi_short and is_stoch_short:
+        side = "SHORT"
+        stop_price = resistance + (atr * 0.3)
+        take_profit_price = support + (atr * 0.3)
+
+    results = [
+        {"label": "RSI", "pass": (side == "LONG" and is_rsi_long) or (side == "SHORT" and is_rsi_short)
+         or (side is None and (is_rsi_long or is_rsi_short))},
+        {"label": "Stoch", "pass": (side == "LONG" and is_stoch_long) or (side == "SHORT" and is_stoch_short)
+         or (side is None and (is_stoch_long or is_stoch_short))},
+        {"label": "Zona", "pass": (side == "LONG" and in_long_zone) or (side == "SHORT" and in_short_zone)
+         or (side is None and (in_long_zone or in_short_zone))},
+    ]
+
+    if side and stop_price is not None and take_profit_price is not None:
+        risk = abs(price - stop_price)
+        reward = abs(take_profit_price - price)
+        rr = reward / risk if risk > 0 else 0
+        min_rr = pf.get("min_rr", 1.5)
+        rr_pass = rr >= min_rr
+        results.append({"label": "RR", "pass": rr_pass})
+        if not rr_pass:
+            side = None
+
+    all_pass = all(r["pass"] for r in results) and bool(side)
+    return {
+        "results": results, "allPass": all_pass, "side": side,
+        "stopPrice": stop_price, "takeProfitPrice": take_profit_price,
+        "indicators": {"rsi": rsi, "stoch": stoch, "support": support, "resistance": resistance},
+    }
+
+
 def run_safety_check_warrior(candles: list[Candle], now_ms: int | None = None) -> dict:
     """Gatilho 'warrior' (long-only, seguidor de tendencia), igual ao bot.js.
 
