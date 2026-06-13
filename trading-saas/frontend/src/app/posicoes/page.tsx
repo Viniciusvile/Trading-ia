@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Wallet, History, Trash2, Loader2, ArrowUpRight, ArrowDownRight, RefreshCw, Calendar, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Info } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardHeader, EmptyState, Badge, Stat, Button, Modal } from "@/components/ui";
-import { SymbolIcon, RangeBar, AnimatedNumber } from "@/components/fx";
+import { SymbolIcon, RangeBar, AnimatedNumber, BalanceChartModal } from "@/components/fx";
 import { fmtUSD } from "@/lib/format";
 import { api } from "@/lib/api";
 
@@ -50,6 +50,7 @@ export default function PosicoesPage() {
   const [reconciling, setReconciling] = useState(false);
   const [reconcileMsg, setReconcileMsg] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [isChartOpen, setIsChartOpen] = useState(false);
 
   async function handleReconcile() {
     setReconciling(true);
@@ -306,7 +307,11 @@ export default function PosicoesPage() {
             <Card padding="md">
               <Stat label="Posições abertas" value={String(totalOpen)} size="sm" />
             </Card>
-            <Card padding="md">
+            <Card
+              padding="md"
+              className="cursor-pointer hover:border-[var(--color-border-strong)] transition-all active:scale-[0.98] select-none"
+              onClick={() => setIsChartOpen(true)}
+            >
               <Stat
                 label="P&L não realizado"
                 value={
@@ -319,7 +324,11 @@ export default function PosicoesPage() {
                 size="sm"
               />
             </Card>
-            <Card padding="md">
+            <Card
+              padding="md"
+              className="cursor-pointer hover:border-[var(--color-border-strong)] transition-all active:scale-[0.98] select-none"
+              onClick={() => setIsChartOpen(true)}
+            >
               <Stat
                 label="P&L realizado"
                 value={
@@ -977,6 +986,9 @@ export default function PosicoesPage() {
         </Modal>
       )}
 
+      {isChartOpen && (
+        <BalanceChartModal open={isChartOpen} onClose={() => setIsChartOpen(false)} />
+      )}
     </div>
   );
 }
