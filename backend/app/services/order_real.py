@@ -45,11 +45,46 @@ def fmt_quote(n: float, config: dict | None = None) -> str:
 
 
 def auto_precision(price: float, min_prec: int = 4) -> int:
-    """Casas decimais p/ preço de OCO: ao menos 4 dígitos significativos, cap em 8."""
+    """Casas decimais p/ preço de OCO: ao menos 4 dígitos significativos, cap em 8.
+
+    ATENÇÃO: isto é um FALLBACK. O correto é alinhar ao tickSize real do símbolo
+    (price_decimals_for_symbol) — para BTC (tickSize 0.01) este heurístico erraria
+    dando 4 casas e violaria o PRICE_FILTER da Binance.
+    """
     if price <= 0:
         return min_prec
     needed = max(min_prec, math.ceil(-math.log10(price)) + 3)
     return min(needed, 8)
+
+
+# Cache do tickSize por símbolo (evita chamar exchange_info a cada ordem).
+_TICK_DECIMALS_CACHE: dict[str, int] = {}
+
+
+def price_decimals_for_symbol(client: Client, symbol: str) -> int:
+    """Casas decimais válidas p/ PREÇO do símbolo, derivadas do tickSize real (PRICE_FILTER).
+
+    Ex.: BTCUSDT tickSize 0.01 -> 2 casas; XRPUSDT tickSize 0.0001 -> 4. Resolve o
+    erro 'Filter failure: PRICE_FILTER' de preços com casas a mais que o tick.
+    """
+    if symbol in _TICK_DECIMALS_CACHE:
+        return _TICK_DECIMALS_CACHE[symbol]
+    try:
+        info = client.get_symbol_info(symbol)
+        tick = None
+        for f in (info or {}).get("filters", []):
+            if f.get("filterType") == "PRICE_FILTER":
+                tick = f.get("tickSize")
+                break
+        if tick:
+            # nº de casas decimais significativas do tickSize ("0.01000000" -> 2)
+            t = tick.rstrip("0")
+            decimals = len(t.split(".")[1]) if "." in t else 0
+            _TICK_DECIMALS_CACHE[symbol] = decimals
+            return decimals
+    except Exception:
+        pass
+    return 2  # fallback conservador
 
 
 # ─── Ordens (tocam a Binance via python-binance) ───
@@ -69,8 +104,11 @@ def open_long(client: Client, symbol: str, quote_usdt: float, config: dict | Non
 def place_oco_sell(client: Client, symbol: str, quantity: str, tp_price: float,
                    stop_price: float, stop_limit_price: float | None = None,
                    precision: int | None = None) -> dict:
-    """OCO de venda: TP (limit) + SL (stop-limit) juntos. Espelha placeOCO do legado."""
-    prec = precision if precision is not None else auto_precision(tp_price)
+    """OCO de venda: TP (limit) + SL (stop-limit) juntos. Espelha placeOCO do legado.
+
+    Alinha os preços ao tickSize REAL do símbolo (evita 'Filter failure: PRICE_FILTER').
+    """
+    prec = precision if precision is not None else price_decimals_for_symbol(client, symbol)
     sl_limit = stop_limit_price if stop_limit_price is not None else stop_price
     # API nova da Binance (above/below): para um OCO de SELL,
     #   above = TP (LIMIT_MAKER, preço acima do mercado)
@@ -107,6 +145,8 @@ def get_oco(client: Client, order_list_id) -> dict:
     status do orderList: 'EXECUTING' (ativa) | 'ALL_DONE' (TP ou SL bateu) | 'REJECT'.
     Se ALL_DONE, busca a ordem FILLED para descobrir o preco real de saida.
     """
+    if order_list_id is None:
+        return {"ok": False, "error": "sem orderListId"}
     try:
         res = client.v3_get_order_list(orderListId=int(order_list_id))
     except BinanceAPIException as e:
