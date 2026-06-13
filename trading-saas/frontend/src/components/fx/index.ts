@@ -6,3 +6,4 @@ export { SymbolIcon } from "./SymbolIcon";
 export { PageTransition } from "./PageTransition";
 export { RangeBar } from "./RangeBar";
 export { BalanceChartModal } from "./BalanceChartModal";
+export { PnlChartModal } from "./PnlChartModal";

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Wallet, History, Trash2, Loader2, ArrowUpRight, ArrowDownRight, RefreshCw, Calendar, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Info } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardHeader, EmptyState, Badge, Stat, Button, Modal } from "@/components/ui";
-import { SymbolIcon, RangeBar, AnimatedNumber, BalanceChartModal } from "@/components/fx";
+import { SymbolIcon, RangeBar, AnimatedNumber, PnlChartModal } from "@/components/fx";
 import { fmtUSD } from "@/lib/format";
 import { api } from "@/lib/api";
 
@@ -987,7 +987,7 @@ export default function PosicoesPage() {
       )}
 
       {isChartOpen && (
-        <BalanceChartModal open={isChartOpen} onClose={() => setIsChartOpen(false)} />
+        <PnlChartModal open={isChartOpen} onClose={() => setIsChartOpen(false)} />
       )}
     </div>
   );
