@@ -220,6 +220,7 @@ export default function PosicoesPage() {
 
   // Group daily P&L and total realized P&L
   const dailyPnL: Record<string, number> = {};
+  const dailyCost: Record<string, number> = {};
   let totalRealizedPnL = 0;
   closedPositions.forEach((pos) => {
     const pnlVal = typeof (pos as any).pnl === "number" ? (pos as any).pnl : parseFloat((pos as any).pnl || "0");
@@ -233,6 +234,9 @@ export default function PosicoesPage() {
       const day = String(closedDate.getDate()).padStart(2, '0');
       const dateKey = `${year}-${month}-${day}`;
       dailyPnL[dateKey] = (dailyPnL[dateKey] || 0) + pnlVal;
+      
+      const cost = (pos.entryPrice || 0) * (pos.quantity || 0);
+      dailyCost[dateKey] = (dailyCost[dateKey] || 0) + cost;
     }
   });
 
@@ -701,19 +705,25 @@ export default function PosicoesPage() {
                     cellClass += " scale-105 shadow-sm";
                   }
 
+                  const cellPnlPct = hasTrade && dailyCost[dateKey] ? (pnlForDay / dailyCost[dateKey]) * 100 : 0;
+                  const cellTitle = hasTrade 
+                    ? `Resultado: ${isProfit ? "+" : ""}${fmtUSD(pnlForDay)} (${isProfit ? "+" : ""}${cellPnlPct.toFixed(2)}%)` 
+                    : undefined;
+
                   return (
                     <div
                       key={`day-${day}`}
                       className={cellClass}
+                      title={cellTitle}
                       onMouseEnter={() => setHoveredDayKey(dateKey)}
                       onMouseLeave={() => setHoveredDayKey(null)}
                       onClick={() => setSelectedDayKey(selectedDayKey === dateKey ? null : dateKey)}
                     >
                       <span>{day}</span>
                       {hasTrade && !isSelected && (
-                        <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${
-                          isProfit ? "bg-emerald-500" : isLoss ? "bg-rose-500" : "bg-muted"
-                        }`} />
+                         <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${
+                           isProfit ? "bg-emerald-500" : isLoss ? "bg-rose-500" : "bg-muted"
+                         }`} />
                       )}
                     </div>
                   );
@@ -732,13 +742,15 @@ export default function PosicoesPage() {
                   
                   if (pnlVal !== undefined) {
                     const isProfit = pnlVal >= 0;
+                    const dayCost = dailyCost[activeKey] || 0;
+                    const pnlPct = dayCost ? (pnlVal / dayCost) * 100 : 0;
                     return (
                       <div className="space-y-1">
                         <div className="text-[var(--color-text-2)] font-medium">{formattedDate}</div>
                         <div className="flex items-center justify-between">
                           <span className="text-[var(--color-text-2)]">Resultado do dia:</span>
                           <span className={`font-bold ${isProfit ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"}`}>
-                            {isProfit ? "+" : ""}{fmtUSD(pnlVal)}
+                            {isProfit ? "+" : ""}{fmtUSD(pnlVal)} ({isProfit ? "+" : ""}{pnlPct.toFixed(2)}%)
                           </span>
                         </div>
                       </div>
