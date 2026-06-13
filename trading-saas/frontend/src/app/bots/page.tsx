@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Bot, Pause, Play, AlertTriangle, FileText, Settings, Zap } from "lucide-react";
+import { Bot, Pause, Play, AlertTriangle, FileText, Settings, Zap, HelpCircle } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardHeader, Button, Badge, Stat, Tooltip, Modal, Input } from "@/components/ui";
 import { AnimatedNumber, SymbolIcon, PillTabs } from "@/components/fx";
@@ -109,6 +109,10 @@ export default function BotsPage() {
   const [logBotId, setLogBotId] = useState<string | null>(null);
   const [logLines, setLogLines] = useState<string[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
+
+  // About Modal State
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [aboutBotId, setAboutBotId] = useState<string | null>(null);
 
   // Decision history state
   const [decisionHistory, setDecisionHistory] = useState<any[]>([]);
@@ -519,6 +523,19 @@ export default function BotsPage() {
                       <FileText size={14} />
                     </Button>
                   </Tooltip>
+                  <Tooltip content="Sobre o robô (Funcionamento e Travas)">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label="Sobre"
+                      onClick={() => {
+                        setAboutBotId(bot.id);
+                        setAboutOpen(true);
+                      }}
+                    >
+                      <HelpCircle size={14} />
+                    </Button>
+                  </Tooltip>
                 </div>
               </Card>
             </motion.div>
@@ -647,6 +664,146 @@ export default function BotsPage() {
       >
         <div className="text-sm text-[var(--color-text-2)]">
           Esta ação é <strong>irreversível</strong>. Ela enviará comandos de venda imediata a mercado para todos os ativos em custódia ativa dos bots.
+        </div>
+      </Modal>
+
+      {/* About Bot Modal */}
+      <Modal
+        open={aboutOpen}
+        onClose={() => setAboutOpen(false)}
+        title={aboutBotId === "masterbot" ? "Sobre o MasterBot" : aboutBotId === "micro-scalper" ? "Sobre o Micro Scalper" : "Sobre o Bot Futuros"}
+        description="Entenda o funcionamento, limites de posições e travas de segurança deste robô."
+        footer={
+          <Button variant="primary" onClick={() => setAboutOpen(false)}>
+            Entendi
+          </Button>
+        }
+      >
+        <div className="space-y-4 text-xs text-[var(--color-text-2)] leading-relaxed">
+          {aboutBotId === "masterbot" && (
+            <>
+              <div>
+                <h4 className="text-sm font-semibold text-[var(--color-text)] mb-1">🔍 Como Funciona?</h4>
+                <p>
+                  O MasterBot opera de forma periódica (em ciclos programados, ex: a cada 1 hora). A cada ciclo, ele analisa todos os ativos da watchlist selecionada e executa as regras das estratégias ativas definidas em <strong className="text-[var(--color-text)]">rules.json</strong> (como Warrior ou Range-v2) nos timeframes configurados.
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-2)] space-y-2.5">
+                <h4 className="text-sm font-semibold text-[var(--color-text)]">🛡️ Limites & Travas de Segurança</h4>
+                
+                <div className="flex items-start gap-2">
+                  <span className="text-[var(--color-brand-500)] font-bold">⏱️</span>
+                  <div>
+                    <strong className="text-[var(--color-text)] block">Um trade por vez por ativo:</strong>
+                    Se já houver uma posição aberta do mesmo ativo (ex: <code className="text-amber-500">BTCUSDT</code>), o robô ignorará qualquer novo sinal de entrada desse mesmo ativo para evitar compra duplicada.
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <span className="text-[var(--color-brand-500)] font-bold">📊</span>
+                  <div>
+                    <strong className="text-[var(--color-text)] block">Limite de Posições Simultâneas:</strong>
+                    Livre / Sem trava apertada por padrão (máximo de até 999 posições simultâneas de ativos diferentes no mercado).
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <span className="text-[var(--color-brand-500)] font-bold">💰</span>
+                  <div>
+                    <strong className="text-[var(--color-text)] block">Valor por Operação:</strong>
+                    Limitado pelo valor definido em "Tam. Máx. Operação ($)" da estratégia ou do plano individual do ativo.
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {aboutBotId === "micro-scalper" && (
+            <>
+              <div>
+                <h4 className="text-sm font-semibold text-[var(--color-text)] mb-1">⚡ Como Funciona?</h4>
+                <p>
+                  O Micro Scalper executa em um loop de alta velocidade (a cada 5 segundos). Ele analisa gráficos de curtíssimo prazo (1m e 5m) em busca de sinais rápidos de reversão ou correções curtas (<em className="text-[var(--color-text)]">turbo-reversion</em> ou <em className="text-[var(--color-text)]">micro-dip</em>), buscando lucros rápidos com Take Profit e Stop Loss curtos.
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-2)] space-y-2.5">
+                <h4 className="text-sm font-semibold text-[var(--color-text)]">🛡️ Limites & Travas de Segurança</h4>
+
+                <div className="flex items-start gap-2">
+                  <span className="text-emerald-500 font-bold">⏱️</span>
+                  <div>
+                    <strong className="text-[var(--color-text)] block">Um trade por vez por ativo:</strong>
+                    Mantém apenas uma operação ativa por ativo. Ele só voltará a procurar sinais de entrada para aquele ativo depois que a posição atual dele for fechada.
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <span className="text-emerald-500 font-bold">🚦</span>
+                  <div>
+                    <strong className="text-[var(--color-text)] block">Circuit Breaker (Perdas Seguidas):</strong>
+                    Se acumular 3 perdas seguidas (Stop Loss) em um ativo, as novas operações desse ativo são pausadas por 30 minutos.
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <span className="text-emerald-500 font-bold">⚠️</span>
+                  <div>
+                    <strong className="text-[var(--color-text)] block">Filtro de Queda do BTC:</strong>
+                    Se o Bitcoin despencar mais de 1.5% em 15 minutos, todas as novas entradas de scalper em altcoins são temporariamente travadas.
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <span className="text-emerald-500 font-bold">📅</span>
+                  <div>
+                    <strong className="text-[var(--color-text)] block">Limite Máximo de Trades:</strong>
+                    Limite de até 50 trades por sessão para evitar super-exposição ao mercado.
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {aboutBotId === "futures" && (
+            <>
+              <div>
+                <h4 className="text-sm font-semibold text-[var(--color-text)] mb-1">🚀 Como Funciona?</h4>
+                <p>
+                  O Bot de Futuros monitora o mercado em busca de tendências fortes nos gráficos de 1H e 4H. Ele abre posições direcionais de alta ou baixa (LONG/SHORT) utilizando alavancagem para maximizar o retorno das tendências.
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-2)] space-y-2.5">
+                <h4 className="text-sm font-semibold text-[var(--color-text)]">🛡️ Limites & Travas de Segurança</h4>
+
+                <div className="flex items-start gap-2">
+                  <span className="text-amber-500 font-bold">⏱️</span>
+                  <div>
+                    <strong className="text-[var(--color-text)] block">Um trade por vez por ativo:</strong>
+                    Garante no máximo uma posição de futuros por ativo por vez para mitigar riscos de liquidação.
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <span className="text-amber-500 font-bold">⚙️</span>
+                  <div>
+                    <strong className="text-[var(--color-text)] block">Alavancagem Limitada:</strong>
+                    Configurado por plano (geralmente limitado a 5x) para garantir que a margem suporta flutuações sem risco excessivo de liquidação imediata.
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <span className="text-amber-500 font-bold">🛡️</span>
+                  <div>
+                    <strong className="text-[var(--color-text)] block">Auditoria Ativa de Ordens:</strong>
+                    Se a ordem de TP ou SL sumir ou for cancelada na Binance Futuros, o watchdog do servidor a repõe automaticamente em segundos.
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </Modal>
 
