@@ -278,7 +278,7 @@ export const api = {
       reviews: [],
     }),
 
-  dashboardSummary: () =>
+  dashboardSummary: (tzOffset?: number) =>
     safeJson<{
       success: boolean;
       pnlToday: number;
@@ -301,7 +301,7 @@ export const api = {
         slCount?: number;
         totalClosed?: number;
       } | null;
-    }>("/dashboard/summary", undefined, {
+    }>(typeof tzOffset === "number" ? `/dashboard/summary?tzOffset=${tzOffset}` : "/dashboard/summary", undefined, {
       success: false,
       pnlToday: 0,
       operationsToday: 0,

@@ -113,7 +113,7 @@ export default function InicioPage() {
 
         // Métricas reais agregadas das posições (P&L do dia, operações,
         // taxa de acerto 30d e atividade recente) — fim dos números mockados
-        const summary = await api.dashboardSummary();
+        const summary = await api.dashboardSummary(new Date().getTimezoneOffset());
         if (active && summary.success) {
           setPnl24h(summary.pnlToday || 0);
           setOpsToday(summary.operationsToday || 0);

@@ -84,7 +84,7 @@ export function Topbar() {
       try {
         const [balRes, sumRes] = await Promise.all([
           api.botBalance(),
-          api.dashboardSummary()
+          api.dashboardSummary(new Date().getTimezoneOffset())
         ]);
         if (active && balRes && balRes.success) {
           setBalance({

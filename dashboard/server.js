@@ -2759,15 +2759,22 @@ app.post('/api/bot/positions/:id/oco', authenticateToken, async (req, res) => {
 app.get('/api/dashboard/summary', authenticateToken, async (req, res) => {
   try {
     const positions = await db.loadPositions(req.user.id);
-    const dayKey = (iso) => (iso || '').slice(0, 10);
-    const todayUtc = new Date().toISOString().slice(0, 10);
+    const tzOffset = parseInt(req.query.tzOffset) || 0;
+    const getLocalDateKey = (iso) => {
+      if (!iso) return '';
+      const utcDate = new Date(iso);
+      const localDate = new Date(utcDate.getTime() - (tzOffset * 60000));
+      return localDate.toISOString().slice(0, 10);
+    };
+
+    const clientTodayStr = getLocalDateKey(new Date().toISOString());
 
     const closed = positions.filter(p => p.status === 'closed' && p.pnl != null);
-    const closedToday = closed.filter(p => dayKey(p.closedAt) === todayUtc);
+    const closedToday = closed.filter(p => getLocalDateKey(p.closedAt) === clientTodayStr);
     const pnlToday = closedToday.reduce((acc, p) => acc + (parseFloat(p.pnl) || 0), 0);
 
     // Operações de hoje = entradas abertas hoje (qualquer robô)
-    const operationsToday = positions.filter(p => dayKey(p.openedAt) === todayUtc).length;
+    const operationsToday = positions.filter(p => getLocalDateKey(p.openedAt) === clientTodayStr).length;
 
     // Taxa de acerto dos últimos 30 dias (posições fechadas com PnL)
     const cutoff30 = Date.now() - 30 * 86_400_000;
@@ -2805,7 +2812,7 @@ app.get('/api/dashboard/summary', authenticateToken, async (req, res) => {
       .map(toTrade)
       .sort((a, b) => new Date(b.closedAt) - new Date(a.closedAt));
     const todayOpened = positions
-      .filter(p => dayKey(p.openedAt) === todayUtc)
+      .filter(p => getLocalDateKey(p.openedAt) === clientTodayStr)
       .map(toTrade)
       .sort((a, b) => new Date(b.openedAt) - new Date(a.openedAt));
     const pnls30 = closed30.map(p => parseFloat(p.pnl) || 0);
