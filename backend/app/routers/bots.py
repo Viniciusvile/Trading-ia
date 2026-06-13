@@ -531,22 +531,51 @@ def futures_stop(current_user: User = Depends(get_current_user)):
     return {"success": True}
 
 
-# ─── Backtest: STUB (motor real é Fase 7) — retorna vazio com aviso, sem quebrar a UI ───
+# ─── Backtest: motor REAL (port de masterbot/lib/backtest-engine.js) ───
 
 @router.post("/backtest")
 def backtest(
     body: dict = Body(...),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    return {
-        "success": True,
-        "ranAt": int(datetime.now(timezone.utc).timestamp() * 1000),
-        "combined": None,
-        "equityCurve": [],
-        "winRateTarget": None,
-        "approved": None,
-        "walkForward": None,
-        "warnings": ["Backtest em migração — o motor de análise estará disponível em breve."],
-        "results": [],
-        "recentTrades": [],
-    }
+    """Roda o backtest de um plano (symbols×timeframes) com candles reais da Binance.
+
+    Aceita o plano completo no body OU apenas {name} (resolve do master_plans do user).
+    Persiste o lastBacktest no master_plans correspondente, como o legado fazia.
+    """
+    from app.services import backtest as bt
+
+    plan = dict(body or {})
+    # Se veio só o nome, resolve o plano salvo do usuário.
+    if plan.get("name") and not plan.get("symbols"):
+        mp = (
+            db.query(MasterPlan)
+            .filter(MasterPlan.user_id == current_user.id, MasterPlan.name == plan["name"])
+            .first()
+        )
+        if mp:
+            plan = {**(mp.data or {}), "name": mp.name}
+
+    try:
+        result = bt.run_plan_backtest(plan)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:  # noqa: BLE001
+        return {"success": False, "error": f"Erro no backtest: {e}"}
+
+    # Persiste o lastBacktest na estratégia do usuário (se existir).
+    if plan.get("name"):
+        mp = (
+            db.query(MasterPlan)
+            .filter(MasterPlan.user_id == current_user.id, MasterPlan.name == plan["name"])
+            .first()
+        )
+        if mp:
+            data = dict(mp.data or {})
+            data["lastBacktest"] = result
+            mp.data = data
+            flag_modified(mp, "data")
+            db.commit()
+
+    return {"success": True, **result}
