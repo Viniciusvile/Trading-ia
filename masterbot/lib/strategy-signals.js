@@ -55,6 +55,27 @@ export function createSignalFn(plan) {
   // Spot não permite venda a descoberto: espelha a restrição do bot ao vivo
   const allowShort = plan.mode === "futures";
 
+  // ── Estratégia "custom" (importada do TradingView/Pine via IA) ──
+  // O sistema não reimplementa o Pine Script; em vez disso usa os FILTROS
+  // extraídos pela IA (RSI, Bollinger %B, EMAs, MACD, ADX...) como gatilho de
+  // entrada. Cada estratégia importada tem seu próprio conjunto de filtros, então
+  // os backtests deixam de ser idênticos. Sem este ramo, "custom" caía no
+  // fallback warrior e TODAS davam o mesmo resultado.
+  if (strategy === "custom") {
+    return function customSignalFn(window) {
+      const filterResults = applyPlanFilters(window, plan);
+      // Sem nenhum filtro mapeável não há gatilho — não opera (evita ruído).
+      if (filterResults.length === 0) return null;
+      if (!filterResults.every((f) => f.pass)) return null;
+
+      const price = window[window.length - 1].close;
+      const atr = calcATR(window, 14);
+      if (!atr) return null;
+      const { stop, tp } = calcPlanStopTP(price, atr, plan, "LONG");
+      return { side: "LONG", stop, tp };
+    };
+  }
+
   return function signalFn(window) {
     // 1. Filtros de regime do plano (EMA tripla, ADX, volume, choppiness...)
     const filterResults = applyPlanFilters(window, plan);

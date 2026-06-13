@@ -1529,10 +1529,105 @@ function normalizeImportedStrategy(raw) {
     symbols: Array.isArray(out.symbols) && out.symbols.length ? out.symbols : ['BTCUSDT'],
     timeframes: Array.isArray(out.timeframes) && out.timeframes.length ? out.timeframes : ['1H'],
     mode: out.mode === 'futures' ? 'futures' : 'spot',
-    filters: out.filters && typeof out.filters === 'object' ? out.filters : {},
-    sl: out.sl && typeof out.sl === 'object' ? out.sl : { type: 'percentage', value: 1.5 },
-    tp: out.tp && typeof out.tp === 'object' ? out.tp : { type: 'percentage', value: 3.0 },
+    // Converte os filtros aninhados da IA (ex.: rsi:{period,oversold}) para as
+    // chaves planas que o motor de backtest (applyPlanFilters) entende — sem
+    // isso, toda estratégia importada roda a mesma lógica e dá o mesmo resultado.
+    filters: flattenImportedFilters(out.filters),
+    sl: normalizeSlTp(out.sl, 1.5),
+    tp: normalizeSlTp(out.tp, 3.0),
   };
+}
+
+/**
+ * Normaliza SL/TP da IA para o formato que calcPlanStopTP entende. A IA emite
+ * { type: 'percentage', value } mas o motor usa type 'pct'. ATR é preservado.
+ */
+function normalizeSlTp(v, defaultPct) {
+  if (!v || typeof v !== 'object') return { type: 'pct', value: defaultPct };
+  if (v.type === 'percentage' || v.type === 'percent' || v.type === 'pct') {
+    const value = Number(v.value);
+    return { type: 'pct', value: isNaN(value) || value <= 0 ? defaultPct : value };
+  }
+  if (v.type === 'atr' && v.multiplier != null) {
+    return { type: 'atr', multiplier: Number(v.multiplier) };
+  }
+  // Formato desconhecido: usa o valor numérico como porcentagem se houver.
+  const value = Number(v.value);
+  if (!isNaN(value) && value > 0) return { type: 'pct', value };
+  return { type: 'pct', value: defaultPct };
+}
+
+/**
+ * Mapeia o objeto `filters` extraído pela IA (geralmente aninhado por indicador)
+ * para as chaves planas reconhecidas por applyPlanFilters. Assim cada estratégia
+ * importada vira uma combinação real de gatilhos — e não o fallback warrior.
+ */
+function flattenImportedFilters(filters) {
+  if (!filters || typeof filters !== 'object') return {};
+  const f = filters;
+  const out = {};
+  const num = (v) => (v == null || isNaN(Number(v)) ? null : Number(v));
+
+  // RSI: aceita aninhado {rsi:{oversold,overbought,period}} ou já plano.
+  const rsi = f.rsi || f.RSI;
+  if (rsi && typeof rsi === 'object') {
+    const os = num(rsi.oversold ?? rsi.lower ?? rsi.min);
+    const ob = num(rsi.overbought ?? rsi.upper ?? rsi.max);
+    // Entrada típica de reversão: comprar quando RSI está na zona baixa.
+    if (os != null) out.rsi_max = os;          // RSI ≤ oversold dispara compra
+    else if (ob != null) out.rsi_min = 0;      // sem oversold: zona ampla
+    if (num(rsi.period) != null) out.rsi_period = num(rsi.period);
+  }
+  if (num(f.rsi_min) != null) out.rsi_min = num(f.rsi_min);
+  if (num(f.rsi_max) != null) out.rsi_max = num(f.rsi_max);
+
+  // Bandas de Bollinger: %B baixo (preço perto da banda inferior) = compra.
+  const bb = f.bb || f.bollinger || f.bollingerBands || f.bollinger_bands;
+  if (bb && typeof bb === 'object') {
+    if (num(bb.period ?? bb.length) != null) out.bb_period = num(bb.period ?? bb.length);
+    if (num(bb.mult ?? bb.stdDev ?? bb.deviation) != null) out.bb_mult = num(bb.mult ?? bb.stdDev ?? bb.deviation);
+    out.bb_pct_b_max = 0.2; // entra perto da banda inferior
+  }
+
+  // Médias móveis / tendência: exige alinhamento de EMAs (tendência de alta).
+  const ma = f.ma || f.ema || f.movingAverage || f.moving_average;
+  if (ma || /moving|ema|média/i.test(JSON.stringify(f))) {
+    out.ema_triple = true;
+  }
+
+  // MACD: momentum positivo.
+  if (f.macd || /macd/i.test(JSON.stringify(f))) {
+    out.macd_positive = true;
+  }
+
+  // ADX / força de tendência.
+  const adx = f.adx || f.ADX;
+  if (adx && typeof adx === 'object' && num(adx.min ?? adx.threshold) != null) {
+    out.adx_min = num(adx.min ?? adx.threshold);
+  }
+  if (num(f.adx_min) != null) out.adx_min = num(f.adx_min);
+  if (num(f.adx_max) != null) out.adx_max = num(f.adx_max);
+
+  // Supertrend.
+  const st = f.supertrend || f.superTrend;
+  if (st && typeof st === 'object') {
+    out.supertrend_period = num(st.period ?? st.atrPeriod) ?? 10;
+    if (num(st.mult ?? st.factor) != null) out.supertrend_mult = num(st.mult ?? st.factor);
+  }
+
+  // Volume.
+  if (num(f.volume_mult) != null) out.volume_mult = num(f.volume_mult);
+  const vol = f.volume;
+  if (vol && typeof vol === 'object' && num(vol.mult ?? vol.multiplier) != null) {
+    out.volume_mult = num(vol.mult ?? vol.multiplier);
+  }
+
+  // Fallback: se a IA não trouxe nenhum filtro mapeável, deixa ao menos o RSI
+  // de reversão para que a estratégia tenha um gatilho próprio (e não copie outra).
+  if (Object.keys(out).length === 0) {
+    out.rsi_max = 35;
+  }
+  return out;
 }
 
 // ── BACKTEST ────────────────────────────────────────────────────
