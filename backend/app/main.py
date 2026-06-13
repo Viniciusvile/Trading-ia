@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import auth, binance, strategy, trades, dashboard, billing, wallet, market, settings as settings_router, templates, micro_scalper
+from app.routers import auth, binance, strategy, trades, dashboard, billing, wallet, market, settings as settings_router, templates, micro_scalper, bots
 
 app = FastAPI(title="Trading Bots SaaS", version="1.0.0")
 
@@ -23,6 +23,7 @@ app.include_router(market.router, prefix="/api/market", tags=["market"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
 app.include_router(templates.router, prefix="/api/templates", tags=["templates"])
 app.include_router(micro_scalper.router, prefix="/api/micro-scalper", tags=["micro-scalper"])
+app.include_router(bots.router, prefix="/api/bot", tags=["bots"])
 
 
 @app.get("/health")
