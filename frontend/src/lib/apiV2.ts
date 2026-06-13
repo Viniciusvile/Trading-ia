@@ -117,4 +117,22 @@ export const apiV2 = {
       undefined,
       { success: false, config: null },
     ),
+
+  botMasterStatus: () =>
+    v2<{ success: boolean; isAlive: boolean }>(
+      "/bot/master/status",
+      undefined,
+      { success: false, isAlive: false },
+    ),
+
+  adaptiveStatus: () =>
+    v2<{ success: boolean; running: boolean }>(
+      "/bot/adaptive/status",
+      undefined,
+      {
+        success: false, running: false, paper: true, params: null,
+        openTrades: [], stats30d: { trades: 0, winRate: 0, pnlPct: 0 },
+        recentTrades: [], lessons: [], reviews: [],
+      } as unknown as { success: boolean; running: boolean },
+    ),
 };

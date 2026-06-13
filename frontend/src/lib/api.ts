@@ -268,30 +268,32 @@ export const api = {
     safeJson<{ success: boolean; spot?: number; futures?: number }>("/bot/balance", undefined, { success: false }),
 
   botMasterStatus: () =>
-    safeJson<{
-      success: boolean;
-      isAlive: boolean;
-      status?: string;
-      lastRun?: string;
-      nextRun?: string;
-      watchlist?: string[];
-      openPositions?: number;
-      lastResults?: {
-        symbol: string;
-        timeframe: string;
-        allPass: boolean;
-        side?: string | null;
-        signal: string;
-        price?: number | null;
-        strategy?: string | null;
-        conditions?: {
-          label: string;
-          pass: boolean;
-          required: string | number;
-          actual: string | number;
-        }[];
-      }[];
-    }>("/bot/master/status", undefined, { success: false, isAlive: false }),
+    BACKEND_FLAGS.bots
+      ? (apiV2.botMasterStatus() as Promise<{ success: boolean; isAlive: boolean }>)
+      : safeJson<{
+          success: boolean;
+          isAlive: boolean;
+          status?: string;
+          lastRun?: string;
+          nextRun?: string;
+          watchlist?: string[];
+          openPositions?: number;
+          lastResults?: {
+            symbol: string;
+            timeframe: string;
+            allPass: boolean;
+            side?: string | null;
+            signal: string;
+            price?: number | null;
+            strategy?: string | null;
+            conditions?: {
+              label: string;
+              pass: boolean;
+              required: string | number;
+              actual: string | number;
+            }[];
+          }[];
+        }>("/bot/master/status", undefined, { success: false, isAlive: false }),
 
   botMasterStart: () =>
     safeJson<{ success: boolean; error?: string }>("/bot/master/start", { method: "POST" }),
@@ -305,17 +307,19 @@ export const api = {
       : safeJson<{ success: boolean; running: boolean; activeSymbols?: string[] }>("/micro-scalper/status", undefined, { success: false, running: false }),
 
   adaptiveStatus: () =>
-    safeJson<AdaptiveStatus>("/adaptive/status", undefined, {
-      success: false,
-      running: false,
-      paper: true,
-      params: null,
-      openTrades: [],
-      stats30d: { trades: 0, winRate: 0, pnlPct: 0 },
-      recentTrades: [],
-      lessons: [],
-      reviews: [],
-    }),
+    BACKEND_FLAGS.bots
+      ? (apiV2.adaptiveStatus() as Promise<AdaptiveStatus>)
+      : safeJson<AdaptiveStatus>("/adaptive/status", undefined, {
+          success: false,
+          running: false,
+          paper: true,
+          params: null,
+          openTrades: [],
+          stats30d: { trades: 0, winRate: 0, pnlPct: 0 },
+          recentTrades: [],
+          lessons: [],
+          reviews: [],
+        }),
 
   dashboardSummary: (tzOffset?: number) =>
     safeJson<{
