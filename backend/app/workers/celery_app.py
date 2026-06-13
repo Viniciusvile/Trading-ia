@@ -11,6 +11,7 @@ celery = Celery(
         "app.workers.bot_runner_micro",
         "app.workers.bot_runner_master",
         "app.workers.bot_runner_adaptive",
+        "app.workers.sync_runner",
     ],
 )
 
@@ -35,6 +36,12 @@ celery.conf.update(
         "adaptive-paper": {
             "task": "run_adaptive",
             "schedule": 300.0,
+        },
+        # Sync de positions legado->Python (~60s) enquanto os 2 sistemas coexistem.
+        # DESLIGAR na Fase 6 (quando o legado parar e o Python assumir execucao real).
+        "sync-positions": {
+            "task": "sync_positions",
+            "schedule": 60.0,
         },
     },
 )
