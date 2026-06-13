@@ -172,6 +172,50 @@ export const apiV2 = {
   accountDelete: (id: string) =>
     v2<{ success: boolean }>(`/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }, { success: false }),
 
+  // ─── Fatia F5: escrita de posições (PAPER) + saldo + futures stub + backtest stub ───
+  botBalance: () =>
+    v2<{ success: boolean; spot?: number; futures?: number }>(
+      "/bot/balance",
+      undefined,
+      { success: false },
+    ),
+  botClosePosition: (id: string, markOnly?: boolean) =>
+    v2<{ success: boolean; error?: string }>(
+      `/bot/positions/${encodeURIComponent(id)}/close${markOnly ? "?markOnly=true" : ""}`,
+      { method: "POST" },
+      { success: false, error: "Falha na requisição" },
+    ),
+  botReconcile: () =>
+    v2<{ success: boolean; error?: string }>(
+      "/bot/reconcile",
+      { method: "POST" },
+      { success: false, error: "Falha ao reconciliar" },
+    ),
+  botEmergencySell: () =>
+    v2<{ success: boolean; message?: string }>("/bot/emergency-sell", { method: "POST" }, { success: false }),
+  botForceTrade: (params: { symbol: string; timeframe: string; side: string; amount?: number; mode: string }) =>
+    v2<{ success: boolean; exitCode?: number; stdout?: string; stderr?: string; error?: string }>(
+      "/bot/force-trade",
+      { method: "POST", body: JSON.stringify(params) },
+      { success: false, error: "Falha na requisição" },
+    ),
+  botFuturesStatus: () =>
+    v2<{ success: boolean; isAlive: boolean; status?: string }>(
+      "/bot/futures/status",
+      undefined,
+      { success: false, isAlive: false },
+    ),
+  botFuturesStart: () =>
+    v2<{ success: boolean; error?: string }>("/bot/futures/start", { method: "POST" }, { success: false }),
+  botFuturesStop: () =>
+    v2<{ success: boolean }>("/bot/futures/stop", { method: "POST" }, { success: false }),
+  botBacktest: (plan: Record<string, unknown>) =>
+    v2<{ success: boolean; error?: string }>(
+      "/bot/backtest",
+      { method: "POST", body: JSON.stringify(plan) },
+      { success: false, error: "Falha ao executar análise" },
+    ),
+
   // ─── Fatia E: Estratégias do MasterBot (planos master_plans) ───
   botStrategies: () =>
     v2<{ success: boolean; strategies: unknown[] }>(

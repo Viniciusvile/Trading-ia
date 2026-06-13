@@ -328,3 +328,163 @@ def delete_strategy(name: str, current_user: User = Depends(get_current_user), d
     db.delete(plan)
     db.commit()
     return {"success": True}
+
+
+# ─── Saldo (spot) — reusa as credenciais Binance do usuario ───
+
+@router.get("/balance")
+def bot_balance(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Saldo total em USDT (spot). futures=0 (sem bot futures no Python).
+
+    Falha graciosa: se nao houver credencial/erro Binance, retorna 0 sem quebrar a UI.
+    """
+    from app.models.binance_config import BinanceConfig
+    from app.services.crypto import decrypt
+    from binance.client import Client
+
+    config = db.query(BinanceConfig).filter(BinanceConfig.user_id == current_user.id).first()
+    if not config:
+        return {"success": True, "spot": 0, "futures": 0}
+    try:
+        client = Client(decrypt(config.encrypted_api_key), decrypt(config.encrypted_secret_key), testnet=config.is_testnet)
+        account = client.get_account()
+        prices = {p["symbol"]: float(p["price"]) for p in client.get_all_tickers()}
+        total = 0.0
+        for b in account.get("balances", []):
+            qty = float(b["free"]) + float(b["locked"])
+            if qty <= 0:
+                continue
+            asset = b["asset"]
+            if asset == "USDT":
+                total += qty
+            elif f"{asset}USDT" in prices:
+                total += qty * prices[f"{asset}USDT"]
+        return {"success": True, "spot": round(total, 2), "futures": 0}
+    except Exception:
+        return {"success": True, "spot": 0, "futures": 0}
+
+
+# ─── Escrita de posicoes (PAPER: opera sobre a tabela positions, NAO toca a Binance) ───
+
+@router.post("/positions/{pos_id}/close")
+def close_position(
+    pos_id: str,
+    markOnly: bool = False,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Fecha uma posicao em PAPER: marca status=closed e registra closedAt. Nao envia ordem real."""
+    pos = (
+        db.query(Position)
+        .filter(Position.id == pos_id, Position.user_id == current_user.id)
+        .first()
+    )
+    if not pos:
+        return {"success": False, "error": "Posição não encontrada"}
+    if pos.status == "closed":
+        return {"success": True, "error": None}
+    pos.status = "closed"
+    pos.closed_at = datetime.now(timezone.utc)
+    d = dict(pos.data or {})
+    d["status"] = "closed"
+    d["closedAt"] = pos.closed_at.isoformat()
+    d["exitReason"] = "manual_paper" if not markOnly else "mark_only"
+    pos.data = d
+    flag_modified(pos, "data")
+    db.commit()
+    return {"success": True}
+
+
+@router.post("/reconcile")
+def reconcile(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Reconciliacao em PAPER: como nao ha Binance, apenas reporta as posicoes abertas conhecidas."""
+    open_positions = (
+        db.query(Position)
+        .filter(Position.user_id == current_user.id, Position.status == "open")
+        .all()
+    )
+    return {
+        "success": True,
+        "checked": len(open_positions),
+        "ghostsClosed": [],
+        "missingOco": [],
+        "ok": [p.id for p in open_positions],
+        "untracked": [],
+    }
+
+
+@router.post("/emergency-sell")
+def emergency_sell(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Fecha TODAS as posicoes abertas em PAPER (sem ordem real)."""
+    open_positions = (
+        db.query(Position)
+        .filter(Position.user_id == current_user.id, Position.status == "open")
+        .all()
+    )
+    now = datetime.now(timezone.utc)
+    for pos in open_positions:
+        pos.status = "closed"
+        pos.closed_at = now
+        d = dict(pos.data or {})
+        d["status"] = "closed"
+        d["closedAt"] = now.isoformat()
+        d["exitReason"] = "emergency_paper"
+        pos.data = d
+        flag_modified(pos, "data")
+    db.commit()
+    return {"success": True, "message": f"{len(open_positions)} posição(ões) fechada(s) (paper)."}
+
+
+@router.post("/force-trade")
+def force_trade(
+    body: dict = Body(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Force-trade em PAPER: nao executa ordem real. Retorna shape compativel com a UI."""
+    symbol = (body or {}).get("symbol", "")
+    side = (body or {}).get("side", "")
+    return {
+        "success": True,
+        "exitCode": 0,
+        "stdout": f"[PAPER] Force-trade simulado: {side} {symbol}. Execução real desativada nesta fase.",
+        "stderr": "",
+    }
+
+
+# ─── Bot Futures: STUB (nao portado para o Python; aparece pausado na UI) ───
+
+@router.get("/futures/status")
+def futures_status(current_user: User = Depends(get_current_user)):
+    return {"success": True, "isAlive": False, "status": "stopped", "openPositions": 0}
+
+
+@router.post("/futures/start")
+def futures_start(current_user: User = Depends(get_current_user)):
+    return {"success": False, "error": "Bot Futures não está disponível no novo sistema."}
+
+
+@router.post("/futures/stop")
+def futures_stop(current_user: User = Depends(get_current_user)):
+    return {"success": True}
+
+
+# ─── Backtest: STUB (motor real é Fase 7) — retorna vazio com aviso, sem quebrar a UI ───
+
+@router.post("/backtest")
+def backtest(
+    body: dict = Body(...),
+    current_user: User = Depends(get_current_user),
+):
+    return {
+        "success": True,
+        "ranAt": int(datetime.now(timezone.utc).timestamp() * 1000),
+        "combined": None,
+        "equityCurve": [],
+        "winRateTarget": None,
+        "approved": None,
+        "walkForward": None,
+        "warnings": ["Backtest em migração — o motor de análise estará disponível em breve."],
+        "results": [],
+        "recentTrades": [],
+    }

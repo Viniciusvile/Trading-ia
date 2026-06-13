@@ -262,10 +262,14 @@ export const api = {
     safeJson<{ success: boolean; lines: string[]; message?: string }>("/bot/master/raw-log", undefined, { success: false, lines: [] }),
 
   botEmergencySell: () =>
-    safeJson<{ success: boolean; message?: string }>("/bot/emergency-sell", { method: "POST" }),
+    BACKEND_FLAGS.positions
+      ? apiV2.botEmergencySell()
+      : safeJson<{ success: boolean; message?: string }>("/bot/emergency-sell", { method: "POST" }),
 
   botBalance: () =>
-    safeJson<{ success: boolean; spot?: number; futures?: number }>("/bot/balance", undefined, { success: false }),
+    BACKEND_FLAGS.bots
+      ? apiV2.botBalance()
+      : safeJson<{ success: boolean; spot?: number; futures?: number }>("/bot/balance", undefined, { success: false }),
 
   botMasterStatus: () =>
     BACKEND_FLAGS.bots
@@ -386,13 +390,19 @@ export const api = {
       : safeJson<{ success: boolean; error?: string }>("/micro-scalper/stop", { method: "POST" }),
 
   botFuturesStatus: () =>
-    safeJson<{ success: boolean; isAlive: boolean; status?: string }>("/bot/futures/status", undefined, { success: false, isAlive: false }),
+    BACKEND_FLAGS.bots
+      ? apiV2.botFuturesStatus()
+      : safeJson<{ success: boolean; isAlive: boolean; status?: string }>("/bot/futures/status", undefined, { success: false, isAlive: false }),
 
   botFuturesStart: () =>
-    safeJson<{ success: boolean; error?: string }>("/bot/futures/start", { method: "POST" }),
+    BACKEND_FLAGS.bots
+      ? apiV2.botFuturesStart()
+      : safeJson<{ success: boolean; error?: string }>("/bot/futures/start", { method: "POST" }),
 
   botFuturesStop: () =>
-    safeJson<{ success: boolean; error?: string }>("/bot/futures/stop", { method: "POST" }),
+    BACKEND_FLAGS.bots
+      ? apiV2.botFuturesStop()
+      : safeJson<{ success: boolean; error?: string }>("/bot/futures/stop", { method: "POST" }),
 
   microScalperConfig: () =>
     BACKEND_FLAGS.bots
@@ -547,16 +557,20 @@ export const api = {
     ),
 
   botBacktest: (plan: any) =>
-    safeJson<{ success: boolean; error?: string } & Partial<BacktestResult>>("/bot/backtest", {
-      method: "POST",
-      body: JSON.stringify(plan),
-    }, { success: false, error: "Falha ao executar análise" }),
+    BACKEND_FLAGS.strategies
+      ? (apiV2.botBacktest(plan) as ReturnType<typeof safeJson>)
+      : safeJson<{ success: boolean; error?: string } & Partial<BacktestResult>>("/bot/backtest", {
+          method: "POST",
+          body: JSON.stringify(plan),
+        }, { success: false, error: "Falha ao executar análise" }),
 
   botForceTrade: (params: { symbol: string; timeframe: string; side: string; amount?: number; mode: string }) =>
-    safeJson<{ success: boolean; exitCode?: number; stdout?: string; stderr?: string; error?: string }>("/bot/force-trade", {
-      method: "POST",
-      body: JSON.stringify(params),
-    }, { success: false, error: "Falha na requisição" }),
+    BACKEND_FLAGS.bots
+      ? apiV2.botForceTrade(params)
+      : safeJson<{ success: boolean; exitCode?: number; stdout?: string; stderr?: string; error?: string }>("/bot/force-trade", {
+          method: "POST",
+          body: JSON.stringify(params),
+        }, { success: false, error: "Falha na requisição" }),
 
   botPositions: () =>
     BACKEND_FLAGS.positions
@@ -582,7 +596,9 @@ export const api = {
     }>("/bot/positions", undefined, { success: false, positions: [] }),
 
   botReconcile: () =>
-    safeJson<{
+    BACKEND_FLAGS.positions
+      ? (apiV2.botReconcile() as ReturnType<typeof safeJson>)
+      : safeJson<{
       success: boolean;
       error?: string;
       checked?: number;
@@ -593,9 +609,11 @@ export const api = {
     }>("/bot/reconcile", { method: "POST" }, { success: false, error: "Falha ao reconciliar" }),
 
   botClosePosition: (id: string, markOnly?: boolean) =>
-    safeJson<{ success: boolean; error?: string }>(`/bot/positions/${encodeURIComponent(id)}/close${markOnly ? "?markOnly=true" : ""}`, {
-      method: "POST",
-    }, { success: false, error: "Falha na requisição" }),
+    BACKEND_FLAGS.positions
+      ? apiV2.botClosePosition(id, markOnly)
+      : safeJson<{ success: boolean; error?: string }>(`/bot/positions/${encodeURIComponent(id)}/close${markOnly ? "?markOnly=true" : ""}`, {
+          method: "POST",
+        }, { success: false, error: "Falha na requisição" }),
 
   // ─── Multi-Account API Endpoints ───
   accountsList: () =>
