@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from celery import shared_task
 from binance.client import Client
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.database import _get_session_factory
 from app.models.user import User  # noqa: F401  (registra a tabela 'users' p/ resolver a FK)
@@ -81,6 +82,7 @@ def run_masterbot():
             new_data = dict(cfg.data or {})
             new_data["lastStatus"] = {"status": "waiting", "lastRun": now, "results": user_results}
             cfg.data = new_data
+            flag_modified(cfg, "data")  # JSONB nao detecta mutacao sem isto -> lastRun nao persistia
         db.commit()
         return {"status": "ok", "ts": datetime.now(timezone.utc).isoformat(), "decisions": decisions}
     finally:

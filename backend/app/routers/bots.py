@@ -86,11 +86,14 @@ def master_status(current_user: User = Depends(get_current_user), db: Session = 
         except ValueError:
             is_alive = False
     enabled = is_bot_enabled(db, current_user.id, "master_enabled")
+    # isAlive reflete o que o usuario controla (ligado/desligado). is_alive (heartbeat)
+    # vira um indicador secundario de "worker processando" (workerFresh).
     return {
         "success": True,
-        "isAlive": bool(enabled and is_alive),
+        "isAlive": enabled,
         "enabled": enabled,
-        "status": last.get("status", "stopped") if enabled else "stopped",
+        "workerFresh": is_alive,
+        "status": last.get("status", "waiting") if enabled else "stopped",
         "lastRun": last_run,
         "watchlist": data.get("watchlist", []),
         "lastResults": [
