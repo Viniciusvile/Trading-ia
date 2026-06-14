@@ -38,12 +38,8 @@ celery.conf.update(
             "task": "run_adaptive",
             "schedule": 300.0,
         },
-        # Sync de positions legado->Python (~60s) enquanto os 2 sistemas coexistem.
-        # DESLIGAR na Fase 6 (quando o legado parar e o Python assumir execucao real).
-        "sync-positions": {
-            "task": "sync_positions",
-            "schedule": 60.0,
-        },
+        # (Fase 8) sync_positions REMOVIDO: o legado foi desligado, nao ha mais o que
+        # sincronizar. O sync_runner segue no include mas nao e mais agendado.
         # Micro-Scalper REAL (executa ordem). Opt-in DUPLO por usuario (micro_enabled
         # E config.live). Hoje so o user de teste, com conta TESTNET ativa (fake).
         "micro-scalper-real": {
