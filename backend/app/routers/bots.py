@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user
 from app.models.user import User
@@ -418,6 +419,245 @@ def get_shared_strategy(code: str, db: Session = Depends(get_db)):
     pub = _public_strategy_data(plan.data or {})
     pub["code"] = code
     return {"success": True, "strategy": pub}
+
+
+# ─── Importação de estratégia via TradingView / Pine Script ───
+
+def _num(v):
+    try:
+        if v is None:
+            return None
+        n = float(v)
+        return n
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_sl_tp(v: dict | None, default_pct: float) -> dict:
+    """A IA emite {type:'percentage', value}; o motor usa type 'pct'. ATR é preservado."""
+    if not isinstance(v, dict):
+        return {"type": "pct", "value": default_pct}
+    t = v.get("type")
+    if t in ("percentage", "percent", "pct"):
+        value = _num(v.get("value"))
+        return {"type": "pct", "value": default_pct if (value is None or value <= 0) else value}
+    if t == "atr" and v.get("multiplier") is not None:
+        return {"type": "atr", "multiplier": _num(v.get("multiplier"))}
+    value = _num(v.get("value"))
+    if value is not None and value > 0:
+        return {"type": "pct", "value": value}
+    return {"type": "pct", "value": default_pct}
+
+
+def _flatten_imported_filters(filters) -> dict:
+    """Achata filtros aninhados da IA (rsi/bb/ema/macd/adx...) para chaves planas."""
+    if not isinstance(filters, dict):
+        return {}
+    import json as _json
+    f = filters
+    out: dict = {}
+    blob = _json.dumps(f).lower()
+
+    rsi = f.get("rsi") or f.get("RSI")
+    if isinstance(rsi, dict):
+        os_ = _num(rsi.get("oversold") or rsi.get("lower") or rsi.get("min"))
+        ob = _num(rsi.get("overbought") or rsi.get("upper") or rsi.get("max"))
+        if os_ is not None:
+            out["rsi_max"] = os_
+        elif ob is not None:
+            out["rsi_min"] = 0
+        if _num(rsi.get("period")) is not None:
+            out["rsi_period"] = _num(rsi.get("period"))
+    if _num(f.get("rsi_min")) is not None:
+        out["rsi_min"] = _num(f.get("rsi_min"))
+    if _num(f.get("rsi_max")) is not None:
+        out["rsi_max"] = _num(f.get("rsi_max"))
+
+    bb = f.get("bb") or f.get("bollinger") or f.get("bollingerBands") or f.get("bollinger_bands")
+    if isinstance(bb, dict):
+        if _num(bb.get("period") or bb.get("length")) is not None:
+            out["bb_period"] = _num(bb.get("period") or bb.get("length"))
+        if _num(bb.get("mult") or bb.get("stdDev") or bb.get("deviation")) is not None:
+            out["bb_mult"] = _num(bb.get("mult") or bb.get("stdDev") or bb.get("deviation"))
+        out["bb_pct_b_max"] = 0.2
+
+    if f.get("ma") or f.get("ema") or f.get("movingAverage") or f.get("moving_average") \
+            or "moving" in blob or "ema" in blob or "média" in blob:
+        out["ema_triple"] = True
+
+    if f.get("macd") or "macd" in blob:
+        out["macd_positive"] = True
+
+    adx = f.get("adx") or f.get("ADX")
+    if isinstance(adx, dict) and _num(adx.get("min") or adx.get("threshold")) is not None:
+        out["adx_min"] = _num(adx.get("min") or adx.get("threshold"))
+    if _num(f.get("adx_min")) is not None:
+        out["adx_min"] = _num(f.get("adx_min"))
+    if _num(f.get("adx_max")) is not None:
+        out["adx_max"] = _num(f.get("adx_max"))
+
+    st = f.get("supertrend") or f.get("superTrend")
+    if isinstance(st, dict):
+        out["supertrend_period"] = _num(st.get("period") or st.get("atrPeriod")) or 10
+        if _num(st.get("mult") or st.get("factor")) is not None:
+            out["supertrend_mult"] = _num(st.get("mult") or st.get("factor"))
+
+    if _num(f.get("volume_mult")) is not None:
+        out["volume_mult"] = _num(f.get("volume_mult"))
+    vol = f.get("volume")
+    if isinstance(vol, dict) and _num(vol.get("mult") or vol.get("multiplier")) is not None:
+        out["volume_mult"] = _num(vol.get("mult") or vol.get("multiplier"))
+
+    return out
+
+
+def _normalize_imported_strategy(raw) -> dict:
+    out = raw if isinstance(raw, dict) else {}
+    name = out.get("name")
+    symbols = out.get("symbols")
+    timeframes = out.get("timeframes")
+    return {
+        "name": name.strip() if isinstance(name, str) and name.strip() else "Estratégia Importada",
+        "description": out.get("description") if isinstance(out.get("description"), str) else "",
+        "strategy": out.get("strategy") if isinstance(out.get("strategy"), str) else "custom",
+        "symbols": symbols if isinstance(symbols, list) and symbols else ["BTCUSDT"],
+        "timeframes": timeframes if isinstance(timeframes, list) and timeframes else ["1H"],
+        "mode": "futures" if out.get("mode") == "futures" else "spot",
+        "filters": _flatten_imported_filters(out.get("filters")),
+        "sl": _normalize_sl_tp(out.get("sl"), 1.5),
+        "tp": _normalize_sl_tp(out.get("tp"), 3.0),
+    }
+
+
+def _parse_gemini_json(text: str) -> dict:
+    import json as _json
+    import re as _re
+    t = (text or "").strip()
+    fence = _re.search(r"```(?:json)?\s*([\s\S]*?)```", t, _re.IGNORECASE)
+    if fence:
+        t = fence.group(1).strip()
+    first = t.find("{")
+    last = t.rfind("}")
+    if first >= 0 and last > first:
+        t = t[first:last + 1]
+    return _json.loads(t)
+
+
+def _map_pine_with_gemini(pine_script: str, api_key: str) -> dict:
+    import httpx
+    system_prompt = (
+        "Você é um compilador de estratégias de trading automatizadas.\n"
+        "Analise o script em Pine Script (TradingView) fornecido e extraia:\n"
+        "1. Indicadores utilizados (ex: RSI, Bandas de Bollinger, Médias Móveis, MACD, etc.).\n"
+        "2. Parâmetros numéricos associados (ex: período do RSI, desvio padrão das BBs, comprimento das EMAs).\n"
+        "3. Condições e gatilhos de Entrada (compra/venda).\n"
+        "4. Valores de Stop Loss (SL) e Take Profit (TP), mapeando-os como porcentagem decimal.\n\n"
+        "Retorne APENAS um objeto JSON válido, sem markdown ou explicações externas, no seguinte formato:\n"
+        '{\n'
+        '  "name": "Nome sugerido",\n'
+        '  "description": "Breve descrição do comportamento do script",\n'
+        '  "strategy": "rsi-bb" ou "moving-average" ou "custom",\n'
+        '  "filters": {},\n'
+        '  "sl": { "type": "percentage", "value": 1.5 },\n'
+        '  "tp": { "type": "percentage", "value": 3.0 }\n'
+        '}\n\n'
+        "### Pine Script:\n```\n" + pine_script[:20000] + "\n```"
+    )
+    models = ["gemini-2.5-flash", "gemini-1.5-flash"]
+    last_err = None
+    for model in models:
+        try:
+            resp = httpx.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
+                json={
+                    "contents": [{"parts": [{"text": system_prompt}]}],
+                    "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"},
+                },
+                timeout=45.0,
+            )
+            data = resp.json()
+            if data.get("error"):
+                last_err = RuntimeError(data["error"].get("message", "Erro Gemini"))
+                continue
+            try:
+                txt = data["candidates"][0]["content"]["parts"][0]["text"]
+            except (KeyError, IndexError, TypeError):
+                txt = None
+            if not txt:
+                last_err = RuntimeError("Resposta vazia do Gemini")
+                continue
+            return _normalize_imported_strategy(_parse_gemini_json(txt))
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+    raise last_err or RuntimeError("Falha ao analisar o script com a IA")
+
+
+def _scrape_pine_from_url(url: str) -> str:
+    """Tenta extrair o código Pine de uma página pública do TradingView."""
+    import re as _re
+    import httpx
+    if not _re.match(r"^https?://", url, _re.IGNORECASE):
+        raise ValueError("invalid_url")
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+    }
+    try:
+        resp = httpx.get(url, headers=headers, follow_redirects=True, timeout=15.0)
+    except Exception:
+        raise ValueError("fetch_failed")
+    if resp.status_code != 200:
+        raise ValueError("http_error")
+    html = resp.text
+    if _re.search(r"just a moment|cf-browser-verification|captcha|access denied|enable javascript",
+                  html, _re.IGNORECASE):
+        raise ValueError("blocked")
+    for pat in (r'"scriptSource"\s*:\s*"((?:[^"\\]|\\.)*)"', r'"source"\s*:\s*"((?:[^"\\]|\\.)*)"'):
+        m = _re.search(pat, html)
+        if m:
+            raw = m.group(1)
+            # Decodifica escapes JSON básicos.
+            return raw.encode().decode("unicode_escape")
+    raise ValueError("not_found")
+
+
+@router.post("/strategies/import-tradingview")
+def import_strategy_tradingview(
+    body: dict = Body(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Analisa um Pine Script (colado ou via URL pública) com a IA e devolve a config."""
+    api_key = settings.gemini_api_key
+    if not api_key:
+        return {"success": False, "error": "Chave de API do Gemini não configurada no servidor"}
+
+    raw_pine = ((body or {}).get("rawPineScript") or "").strip()
+    url = ((body or {}).get("url") or "").strip()
+    pine_script = raw_pine
+
+    if not pine_script and url:
+        try:
+            pine_script = _scrape_pine_from_url(url)
+        except ValueError as e:
+            reason = str(e)
+            return {
+                "success": False,
+                "reason": reason,
+                "error": "Não foi possível ler o código pela URL. Muitos scripts do TradingView são "
+                         "protegidos ou bloqueiam acesso automático — abra o script, copie o Pine Script "
+                         "e cole no campo abaixo.",
+            }
+
+    if not pine_script:
+        return {"success": False, "error": "Informe a URL do TradingView ou cole o código Pine Script"}
+
+    try:
+        mapped = _map_pine_with_gemini(pine_script, api_key)
+        return {"success": True, "strategy": mapped}
+    except Exception as e:  # noqa: BLE001
+        return {"success": False, "error": str(e) or "Falha ao analisar o script"}
 
 
 def _set_plan_active(db: Session, user_id: str, name: str, active: bool) -> dict:

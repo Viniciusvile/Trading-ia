@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     stripe_price_basic: str = ""
     stripe_price_pro: str = ""
     stripe_webhook_secret: str = ""
+    google_client_id: str = ""
+    gemini_api_key: str = ""
 
     class Config:
         env_file = ".env"
