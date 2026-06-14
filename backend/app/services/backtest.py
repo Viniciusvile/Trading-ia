@@ -214,6 +214,8 @@ def get_plan_warnings(plan: dict) -> list[str]:
         warnings.append("O filtro de ADX 4H (adx_4h_max) é ignorado no backtest — resultado pode ser mais otimista que o bot ao vivo.")
     if plan.get("mode") != "futures" and plan.get("strategy") == "range-v2":
         warnings.append("Modo spot: sinais SHORT do Range v2 são descartados (sem venda a descoberto), igual ao bot ao vivo.")
+    if plan.get("mode") != "futures" and plan.get("strategy") == "volatility-envelope":
+        warnings.append("Modo spot: só as viradas de momentum para CIMA (compra) operam; viradas para baixo são descartadas (sem venda a descoberto).")
     if plan.get("strategy") in ("micro-dip", "turbo-reversion"):
         warnings.append("O backtest do scalper avalia candles fechados; o robô ao vivo reage em tempo real — os resultados são uma aproximação.")
     return warnings

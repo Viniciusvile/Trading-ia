@@ -246,6 +246,87 @@ def run_safety_check_warrior(candles: list[Candle], now_ms: int | None = None) -
     }
 
 
+def run_safety_check_volatility_envelope(candles: list[Candle], plan_filters: dict | None = None) -> dict:
+    """Gatilho 'volatility-envelope' — port do indicador Adaptive Volatility Envelope
+    [QuantAlgo]. Sinal nativo do script: ENTRA quando o momentum cruza zero.
+
+    - centerline adaptativa via efficiency ratio de Kaufman (choppy vs trend speed)
+    - momentum = slope(centerline)/ATR * sensibilidade, limitado a [-1, 1]
+    - bullTurn: momentum cruza ACIMA de 0 -> LONG
+    - bearTurn: momentum cruza ABAIXO de 0 -> SHORT (so em futures, via decide_signal)
+
+    Parametros (com defaults do preset 'Default' do script):
+      adapt_length=20, choppy_speed=0.05, trend_speed=0.85, vol_length=20, color_sens=8
+    """
+    pf = plan_filters or {}
+    adapt_length = int(pf.get("adapt_length", 20))
+    choppy_speed = float(pf.get("choppy_speed", 0.05))
+    trend_speed = float(pf.get("trend_speed", 0.85))
+    vol_length = int(pf.get("vol_length", 20))
+    color_sens = float(pf.get("color_sens", 8.0))
+
+    # Precisa de historico suficiente para o lookback e para um momentum estavel.
+    need = adapt_length + vol_length + 5
+    if len(candles) < need:
+        return {"results": [{"label": "Dados insuficientes", "pass": False}],
+                "allPass": False, "side": None, "stopPrice": None, "takeProfitPrice": None,
+                "indicators": {}}
+
+    closes = [c["close"] for c in candles]
+
+    # Centerline adaptativa (recursiva), calculada em serie do bar adapt_length em diante.
+    centerline: list[float | None] = [None] * len(closes)
+    for i in range(len(closes)):
+        if i < adapt_length:
+            continue
+        price_change = abs(closes[i] - closes[i - adapt_length])
+        total_movement = sum(abs(closes[j] - closes[j - 1]) for j in range(i - adapt_length + 1, i + 1))
+        eff_ratio = price_change / total_movement if total_movement != 0 else 0.0
+        smoothing = choppy_speed + (trend_speed - choppy_speed) * eff_ratio
+        prev = centerline[i - 1]
+        centerline[i] = closes[i] if prev is None else prev + smoothing * (closes[i] - prev)
+
+    def momentum_at(i: int) -> float | None:
+        """slope(centerline)/ATR * sens, limitado a [-1,1] (espelha o Pine)."""
+        c0, c2 = centerline[i], centerline[i - 2] if i >= 2 else None
+        if c0 is None:
+            return None
+        c2 = c2 if c2 is not None else c0
+        slope = (c0 - c2) / 2.0
+        atr_i = calc_atr(candles[: i + 1], vol_length)
+        if not atr_i:
+            return 0.0
+        raw = slope / atr_i * color_sens
+        return max(-1.0, min(1.0, raw))
+
+    mom_now = momentum_at(len(closes) - 1)
+    mom_prev = momentum_at(len(closes) - 2)
+    if mom_now is None or mom_prev is None:
+        return {"results": [{"label": "Momentum indisponível", "pass": False}],
+                "allPass": False, "side": None, "stopPrice": None, "takeProfitPrice": None,
+                "indicators": {}}
+
+    bull_turn = mom_prev <= 0 and mom_now > 0
+    bear_turn = mom_prev >= 0 and mom_now < 0
+
+    side = "LONG" if bull_turn else ("SHORT" if bear_turn else None)
+    results = [
+        {"label": "Momentum cruzou para cima (bull)", "pass": bull_turn},
+        {"label": "Momentum cruzou para baixo (bear)", "pass": bear_turn},
+    ]
+    # allPass = houve um cruzamento (entrada). decide_signal aplica SL/TP do plano.
+    all_pass = side is not None
+    return {
+        "results": results,
+        "allPass": all_pass,
+        "side": side,
+        "stopPrice": None,
+        "takeProfitPrice": None,
+        "indicators": {"momentum": mom_now, "momentumPrev": mom_prev,
+                       "centerline": centerline[-1]},
+    }
+
+
 # ─── Indicadores p/ filtros de plano (port de bot.js: calcADX, calcChoppiness) ───
 
 def calc_adx(candles: list[Candle], period: int = 14) -> dict | None:

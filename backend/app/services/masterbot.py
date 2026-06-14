@@ -44,6 +44,18 @@ def decide_signal_for_plan(plan: dict, candles: list[dict]) -> dict:
         st = mb.calc_plan_stop_tp(price, atr, plan, safety["side"])
         return {"action": "enter", "side": safety["side"], "stop": st["stop"], "tp": st["tp"], "strategy": strategy, "conditions": safety.get("results", [])}
 
+    if strategy == "volatility-envelope":
+        safety = mb.run_safety_check_volatility_envelope(candles, plan.get("filters") or {})
+        if not safety["allPass"] or not safety["side"]:
+            return {"action": "none", "reason": "envelope sem cruzamento de momentum",
+                    "strategy": strategy, "conditions": safety.get("results", [])}
+        if safety["side"] == "SHORT" and not allow_short:
+            return {"action": "none", "reason": "short bloqueado (spot)",
+                    "strategy": strategy, "conditions": safety.get("results", [])}
+        st = mb.calc_plan_stop_tp(price, atr, plan, safety["side"])
+        return {"action": "enter", "side": safety["side"], "stop": st["stop"], "tp": st["tp"],
+                "strategy": strategy, "conditions": safety.get("results", [])}
+
     # warrior (long-only, seguidor de tendencia) — default
     safety = mb.run_safety_check_warrior(candles)
     if not safety["allPass"]:

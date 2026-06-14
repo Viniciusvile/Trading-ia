@@ -100,7 +100,7 @@ def master_status(current_user: User = Depends(get_current_user), db: Session = 
         "lastResults": [
             {"symbol": r.get("symbol"), "timeframe": "", "allPass": r.get("action") == "enter",
              "side": r.get("side"), "signal": r.get("reason") or "", "strategy": r.get("strategy"),
-             "conditions": r.get("conditions", [])}
+             "plan": r.get("plan") or "", "conditions": r.get("conditions", [])}
             for r in results
         ],
     }
@@ -511,19 +511,40 @@ def _flatten_imported_filters(filters) -> dict:
     return out
 
 
+# Parâmetros do gatilho 'volatility-envelope' (preservados crus nos filters).
+_ENVELOPE_PARAM_KEYS = ("adapt_length", "choppy_speed", "trend_speed", "vol_length", "color_sens")
+
+
+def _envelope_filters(raw_filters) -> dict:
+    """Extrai os params do envelope dos filters da IA, com defaults do preset 'Default'."""
+    f = raw_filters if isinstance(raw_filters, dict) else {}
+    defaults = {"adapt_length": 20, "choppy_speed": 0.05, "trend_speed": 0.85,
+                "vol_length": 20, "color_sens": 8.0}
+    out: dict = {}
+    for k, dflt in defaults.items():
+        v = _num(f.get(k))
+        out[k] = v if v is not None else dflt
+    return out
+
+
 def _normalize_imported_strategy(raw) -> dict:
     out = raw if isinstance(raw, dict) else {}
     name = out.get("name")
     symbols = out.get("symbols")
     timeframes = out.get("timeframes")
+    strategy = out.get("strategy") if isinstance(out.get("strategy"), str) else "custom"
+    if strategy == "volatility-envelope":
+        filters = _envelope_filters(out.get("filters"))
+    else:
+        filters = _flatten_imported_filters(out.get("filters"))
     return {
         "name": name.strip() if isinstance(name, str) and name.strip() else "Estratégia Importada",
         "description": out.get("description") if isinstance(out.get("description"), str) else "",
-        "strategy": out.get("strategy") if isinstance(out.get("strategy"), str) else "custom",
+        "strategy": strategy,
         "symbols": symbols if isinstance(symbols, list) and symbols else ["BTCUSDT"],
         "timeframes": timeframes if isinstance(timeframes, list) and timeframes else ["1H"],
         "mode": "futures" if out.get("mode") == "futures" else "spot",
-        "filters": _flatten_imported_filters(out.get("filters")),
+        "filters": filters,
         "sl": _normalize_sl_tp(out.get("sl"), 1.5),
         "tp": _normalize_sl_tp(out.get("tp"), 3.0),
     }
@@ -552,11 +573,22 @@ def _map_pine_with_gemini(pine_script: str, api_key: str) -> dict:
         "2. Parâmetros numéricos associados (ex: período do RSI, desvio padrão das BBs, comprimento das EMAs).\n"
         "3. Condições e gatilhos de Entrada (compra/venda).\n"
         "4. Valores de Stop Loss (SL) e Take Profit (TP), mapeando-os como porcentagem decimal.\n\n"
+        "O campo \"strategy\" deve ser UM destes valores quando o script corresponder:\n"
+        "- \"volatility-envelope\": indicadores de envelope/banda de volatilidade ADAPTATIVA "
+        "que usam ATR + uma centerline adaptativa (efficiency ratio de Kaufman, choppy/trend speed) "
+        "e sinalizam por virada de momentum (ex.: 'Adaptive Volatility Envelope'). "
+        "Para este, preencha filters com os parametros do script: "
+        "{\"adapt_length\": <Adaptation Length>, \"choppy_speed\": <Choppy Market Speed>, "
+        "\"trend_speed\": <Trending Market Speed>, \"vol_length\": <Volatility Length>, "
+        "\"color_sens\": <Color Sensitivity>}.\n"
+        "- \"range-v2\": reversao a media / suporte-resistencia com RSI + estocastico.\n"
+        "- \"warrior\": seguidor de tendencia (preco>VWAP, EMAs alinhadas, RSI).\n"
+        "- \"custom\": quando nao se encaixa em nenhum acima.\n\n"
         "Retorne APENAS um objeto JSON válido, sem markdown ou explicações externas, no seguinte formato:\n"
         '{\n'
         '  "name": "Nome sugerido",\n'
         '  "description": "Breve descrição do comportamento do script",\n'
-        '  "strategy": "rsi-bb" ou "moving-average" ou "custom",\n'
+        '  "strategy": "volatility-envelope" | "range-v2" | "warrior" | "custom",\n'
         '  "filters": {},\n'
         '  "sl": { "type": "percentage", "value": 1.5 },\n'
         '  "tp": { "type": "percentage", "value": 3.0 }\n'
