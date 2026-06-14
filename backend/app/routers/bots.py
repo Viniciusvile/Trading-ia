@@ -284,17 +284,19 @@ def _plan_to_ui(plan: MasterPlan) -> dict:
     """Mapeia um MasterPlan (data JSONB) para o shape rico que a UI de estratégias espera."""
     d = plan.data or {}
     lb = d.get("lastBacktest") or None
-    # Stats agregados do ultimo backtest (primeiro resultado, se houver).
+    # Usa o COMBINED (agregado de todos os symbol×timeframe), nao results[0] (1o combo
+    # so) — senao o card diverge do modal de Analise, que mostra o combined.
     win_rate = 0.0
     profit_factor = 0.0
-    net_profit = 0.0
-    win_rate_target = None
-    if lb and isinstance(lb.get("results"), list) and lb["results"]:
-        st = lb["results"][0].get("stats") or {}
-        win_rate = st.get("winRate", 0) or 0
-        profit_factor = st.get("profitFactor", 0) or 0
-        net_profit = st.get("netProfitPct", st.get("netProfit", 0)) or 0
-        win_rate_target = st.get("winRateTarget")
+    net_profit = 0.0      # USD (o card usa fmtUSD)
+    total_trades = 0
+    win_rate_target = lb.get("winRateTarget") if lb else None
+    combined = (lb or {}).get("combined") if lb else None
+    if combined:
+        win_rate = combined.get("winRate", 0) or 0
+        profit_factor = combined.get("profitFactor", 0) or 0
+        net_profit = combined.get("netProfitUsd", 0) or 0
+        total_trades = combined.get("totalTrades", 0) or 0
     return {
         "name": d.get("name", plan.name),
         "description": d.get("description", ""),
@@ -307,7 +309,7 @@ def _plan_to_ui(plan: MasterPlan) -> dict:
         "winRate": win_rate,
         "profitFactor": profit_factor,
         "netProfit": net_profit,
-        "totalTrades": (lb["results"][0].get("stats", {}).get("totalTrades", 0) if lb and lb.get("results") else 0),
+        "totalTrades": total_trades,
         "filters": d.get("filters", {}),
         "sl": d.get("sl", {}),
         "tp": d.get("tp", {}),
