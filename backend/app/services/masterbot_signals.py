@@ -244,3 +244,106 @@ def run_safety_check_warrior(candles: list[Candle], now_ms: int | None = None) -
         "stopPrice": stop_price,
         "indicators": {"ema9": ema9, "ema20": ema20, "vwap": vwap, "rsi14": rsi14},
     }
+
+
+# ─── Indicadores p/ filtros de plano (port de bot.js: calcADX, calcChoppiness) ───
+
+def calc_adx(candles: list[Candle], period: int = 14) -> dict | None:
+    """Port IDENTICO de calcADX (bot.js): retorna {adx, pdi, mdi}. Usa DX (nao a
+    media classica de ADX) — fiel ao legado para os resultados baterem."""
+    if len(candles) < period * 2:
+        return None
+
+    def smooth(arr: list[float], p: int) -> float:
+        val = sum(arr[:p])
+        for i in range(p, len(arr)):
+            val = val - val / p + arr[i]
+        return val
+
+    plus_dm, minus_dm, trs = [], [], []
+    for i in range(1, len(candles)):
+        up = candles[i]["high"] - candles[i - 1]["high"]
+        down = candles[i - 1]["low"] - candles[i]["low"]
+        plus_dm.append(up if (up > down and up > 0) else 0)
+        minus_dm.append(down if (down > up and down > 0) else 0)
+        tr = max(candles[i]["high"] - candles[i]["low"],
+                 abs(candles[i]["high"] - candles[i - 1]["close"]),
+                 abs(candles[i]["low"] - candles[i - 1]["close"]))
+        trs.append(tr)
+
+    s_tr = smooth(trs, period)
+    s_pdm = smooth(plus_dm, period)
+    s_mdm = smooth(minus_dm, period)
+    if s_tr == 0:
+        return {"adx": 0, "pdi": 0, "mdi": 0}
+    pdi = 100 * s_pdm / s_tr
+    mdi = 100 * s_mdm / s_tr
+    dx = 0 if (pdi + mdi) == 0 else 100 * abs(pdi - mdi) / (pdi + mdi)
+    return {"adx": dx, "pdi": pdi, "mdi": mdi}
+
+
+def calc_choppiness(candles: list[Candle], period: int = 14) -> float | None:
+    """Port IDENTICO de calcChoppiness (bot.js)."""
+    import math
+    if len(candles) < period + 1:
+        return None
+    sl = candles[-period:]
+    high = max(c["high"] for c in sl)
+    low = min(c["low"] for c in sl)
+    sum_tr = 0.0
+    for i in range(len(candles) - period, len(candles)):
+        c, prev = candles[i], candles[i - 1]
+        sum_tr += max(c["high"] - c["low"],
+                      abs(c["high"] - prev["close"]),
+                      abs(c["low"] - prev["close"]))
+    if high == low:
+        return 100.0
+    return 100 * (math.log10(sum_tr / (high - low)) / math.log10(period))
+
+
+def apply_plan_filters(candles: list[Candle], plan: dict) -> list[dict]:
+    """Port de applyPlanFilters (bot.js) — SO os filtros usados hoje pelas estrategias:
+    ema_triple, adx_min/adx_max, di_direction, rsi_min/rsi_max, volume_mult,
+    volume_max_mult, choppiness_min. Cada um vira {label, pass}.
+
+    CRITICO: a signalFn do legado roda isto ANTES do safety check e exige que TODOS
+    passem. Sem isto, o bot opera em regime errado (gera trades ruins demais).
+    """
+    f = (plan or {}).get("filters") or {}
+    closes = [c["close"] for c in candles]
+    extra: list[dict] = []
+
+    if f.get("ema_triple"):
+        e9, e21 = calc_ema(closes, 9), calc_ema(closes, 21)
+        e55, e200 = calc_ema(closes, 55), calc_ema(closes, 200)
+        extra.append({"label": "EMA9>EMA21>EMA55>EMA200", "pass": e9 > e21 > e55 > e200})
+
+    if f.get("adx_min") is not None or f.get("di_direction"):
+        di = calc_adx(candles, 14)
+        if f.get("adx_min") is not None:
+            extra.append({"label": f"ADX >= {f['adx_min']}", "pass": di is not None and di["adx"] >= f["adx_min"]})
+        if f.get("di_direction"):
+            extra.append({"label": "DI+ > DI-", "pass": di is not None and di["pdi"] > di["mdi"]})
+
+    if f.get("rsi_min") is not None or f.get("rsi_max") is not None:
+        rsi = calc_rsi(closes, 14)
+        mn, mx = f.get("rsi_min", 0), f.get("rsi_max", 100)
+        extra.append({"label": f"RSI {mn}-{mx}", "pass": rsi is not None and mn <= rsi <= mx})
+
+    if f.get("volume_mult") is not None:
+        vols = [c.get("volume", c.get("vol", 0)) for c in candles]
+        avg = sum(vols[-21:-1]) / 20 if len(vols) >= 21 else 0
+        cur = vols[-1]
+        extra.append({"label": f"Volume >= {f['volume_mult']}x", "pass": avg > 0 and cur >= avg * f["volume_mult"]})
+
+    if f.get("volume_max_mult") is not None:
+        vols = [c.get("volume", c.get("vol", 0)) for c in candles]
+        avg = sum(vols[-21:-1]) / 20 if len(vols) >= 21 else 0
+        cur = vols[-1]
+        extra.append({"label": f"Volume <= {f['volume_max_mult']}x", "pass": avg > 0 and cur <= avg * f["volume_max_mult"]})
+
+    if f.get("choppiness_min") is not None:
+        chop = calc_choppiness(candles, 14)
+        extra.append({"label": f"Choppiness >= {f['choppiness_min']}", "pass": chop is not None and chop >= f["choppiness_min"]})
+
+    return extra

@@ -22,6 +22,13 @@ def decide_signal_for_plan(plan: dict, candles: list[dict]) -> dict:
     if atr is None:
         return {"action": "none", "reason": "atr indisponivel"}
 
+    # FILTROS DE REGIME do plano (adx/choppiness/ema_triple/volume) — rodam ANTES do
+    # safety check, igual ao legado. Se algum reprova, NAO opera (evita trades ruins).
+    plan_filters = mb.apply_plan_filters(candles, plan)
+    if plan_filters and not all(fr["pass"] for fr in plan_filters):
+        return {"action": "none", "reason": "filtros de regime reprovados",
+                "strategy": strategy, "conditions": plan_filters}
+
     if strategy == "range-v2":
         safety = mb.run_safety_check_range_v2(candles, plan.get("filters") or {})
         if not safety["allPass"] or not safety["side"]:

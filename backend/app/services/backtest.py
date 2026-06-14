@@ -21,16 +21,30 @@ TIMEFRAME_MAP = {
     "4h": Client.KLINE_INTERVAL_4HOUR, "4H": Client.KLINE_INTERVAL_4HOUR,
     "1d": Client.KLINE_INTERVAL_1DAY, "1D": Client.KLINE_INTERVAL_1DAY,
 }
-BACKTEST_LIMIT = 1000  # histórico amplo para o backtest (legado usa candles longos)
+BACKTEST_LIMIT = 1400  # igual ao legado (fetchHistoricalCandles total=1400)
 
 
 def fetch_historical_candles(client: Client, symbol: str, tf: str, limit: int = BACKTEST_LIMIT) -> list[dict]:
+    """Busca candles paginando para trás (Binance limita 1000/request), igual ao legado."""
     interval = TIMEFRAME_MAP.get(tf, Client.KLINE_INTERVAL_1HOUR)
-    raw = client.get_klines(symbol=symbol, interval=interval, limit=limit)
+    out: list[list] = []
+    end_time = None
+    while len(out) < limit:
+        batch = min(1000, limit - len(out))
+        kwargs = {"symbol": symbol, "interval": interval, "limit": batch}
+        if end_time is not None:
+            kwargs["endTime"] = end_time
+        raw = client.get_klines(**kwargs)
+        if not raw:
+            break
+        out = raw + out  # prepende (estamos indo para tras no tempo)
+        end_time = raw[0][0] - 1  # antes do primeiro candle deste lote
+        if len(raw) < batch:
+            break  # nao ha mais historico
     return [
         {"open": float(k[1]), "high": float(k[2]), "low": float(k[3]),
          "close": float(k[4]), "volume": float(k[5]), "time": int(k[0])}
-        for k in raw
+        for k in out
     ]
 
 
