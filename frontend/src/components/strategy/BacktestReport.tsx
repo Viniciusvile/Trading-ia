@@ -226,7 +226,7 @@ export function BacktestReport({ data }: { data: BacktestResult }) {
                 {[...data.recentTrades].reverse().map((t, idx) => (
                   <tr key={idx}>
                     <td className="p-2.5 text-muted">
-                      {new Date(t.entryTime).toLocaleString("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                      {new Date(t.entryTime).toLocaleString("pt-BR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
                     </td>
                     <td className="p-2.5 font-semibold">{t.symbol || "—"}</td>
                     <td className="p-2.5"><Badge tone={t.side === "LONG" ? "up" : "down"} size="sm">{t.side}</Badge></td>
