@@ -61,6 +61,12 @@ const FILTER_META: Record<string, FilterMeta> = {
   supertrend_period: { label: "Supertrend período", kind: "number", min: 5, max: 30, step: 1 },
   supertrend_mult: { label: "Supertrend multiplicador", kind: "number", min: 1, max: 6, step: 0.1 },
   choppiness_min: { label: "Choppiness mínimo (lateral)", kind: "number", min: 30, max: 60, step: 1 },
+  // Adaptive Volatility Envelope
+  adapt_length: { label: "Adaptação (lookback)", hint: "Bars p/ detectar tendência vs lateral", kind: "number", min: 2, max: 50, step: 1 },
+  choppy_speed: { label: "Velocidade em lateral", hint: "Reação da centerline em mercado choppy", kind: "number", min: 0.01, max: 0.5, step: 0.01 },
+  trend_speed: { label: "Velocidade em tendência", hint: "Quão colada a centerline segue o preço", kind: "number", min: 0.5, max: 0.99, step: 0.01 },
+  vol_length: { label: "Período de volatilidade (ATR)", kind: "number", min: 1, max: 50, step: 1 },
+  color_sens: { label: "Sensibilidade do momentum", kind: "number", min: 1, max: 20, step: 0.5 },
 };
 function metaFor(key: string): FilterMeta {
   return FILTER_META[key] || { label: key.replace(/_/g, " "), kind: typeof key === "string" ? "number" : "number" };
