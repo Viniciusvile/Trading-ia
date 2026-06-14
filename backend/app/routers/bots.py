@@ -15,7 +15,7 @@ from app.database import get_db
 from app.deps import get_current_user
 from app.models.user import User
 from app.models.master import MasterConfig, MasterPlan
-from app.models.bot_state import UserBotState
+from app.models.bot_state import UserBotState, is_bot_enabled
 from app.models.position import Position
 
 router = APIRouter()
@@ -85,15 +85,18 @@ def master_status(current_user: User = Depends(get_current_user), db: Session = 
             is_alive = (datetime.now(timezone.utc) - ts) < timedelta(seconds=HEARTBEAT_FRESH_SECONDS)
         except ValueError:
             is_alive = False
+    enabled = is_bot_enabled(db, current_user.id, "master_enabled")
     return {
         "success": True,
-        "isAlive": is_alive,
-        "status": last.get("status", "stopped"),
+        "isAlive": bool(enabled and is_alive),
+        "enabled": enabled,
+        "status": last.get("status", "stopped") if enabled else "stopped",
         "lastRun": last_run,
         "watchlist": data.get("watchlist", []),
         "lastResults": [
             {"symbol": r.get("symbol"), "timeframe": "", "allPass": r.get("action") == "enter",
-             "side": r.get("side"), "signal": r.get("reason") or "", "strategy": r.get("strategy")}
+             "side": r.get("side"), "signal": r.get("reason") or "", "strategy": r.get("strategy"),
+             "conditions": r.get("conditions", [])}
             for r in results
         ],
     }

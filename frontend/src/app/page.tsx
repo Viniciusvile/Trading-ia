@@ -219,7 +219,7 @@ export default function InicioPage() {
           <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
             <Stat
               label="Taxa de acerto"
-              value={loading ? "..." : winRate30d != null ? `${Math.round(winRate30d * 100)}%` : "—"}
+              value={loading ? "..." : winRate30d != null ? `${Math.round(winRate30d)}%` : "—"}
               hint={winRate30d != null ? `${trades30d} trades em 30 dias · clique p/ detalhes` : "sem trades em 30 dias"}
               size="sm"
             />
@@ -404,7 +404,7 @@ export default function InicioPage() {
             <div className="text-xs text-[var(--color-text-2)] space-y-1">
               <div className="flex justify-between"><span className="text-muted">Melhor operação</span><span className="font-medium text-[var(--color-text-up)]">+{fmtUSD(stats30d.bestPnl)}</span></div>
               <div className="flex justify-between"><span className="text-muted">Pior operação</span><span className="font-medium text-[var(--color-text-down)]">{fmtUSD(stats30d.worstPnl)}</span></div>
-              <div className="flex justify-between"><span className="text-muted">Taxa de acerto</span><span className="font-medium">{winRate30d != null ? `${Math.round(winRate30d * 100)}%` : "—"}</span></div>
+              <div className="flex justify-between"><span className="text-muted">Taxa de acerto</span><span className="font-medium">{winRate30d != null ? `${Math.round(winRate30d)}%` : "—"}</span></div>
             </div>
 
             {/* Nova Seção: Diagnóstico de Duração e Tipo de Fechamento */}

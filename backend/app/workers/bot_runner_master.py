@@ -71,7 +71,8 @@ def run_masterbot():
                     user_results.append({"symbol": symbol, "error": str(e)})
                     continue
                 rec = {"symbol": symbol, "plan": plan.get("name"), "strategy": plan.get("strategy"),
-                       "action": d["action"], "side": d.get("side"), "reason": d.get("reason")}
+                       "action": d["action"], "side": d.get("side"), "reason": d.get("reason"),
+                       "conditions": d.get("conditions", [])}
                 user_results.append(rec)
                 decisions.append({"user": cfg.user_id, **rec})
 

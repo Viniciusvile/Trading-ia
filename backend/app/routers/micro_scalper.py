@@ -18,6 +18,7 @@ from app.database import get_db
 from app.deps import get_current_user
 from app.models.user import User
 from app.models.micro import UserMicroConfig, MicroSession, MicroHeartbeat
+from app.models.bot_state import is_bot_enabled
 from app.services import micro_scalper as scalper
 
 router = APIRouter()
@@ -31,10 +32,13 @@ def status(current_user: User = Depends(get_current_user), db: Session = Depends
     cfg = db.get(UserMicroConfig, current_user.id)
     data = (cfg.data if cfg else {}) or {}
     hb = db.get(MicroHeartbeat, 1)
-    running = bool(
+    hb_fresh = bool(
         hb and hb.ts and (datetime.now(timezone.utc) - hb.ts) < timedelta(seconds=HEARTBEAT_FRESH_SECONDS)
     )
-    return {"success": True, "running": running, "activeSymbols": scalper.active_symbols(data)}
+    # running = ligado pelo usuario (micro_enabled) E worker vivo (heartbeat).
+    enabled = is_bot_enabled(db, current_user.id, "micro_enabled")
+    return {"success": True, "running": bool(enabled and hb_fresh),
+            "enabled": enabled, "activeSymbols": scalper.active_symbols(data)}
 
 
 @router.get("/config")

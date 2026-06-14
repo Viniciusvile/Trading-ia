@@ -25,24 +25,24 @@ def decide_signal_for_plan(plan: dict, candles: list[dict]) -> dict:
     if strategy == "range-v2":
         safety = mb.run_safety_check_range_v2(candles, plan.get("filters") or {})
         if not safety["allPass"] or not safety["side"]:
-            return {"action": "none", "reason": "range-v2 sem setup", "strategy": strategy}
+            return {"action": "none", "reason": "range-v2 sem setup", "strategy": strategy, "conditions": safety.get("results", [])}
         if safety["side"] == "SHORT" and not allow_short:
-            return {"action": "none", "reason": "short bloqueado (spot)", "strategy": strategy}
+            return {"action": "none", "reason": "short bloqueado (spot)", "strategy": strategy, "conditions": safety.get("results", [])}
         # tp 'boundary' (padrao do range) usa alvo do proprio sinal; senao sl/tp do plano
         tp_cfg = plan.get("tp")
         use_boundary = not tp_cfg or tp_cfg.get("type") == "boundary"
         if use_boundary and safety["takeProfitPrice"] is not None and safety["stopPrice"] is not None:
             return {"action": "enter", "side": safety["side"], "stop": safety["stopPrice"],
-                    "tp": safety["takeProfitPrice"], "strategy": strategy}
+                    "tp": safety["takeProfitPrice"], "strategy": strategy, "conditions": safety.get("results", [])}
         st = mb.calc_plan_stop_tp(price, atr, plan, safety["side"])
-        return {"action": "enter", "side": safety["side"], "stop": st["stop"], "tp": st["tp"], "strategy": strategy}
+        return {"action": "enter", "side": safety["side"], "stop": st["stop"], "tp": st["tp"], "strategy": strategy, "conditions": safety.get("results", [])}
 
     # warrior (long-only, seguidor de tendencia) — default
     safety = mb.run_safety_check_warrior(candles)
     if not safety["allPass"]:
-        return {"action": "none", "reason": "warrior sem setup", "strategy": "warrior"}
+        return {"action": "none", "reason": "warrior sem setup", "strategy": "warrior", "conditions": safety.get("results", [])}
     st = mb.calc_plan_stop_tp(price, atr, plan, "LONG")
-    return {"action": "enter", "side": "LONG", "stop": st["stop"], "tp": st["tp"], "strategy": "warrior"}
+    return {"action": "enter", "side": "LONG", "stop": st["stop"], "tp": st["tp"], "strategy": "warrior", "conditions": safety.get("results", [])}
 
 
 def get_active_plan_names(rules: dict) -> list[str]:
