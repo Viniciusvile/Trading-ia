@@ -540,25 +540,31 @@ export const api = {
 
   // ─── Compartilhamento & Importação de estratégias ───
   botStrategyShare: (name: string) =>
-    safeJson<{ success: boolean; code?: string; error?: string }>(
-      `/bot/strategies/${encodeURIComponent(name)}/share`,
-      { method: "POST" },
-      { success: false, error: "Falha ao compartilhar estratégia" },
-    ),
+    BACKEND_FLAGS.strategies
+      ? apiV2.botStrategyShare(name)
+      : safeJson<{ success: boolean; code?: string; error?: string }>(
+          `/bot/strategies/${encodeURIComponent(name)}/share`,
+          { method: "POST" },
+          { success: false, error: "Falha ao compartilhar estratégia" },
+        ),
 
-  botStrategySharedGet: (code: string) =>
-    jsonAllowError<{ success: boolean; strategy?: ImportedStrategy & { code: string }; error?: string }>(
-      `/bot/strategies/shared/${encodeURIComponent(code)}`,
-      undefined,
-      { success: false, error: "Código inválido" },
-    ),
+  botStrategySharedGet: (code: string): Promise<{ success: boolean; strategy?: ImportedStrategy & { code: string }; error?: string }> =>
+    BACKEND_FLAGS.strategies
+      ? (apiV2.botStrategySharedGet(code) as Promise<{ success: boolean; strategy?: ImportedStrategy & { code: string }; error?: string }>)
+      : jsonAllowError<{ success: boolean; strategy?: ImportedStrategy & { code: string }; error?: string }>(
+          `/bot/strategies/shared/${encodeURIComponent(code)}`,
+          undefined,
+          { success: false, error: "Código inválido" },
+        ),
 
-  botStrategyImportTradingView: (payload: { url?: string; rawPineScript?: string }) =>
-    jsonAllowError<{ success: boolean; strategy?: ImportedStrategy; error?: string; reason?: string }>(
-      "/bot/strategies/import-tradingview",
-      { method: "POST", body: JSON.stringify(payload) },
-      { success: false, error: "Falha ao analisar o script" },
-    ),
+  botStrategyImportTradingView: (payload: { url?: string; rawPineScript?: string }): Promise<{ success: boolean; strategy?: ImportedStrategy; error?: string; reason?: string }> =>
+    BACKEND_FLAGS.strategies
+      ? (apiV2.botStrategyImportTradingView(payload) as Promise<{ success: boolean; strategy?: ImportedStrategy; error?: string; reason?: string }>)
+      : jsonAllowError<{ success: boolean; strategy?: ImportedStrategy; error?: string; reason?: string }>(
+          "/bot/strategies/import-tradingview",
+          { method: "POST", body: JSON.stringify(payload) },
+          { success: false, error: "Falha ao analisar o script" },
+        ),
 
   botBacktest: (plan: any) =>
     BACKEND_FLAGS.strategies
@@ -669,6 +675,9 @@ export const api = {
           body: JSON.stringify(params),
         }, { success: false, error: "Falha na autenticação" }),
 
+  loginGoogle: (credential: string) =>
+    apiV2.loginGoogle(credential),
+
   register: (params: { email: string; password?: string }) =>
     BACKEND_FLAGS.auth
       ? apiV2.register(params)
@@ -714,6 +723,10 @@ export interface ImportedStrategy {
   sl: any;
   tp: any;
   winRateTarget?: number | null;
+  /** Recomendação da IA (timeframe/ativo) — só vem na importação via TradingView. */
+  recommendedTimeframes?: string[];
+  recommendedSymbols?: string[];
+  recommendationReason?: string;
 }
 
 export interface SystemNotification {

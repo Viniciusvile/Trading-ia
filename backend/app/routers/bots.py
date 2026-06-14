@@ -552,6 +552,37 @@ def _state_ma_filters(raw_filters) -> dict:
     return out
 
 
+_VALID_TIMEFRAMES = {"5M", "15M", "30M", "1H", "4H", "1D"}
+
+
+def _clean_reco_timeframes(raw) -> list[str]:
+    """Filtra/normaliza os timeframes recomendados para os válidos do sistema."""
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for tf in raw:
+        if not isinstance(tf, str):
+            continue
+        norm = tf.strip().upper().replace("MIN", "M").replace(" ", "")
+        if norm in _VALID_TIMEFRAMES and norm not in out:
+            out.append("1H" if norm == "1H" else norm)
+    return out[:3]
+
+
+def _clean_reco_symbols(raw) -> list[str]:
+    """Mantém só pares cripto USDT (o que o bot opera)."""
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for s in raw:
+        if not isinstance(s, str):
+            continue
+        sym = s.strip().upper().replace("/", "").replace("-", "")
+        if sym.endswith("USDT") and len(sym) > 4 and sym not in out:
+            out.append(sym)
+    return out[:4]
+
+
 def _normalize_imported_strategy(raw) -> dict:
     out = raw if isinstance(raw, dict) else {}
     name = out.get("name")
@@ -564,16 +595,32 @@ def _normalize_imported_strategy(raw) -> dict:
         filters = _state_ma_filters(out.get("filters"))
     else:
         filters = _flatten_imported_filters(out.get("filters"))
+
+    reco_tfs = _clean_reco_timeframes(out.get("recommendedTimeframes"))
+    reco_syms = _clean_reco_symbols(out.get("recommendedSymbols"))
+    reason = out.get("recommendationReason")
+    reason = reason.strip() if isinstance(reason, str) else ""
+
+    # "Sugerir + preencher": usa a recomendação como valor inicial dos campos da
+    # estratégia (o usuário ainda edita antes de salvar). Cai nos defaults se vazio.
+    final_symbols = (symbols if isinstance(symbols, list) and symbols
+                     else (reco_syms or ["BTCUSDT"]))
+    final_tfs = (timeframes if isinstance(timeframes, list) and timeframes
+                 else (reco_tfs or ["1H"]))
+
     return {
         "name": name.strip() if isinstance(name, str) and name.strip() else "Estratégia Importada",
         "description": out.get("description") if isinstance(out.get("description"), str) else "",
         "strategy": strategy,
-        "symbols": symbols if isinstance(symbols, list) and symbols else ["BTCUSDT"],
-        "timeframes": timeframes if isinstance(timeframes, list) and timeframes else ["1H"],
+        "symbols": final_symbols,
+        "timeframes": final_tfs,
         "mode": "futures" if out.get("mode") == "futures" else "spot",
         "filters": filters,
         "sl": _normalize_sl_tp(out.get("sl"), 1.5),
         "tp": _normalize_sl_tp(out.get("tp"), 3.0),
+        "recommendedTimeframes": reco_tfs,
+        "recommendedSymbols": reco_syms,
+        "recommendationReason": reason,
     }
 
 
@@ -599,7 +646,13 @@ def _map_pine_with_gemini(pine_script: str, api_key: str) -> dict:
         "1. Indicadores utilizados (ex: RSI, Bandas de Bollinger, Médias Móveis, MACD, etc.).\n"
         "2. Parâmetros numéricos associados (ex: período do RSI, desvio padrão das BBs, comprimento das EMAs).\n"
         "3. Condições e gatilhos de Entrada (compra/venda).\n"
-        "4. Valores de Stop Loss (SL) e Take Profit (TP), mapeando-os como porcentagem decimal.\n\n"
+        "4. Valores de Stop Loss (SL) e Take Profit (TP), mapeando-os como porcentagem decimal.\n"
+        "5. RECOMENDACAO de uso: com base na natureza da estrategia (frequencia de sinais, "
+        "horizonte, sensibilidade a ruido, volatilidade ideal), recomende o(s) timeframe(s) e o(s) "
+        "ativo(s) MAIS adequados. IMPORTANTE: o robo opera APENAS criptomoedas na Binance em pares "
+        "USDT. Portanto recomende SOMENTE pares cripto USDT (ex.: BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT, "
+        "XRPUSDT, ADAUSDT, AVAXUSDT, LINKUSDT). Timeframes validos: 5m, 15m, 30m, 1H, 4H, 1D. "
+        "Justifique em 1-2 frases curtas em portugues.\n\n"
         "O campo \"strategy\" deve ser UM destes valores quando o script corresponder:\n"
         "- \"volatility-envelope\": indicadores de envelope/banda de volatilidade ADAPTATIVA "
         "que usam ATR + uma centerline adaptativa (efficiency ratio de Kaufman, choppy/trend speed) "
@@ -632,7 +685,10 @@ def _map_pine_with_gemini(pine_script: str, api_key: str) -> dict:
         '  "strategy": "volatility-envelope" | "state-ma-cross" | "range-v2" | "warrior" | "custom",\n'
         '  "filters": {},\n'
         '  "sl": { "type": "percentage", "value": 1.5 },\n'
-        '  "tp": { "type": "percentage", "value": 3.0 }\n'
+        '  "tp": { "type": "percentage", "value": 3.0 },\n'
+        '  "recommendedTimeframes": ["4H", "1D"],\n'
+        '  "recommendedSymbols": ["BTCUSDT", "ETHUSDT"],\n'
+        '  "recommendationReason": "Por que esses timeframes e ativos combinam com a estratégia."\n'
         '}\n\n'
         "### Pine Script:\n```\n" + pine_script[:20000] + "\n```"
     )

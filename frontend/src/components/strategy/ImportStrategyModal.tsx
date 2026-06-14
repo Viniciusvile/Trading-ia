@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, KeyRound, FileCode2, ArrowLeft, Check, AlertTriangle } from "lucide-react";
+import { Sparkles, KeyRound, FileCode2, ArrowLeft, Check, AlertTriangle, Lightbulb, Clock, Coins } from "lucide-react";
 import { Modal, Button, Input } from "@/components/ui";
 import { api, type ImportedStrategy } from "@/lib/api";
 
@@ -241,6 +241,58 @@ export function ImportStrategyModal({ onClose, onSaved, initialCode }: ImportStr
               <span className="block font-semibold text-[var(--color-text)]">{preview.mode}</span>
             </div>
           </div>
+
+          {/* Recomendação da IA: timeframe + ativos sugeridos para esta estratégia */}
+          {(preview.recommendedTimeframes?.length || preview.recommendedSymbols?.length || preview.recommendationReason) && (
+            <div className="p-3.5 rounded-[var(--radius-sm)] border border-[var(--color-brand-500)]/30 bg-[var(--color-brand-500)]/8 space-y-2.5">
+              <span className="flex items-center gap-2 text-xs font-semibold text-[var(--color-text)]">
+                <Lightbulb size={15} className="text-[var(--color-brand-500)]" />
+                Recomendação da IA
+              </span>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <span className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-muted">
+                    <Clock size={11} /> Timeframe
+                  </span>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {preview.recommendedTimeframes?.length ? (
+                      preview.recommendedTimeframes.map((tf) => (
+                        <span key={tf} className="px-2 py-0.5 rounded-[var(--radius-xs)] bg-[var(--color-brand-500)]/15 text-[11px] font-semibold text-[var(--color-brand-500)]">
+                          {tf}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-[11px] text-muted">—</span>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <span className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-muted">
+                    <Coins size={11} /> Ativos
+                  </span>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {preview.recommendedSymbols?.length ? (
+                      preview.recommendedSymbols.map((s) => (
+                        <span key={s} className="px-2 py-0.5 rounded-[var(--radius-xs)] bg-[var(--color-brand-500)]/15 text-[11px] font-semibold text-[var(--color-brand-500)]">
+                          {s}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-[11px] text-muted">—</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {preview.recommendationReason && (
+                <p className="text-[11px] leading-relaxed text-[var(--color-text-2)]">
+                  {preview.recommendationReason}
+                </p>
+              )}
+              <p className="text-[10px] text-muted">
+                Já preenchemos os campos de ativo e timeframe com a sugestão — você pode ajustar antes de salvar.
+              </p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <span className="text-xs font-semibold text-[var(--color-text)]">Parâmetros mapeados</span>
