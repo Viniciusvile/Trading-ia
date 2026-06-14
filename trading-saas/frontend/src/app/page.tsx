@@ -150,6 +150,13 @@ export default function InicioPage() {
           aria-hidden
           className="absolute -top-24 left-1/2 -translate-x-1/2 h-64 w-[480px] rounded-full bg-[var(--color-brand-500)]/10 blur-3xl"
         />
+        {/* Subtle Watermark Logo in the background */}
+        <div className="absolute right-12 top-1/2 -translate-y-1/2 opacity-[0.04] pointer-events-none hidden md:block text-[var(--color-text)]">
+          <svg className="w-32 h-32" viewBox="0 0 48 48" fill="none">
+            <path d="M13 14 L23 32 L31 18 L40 8" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M34 8 L40 8 L40 14" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </div>
         <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div>
             <div className="text-[11px] text-muted capitalize">
@@ -219,7 +226,7 @@ export default function InicioPage() {
           <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
             <Stat
               label="Taxa de acerto"
-              value={loading ? "..." : winRate30d != null ? `${Math.round(winRate30d * 100)}%` : "—"}
+              value={loading ? "..." : winRate30d != null ? `${Math.round(winRate30d)}%` : "—"}
               hint={winRate30d != null ? `${trades30d} trades em 30 dias · clique p/ detalhes` : "sem trades em 30 dias"}
               size="sm"
             />
@@ -404,7 +411,7 @@ export default function InicioPage() {
             <div className="text-xs text-[var(--color-text-2)] space-y-1">
               <div className="flex justify-between"><span className="text-muted">Melhor operação</span><span className="font-medium text-[var(--color-text-up)]">+{fmtUSD(stats30d.bestPnl)}</span></div>
               <div className="flex justify-between"><span className="text-muted">Pior operação</span><span className="font-medium text-[var(--color-text-down)]">{fmtUSD(stats30d.worstPnl)}</span></div>
-              <div className="flex justify-between"><span className="text-muted">Taxa de acerto</span><span className="font-medium">{winRate30d != null ? `${Math.round(winRate30d * 100)}%` : "—"}</span></div>
+              <div className="flex justify-between"><span className="text-muted">Taxa de acerto</span><span className="font-medium">{winRate30d != null ? `${Math.round(winRate30d)}%` : "—"}</span></div>
             </div>
 
             {/* Nova Seção: Diagnóstico de Duração e Tipo de Fechamento */}

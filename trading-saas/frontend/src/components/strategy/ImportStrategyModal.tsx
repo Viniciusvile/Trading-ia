@@ -1,9 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, KeyRound, FileCode2, ArrowLeft, Check } from "lucide-react";
+import { Sparkles, KeyRound, FileCode2, ArrowLeft, Check, AlertTriangle, Lightbulb, Clock, Coins } from "lucide-react";
 import { Modal, Button, Input } from "@/components/ui";
 import { api, type ImportedStrategy } from "@/lib/api";
+
+/** Lógicas que o motor do bot realmente executa. Qualquer outra (ex: "custom")
+ * cai no fallback "warrior" ao vivo — ou seja, NÃO opera o indicador importado. */
+const SUPPORTED_STRATEGIES = new Set([
+  "warrior",
+  "range-v2",
+  "volatility-envelope",
+  "state-ma-cross",
+  "micro-dip",
+  "turbo-reversion",
+]);
 
 interface ImportStrategyModalProps {
   onClose: () => void;
@@ -59,6 +70,7 @@ export function ImportStrategyModal({ onClose, onSaved, initialCode }: ImportStr
   // Resultado mapeado → tela de revisão
   const [preview, setPreview] = useState<ImportedStrategy | null>(null);
   const [saving, setSaving] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const pasteRef = useRef<HTMLTextAreaElement>(null);
 
   // Se veio com código no link, busca automaticamente ao abrir.
@@ -151,6 +163,27 @@ export function ImportStrategyModal({ onClose, onSaved, initialCode }: ImportStr
         winRateTarget: preview.winRateTarget,
       });
       if (res.success) {
+        // Roda o backtest logo após criar, para a estratégia já aparecer com
+        // win rate / P.factor / lucro (como as demais), em vez de "Sem análise".
+        setSaving(false);
+        setAnalyzing(true);
+        try {
+          await api.botBacktest({
+            name: preview.name,
+            strategy: preview.strategy,
+            symbols: preview.symbols,
+            timeframes: preview.timeframes,
+            mode: preview.mode,
+            sl: preview.sl,
+            tp: preview.tp,
+            filters: preview.filters,
+            winRateTarget: preview.winRateTarget,
+          });
+        } catch {
+          /* análise falhou — a estratégia já foi salva; usuário pode reanalisar em Estatísticas */
+        } finally {
+          setAnalyzing(false);
+        }
         onSaved();
         onClose();
       } else {
@@ -178,11 +211,11 @@ export function ImportStrategyModal({ onClose, onSaved, initialCode }: ImportStr
         }
         footer={
           <>
-            <Button variant="ghost" onClick={() => setPreview(null)} leftIcon={<ArrowLeft size={14} />}>
+            <Button variant="ghost" disabled={saving || analyzing} onClick={() => setPreview(null)} leftIcon={<ArrowLeft size={14} />}>
               Voltar
             </Button>
-            <Button variant="success" loading={saving} onClick={saveImported} leftIcon={<Check size={14} />}>
-              Salvar e Criar
+            <Button variant="success" loading={saving || analyzing} onClick={saveImported} leftIcon={<Check size={14} />}>
+              {analyzing ? "Analisando backtest…" : "Salvar e Criar"}
             </Button>
           </>
         }
@@ -207,6 +240,19 @@ export function ImportStrategyModal({ onClose, onSaved, initialCode }: ImportStr
             />
           </div>
 
+          {!SUPPORTED_STRATEGIES.has(preview.strategy) && (
+            <div className="flex gap-2.5 p-3 rounded-[var(--radius-sm)] border border-[var(--color-warn-600,#b45309)]/40 bg-[var(--color-warn-600,#b45309)]/10">
+              <AlertTriangle size={16} className="text-[var(--color-text-down)] shrink-0 mt-0.5" />
+              <p className="text-[11px] leading-relaxed text-[var(--color-text-2)]">
+                <span className="font-semibold text-[var(--color-text)]">Lógica não suportada pelo robô.</span>{" "}
+                Este script usa uma estratégia que o motor ainda não sabe executar. Você pode salvá-la
+                como referência, mas se ativá-la o bot operará com a <span className="font-semibold">regra
+                padrão (Warrior — seguidor de tendência)</span>, e não com o indicador importado. O
+                backtest também refletirá a regra padrão, não o script.
+              </p>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div className="p-3 rounded-[var(--radius-sm)] bg-[var(--color-surface-3)] border border-[var(--color-border)]">
               <span className="text-muted">Lógica base</span>
@@ -217,6 +263,58 @@ export function ImportStrategyModal({ onClose, onSaved, initialCode }: ImportStr
               <span className="block font-semibold text-[var(--color-text)]">{preview.mode}</span>
             </div>
           </div>
+
+          {/* Recomendação da IA: timeframe + ativos sugeridos para esta estratégia */}
+          {(preview.recommendedTimeframes?.length || preview.recommendedSymbols?.length || preview.recommendationReason) && (
+            <div className="p-3.5 rounded-[var(--radius-sm)] border border-[var(--color-brand-500)]/30 bg-[var(--color-brand-500)]/8 space-y-2.5">
+              <span className="flex items-center gap-2 text-xs font-semibold text-[var(--color-text)]">
+                <Lightbulb size={15} className="text-[var(--color-brand-500)]" />
+                Recomendação da IA
+              </span>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <span className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-muted">
+                    <Clock size={11} /> Timeframe
+                  </span>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {preview.recommendedTimeframes?.length ? (
+                      preview.recommendedTimeframes.map((tf) => (
+                        <span key={tf} className="px-2 py-0.5 rounded-[var(--radius-xs)] bg-[var(--color-brand-500)]/15 text-[11px] font-semibold text-[var(--color-brand-500)]">
+                          {tf}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-[11px] text-muted">—</span>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <span className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-muted">
+                    <Coins size={11} /> Ativos
+                  </span>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {preview.recommendedSymbols?.length ? (
+                      preview.recommendedSymbols.map((s) => (
+                        <span key={s} className="px-2 py-0.5 rounded-[var(--radius-xs)] bg-[var(--color-brand-500)]/15 text-[11px] font-semibold text-[var(--color-brand-500)]">
+                          {s}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-[11px] text-muted">—</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {preview.recommendationReason && (
+                <p className="text-[11px] leading-relaxed text-[var(--color-text-2)]">
+                  {preview.recommendationReason}
+                </p>
+              )}
+              <p className="text-[10px] text-muted">
+                Já preenchemos os campos de ativo e timeframe com a sugestão — você pode ajustar antes de salvar.
+              </p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <span className="text-xs font-semibold text-[var(--color-text)]">Parâmetros mapeados</span>

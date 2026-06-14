@@ -17,7 +17,7 @@ export function Sidebar() {
         </div>
         <div className="min-w-0">
           <div className="text-sm font-bold text-[var(--color-text)] truncate">
-            Trading SaaS
+            Vexa Cripto
           </div>
           <div className="text-[10px] uppercase tracking-wider text-muted">
             painel de operações

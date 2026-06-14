@@ -253,38 +253,59 @@ export default function EstrategiasPage() {
                 </div>
 
                 {/* Actions */}
-                <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end sm:justify-start mt-2 sm:mt-0 shrink-0">
                   <Button 
                     variant={s.active ? "danger" : "success"} 
                     size="sm"
                     onClick={() => handleActivateToggle(s)}
-                    className="flex items-center gap-1"
+                    className="flex items-center gap-1 justify-center flex-1 sm:flex-none min-h-[32px] px-3 text-xs"
                   >
                     {s.active ? (
                       <>
-                        <Square size={12} fill="currentColor" /> Desativar
+                        <Square size={10} fill="currentColor" /> Desativar
                       </>
                     ) : (
                       <>
-                        <Play size={12} fill="currentColor" /> Ativar
+                        <Play size={10} fill="currentColor" /> Ativar
                       </>
                     )}
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => setEditingStrategy(s)}>
-                    <SlidersHorizontal size={14} /> Personalizar
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => setEditingStrategy(s)}
+                    className="flex items-center gap-1 justify-center min-h-[32px]"
+                    title="Personalizar"
+                  >
+                    <SlidersHorizontal size={14} />
+                    <span className="hidden sm:inline">Personalizar</span>
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => openStats(s)}>
-                    <BarChart3 size={14} /> Estatísticas
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => openStats(s)}
+                    className="flex items-center gap-1 justify-center min-h-[32px]"
+                    title="Estatísticas"
+                  >
+                    <BarChart3 size={14} />
+                    <span className="hidden sm:inline">Estatísticas</span>
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => setSharingStrategy(s.name)}
                     title="Compartilhar estratégia"
+                    className="h-8 w-8 p-0 flex items-center justify-center shrink-0"
                   >
                     <Share2 size={14} />
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={() => handleDelete(s.name)} className="text-[var(--color-text-down)] hover:bg-[var(--color-text-down)]/10">
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={() => handleDelete(s.name)} 
+                    className="text-[var(--color-text-down)] hover:bg-[var(--color-text-down)]/10 h-8 w-8 p-0 flex items-center justify-center shrink-0"
+                    title="Excluir"
+                  >
                     <Trash2 size={14} />
                   </Button>
                 </div>

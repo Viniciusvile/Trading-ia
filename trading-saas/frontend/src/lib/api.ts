@@ -6,6 +6,9 @@
  * Em dev local sem servidor: as funções devolvem dados vazios para a UI não quebrar.
  */
 
+import { BACKEND_FLAGS } from "@/config/backend";
+import { apiV2 } from "./apiV2";
+
 const BASE = "/api/legacy";
 
 export interface ScalperPlan {
@@ -178,15 +181,17 @@ export const api = {
   health: () => safeJson<{ ok: boolean }>("/health", undefined, { ok: false }),
 
   quote: (symbol: string) =>
-    safeJson<{
-      symbol: string;
-      last: number;
-      change: number;
-      changePct: number;
-      high: number;
-      low: number;
-      volume: number;
-    } | null>(`/quote?symbol=${encodeURIComponent(symbol)}`, undefined, null),
+    BACKEND_FLAGS.market
+      ? apiV2.quote(symbol)
+      : safeJson<{
+          symbol: string;
+          last: number;
+          change: number;
+          changePct: number;
+          high: number;
+          low: number;
+          volume: number;
+        } | null>(`/quote?symbol=${encodeURIComponent(symbol)}`, undefined, null),
 
   state: () =>
     safeJson<{
@@ -196,13 +201,15 @@ export const api = {
     } | null>("/state", undefined, null),
 
   ohlcv: (symbol: string, timeframe = "1D", count = 30) =>
-    safeJson<{
-      bars: { time: number; open: number; high: number; low: number; close: number; volume: number }[];
-    } | null>(
-      `/ohlcv?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}&count=${count}`,
-      undefined,
-      null,
-    ),
+    BACKEND_FLAGS.market
+      ? apiV2.ohlcv(symbol, timeframe, count)
+      : safeJson<{
+          bars: { time: number; open: number; high: number; low: number; close: number; volume: number }[];
+        } | null>(
+          `/ohlcv?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}&count=${count}`,
+          undefined,
+          null,
+        ),
 
   indicators: () =>
     safeJson<Record<string, number | string>>("/indicators", undefined, {}),
@@ -233,7 +240,9 @@ export const api = {
   alertDelete: () => safeJson("/alerts", { method: "DELETE" }),
 
   botConfig: () =>
-    safeJson<{
+    BACKEND_FLAGS.bots
+      ? (apiV2.botConfig() as ReturnType<typeof safeJson>)
+      : safeJson<{
       success: boolean;
       strategyKey: string;
       symbol: string;
@@ -252,64 +261,97 @@ export const api = {
     safeJson<{ success: boolean; trades?: any[] }>("/bot/log", undefined, { success: false }),
 
   botMasterRawLog: () =>
-    safeJson<{ success: boolean; lines: string[]; message?: string }>("/bot/master/raw-log", undefined, { success: false, lines: [] }),
+    BACKEND_FLAGS.bots
+      ? apiV2.botMasterRawLog()
+      : safeJson<{ success: boolean; lines: string[]; message?: string }>("/bot/master/raw-log", undefined, { success: false, lines: [] }),
 
   botEmergencySell: () =>
-    safeJson<{ success: boolean; message?: string }>("/bot/emergency-sell", { method: "POST" }),
+    BACKEND_FLAGS.positions
+      ? apiV2.botEmergencySell()
+      : safeJson<{ success: boolean; message?: string }>("/bot/emergency-sell", { method: "POST" }),
 
   botBalance: () =>
-    safeJson<{ success: boolean; spot?: number; futures?: number }>("/bot/balance", undefined, { success: false }),
+    BACKEND_FLAGS.bots
+      ? apiV2.botBalance()
+      : safeJson<{ success: boolean; spot?: number; futures?: number }>("/bot/balance", undefined, { success: false }),
 
   botMasterStatus: () =>
-    safeJson<{
-      success: boolean;
-      isAlive: boolean;
-      status?: string;
-      lastRun?: string;
-      nextRun?: string;
-      watchlist?: string[];
-      openPositions?: number;
-      lastResults?: {
-        symbol: string;
-        timeframe: string;
-        allPass: boolean;
-        side?: string | null;
-        signal: string;
-        price?: number | null;
-        strategy?: string | null;
-        conditions?: {
-          label: string;
-          pass: boolean;
-          required: string | number;
-          actual: string | number;
-        }[];
-      }[];
-    }>("/bot/master/status", undefined, { success: false, isAlive: false }),
+    BACKEND_FLAGS.bots
+      ? (apiV2.botMasterStatus() as Promise<{ success: boolean; isAlive: boolean }>)
+      : safeJson<{
+          success: boolean;
+          isAlive: boolean;
+          status?: string;
+          lastRun?: string;
+          nextRun?: string;
+          watchlist?: string[];
+          openPositions?: number;
+          lastResults?: {
+            symbol: string;
+            timeframe: string;
+            allPass: boolean;
+            side?: string | null;
+            signal: string;
+            price?: number | null;
+            strategy?: string | null;
+            conditions?: {
+              label: string;
+              pass: boolean;
+              required: string | number;
+              actual: string | number;
+            }[];
+          }[];
+        }>("/bot/master/status", undefined, { success: false, isAlive: false }),
 
   botMasterStart: () =>
-    safeJson<{ success: boolean; error?: string }>("/bot/master/start", { method: "POST" }),
+    BACKEND_FLAGS.bots
+      ? apiV2.botMasterStart()
+      : safeJson<{ success: boolean; error?: string }>("/bot/master/start", { method: "POST" }),
 
   botMasterStop: () =>
-    safeJson<{ success: boolean; error?: string }>("/bot/master/stop", { method: "POST" }),
+    BACKEND_FLAGS.bots
+      ? apiV2.botMasterStop()
+      : safeJson<{ success: boolean; error?: string }>("/bot/master/stop", { method: "POST" }),
 
   microScalperStatus: () =>
-    safeJson<{ success: boolean; running: boolean; activeSymbols?: string[] }>("/micro-scalper/status", undefined, { success: false, running: false }),
+    BACKEND_FLAGS.bots
+      ? apiV2.microScalperStatus()
+      : safeJson<{ success: boolean; running: boolean; activeSymbols?: string[] }>("/micro-scalper/status", undefined, { success: false, running: false }),
+
+  microScalperLog: (limit = 25) =>
+    BACKEND_FLAGS.bots
+      ? apiV2.microScalperLog(limit)
+      : safeJson<{ success: boolean; trades: { t: string; event?: string; symbol?: string; qty?: number; entryPrice?: number; signal?: string; ok?: boolean }[] }>(`/micro-scalper/log?limit=${limit}`, undefined, { success: false, trades: [] }),
+
+  microScalperConfigSave: (patch: Record<string, unknown>) =>
+    BACKEND_FLAGS.bots
+      ? apiV2.microScalperConfigSave(patch)
+      : safeJson<{ success: boolean; error?: string }>("/micro-scalper/config", { method: "PATCH", body: JSON.stringify(patch) }, { success: false }),
+
+  botConfigSave: (patch: Record<string, unknown>) =>
+    BACKEND_FLAGS.bots
+      ? apiV2.botConfigSave(patch)
+      : safeJson<{ success: boolean; error?: string }>("/bot/config", { method: "PATCH", body: JSON.stringify(patch) }, { success: false }),
 
   adaptiveStatus: () =>
-    safeJson<AdaptiveStatus>("/adaptive/status", undefined, {
-      success: false,
-      running: false,
-      paper: true,
-      params: null,
-      openTrades: [],
-      stats30d: { trades: 0, winRate: 0, pnlPct: 0 },
-      recentTrades: [],
-      lessons: [],
-      reviews: [],
-    }),
+    BACKEND_FLAGS.bots
+      ? (apiV2.adaptiveStatus() as Promise<AdaptiveStatus>)
+      : safeJson<AdaptiveStatus>("/adaptive/status", undefined, {
+          success: false,
+          running: false,
+          paper: true,
+          params: null,
+          openTrades: [],
+          stats30d: { trades: 0, winRate: 0, pnlPct: 0 },
+          recentTrades: [],
+          lessons: [],
+          reviews: [],
+        }),
 
   dashboardSummary: (tzOffset?: number) =>
-    safeJson<{
+    BACKEND_FLAGS.dashboard
+      ? (apiV2.dashboardSummary(tzOffset) as ReturnType<typeof safeJson>)
+      : safeJson<{
       success: boolean;
       pnlToday: number;
       operationsToday: number;
@@ -342,32 +384,54 @@ export const api = {
     }),
 
   microScalperStart: () =>
-    safeJson<{ success: boolean; error?: string }>("/micro-scalper/start", { method: "POST" }),
+    BACKEND_FLAGS.bots
+      ? apiV2.microScalperStart()
+      : safeJson<{ success: boolean; error?: string }>("/micro-scalper/start", { method: "POST" }),
 
   microScalperStop: () =>
-    safeJson<{ success: boolean; error?: string }>("/micro-scalper/stop", { method: "POST" }),
+    BACKEND_FLAGS.bots
+      ? apiV2.microScalperStop()
+      : safeJson<{ success: boolean; error?: string }>("/micro-scalper/stop", { method: "POST" }),
 
   botFuturesStatus: () =>
-    safeJson<{ success: boolean; isAlive: boolean; status?: string }>("/bot/futures/status", undefined, { success: false, isAlive: false }),
+    BACKEND_FLAGS.bots
+      ? apiV2.botFuturesStatus()
+      : safeJson<{ success: boolean; isAlive: boolean; status?: string }>("/bot/futures/status", undefined, { success: false, isAlive: false }),
 
   botFuturesStart: () =>
-    safeJson<{ success: boolean; error?: string }>("/bot/futures/start", { method: "POST" }),
+    BACKEND_FLAGS.bots
+      ? apiV2.botFuturesStart()
+      : safeJson<{ success: boolean; error?: string }>("/bot/futures/start", { method: "POST" }),
 
   botFuturesStop: () =>
-    safeJson<{ success: boolean; error?: string }>("/bot/futures/stop", { method: "POST" }),
+    BACKEND_FLAGS.bots
+      ? apiV2.botFuturesStop()
+      : safeJson<{ success: boolean; error?: string }>("/bot/futures/stop", { method: "POST" }),
 
   microScalperConfig: () =>
-    safeJson<{
-      success: boolean;
-      config: {
-        active_symbols: string[];
-        max_trade_usdt?: number;
-        min_trade_usdt?: number;
-        daily_profit_target_usdt?: number;
-        loop_interval_ms?: number;
-        plans: Record<string, ScalperPlan>;
-      } | null;
-    }>("/micro-scalper/config", undefined, { success: false, config: null }),
+    BACKEND_FLAGS.bots
+      ? (apiV2.microScalperConfig() as Promise<{
+          success: boolean;
+          config: {
+            active_symbols: string[];
+            max_trade_usdt?: number;
+            min_trade_usdt?: number;
+            daily_profit_target_usdt?: number;
+            loop_interval_ms?: number;
+            plans: Record<string, ScalperPlan>;
+          } | null;
+        }>)
+      : safeJson<{
+          success: boolean;
+          config: {
+            active_symbols: string[];
+            max_trade_usdt?: number;
+            min_trade_usdt?: number;
+            daily_profit_target_usdt?: number;
+            loop_interval_ms?: number;
+            plans: Record<string, ScalperPlan>;
+          } | null;
+        }>("/micro-scalper/config", undefined, { success: false, config: null }),
 
   microScalperStrategySave: (payload: {
     symbol: string;
@@ -375,10 +439,13 @@ export const api = {
     active?: boolean;
     global?: Record<string, number>;
   }) =>
-    safeJson<{ success: boolean; restarted?: boolean; error?: string }>("/micro-scalper/strategy", {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    }, { success: false, error: "Falha ao salvar estratégia do scalper" }),
+    BACKEND_FLAGS.positions
+      ? apiV2.microScalperStrategySave(payload)
+      : safeJson<{ success: boolean; restarted?: boolean; error?: string }>("/micro-scalper/strategy", {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        }, { success: false, error: "Falha ao salvar estratégia do scalper" }),
+
 
   microScalperSignal: (symbol: string) =>
     safeJson<{ action: string; confidence: number; reason: string } | null>(
@@ -417,7 +484,9 @@ export const api = {
     ),
 
   botStrategies: () =>
-    safeJson<{
+    BACKEND_FLAGS.strategies
+      ? (apiV2.botStrategies() as ReturnType<typeof safeJson>)
+      : safeJson<{
       success: boolean;
       strategies: {
         name: string;
@@ -444,62 +513,82 @@ export const api = {
     }>("/bot/strategies", undefined, { success: false, strategies: [] }),
 
   botStrategyCreate: (strat: any) =>
-    safeJson<{ success: boolean; strategy?: any }>("/bot/strategies", {
-      method: "POST",
-      body: JSON.stringify(strat),
-    }, { success: false }),
+    BACKEND_FLAGS.strategies
+      ? apiV2.botStrategyCreate(strat)
+      : safeJson<{ success: boolean; strategy?: any }>("/bot/strategies", {
+          method: "POST",
+          body: JSON.stringify(strat),
+        }, { success: false }),
 
   botStrategyActivate: (name: string) =>
-    safeJson<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}/activate`, {
-      method: "POST",
-    }, { success: false }),
+    BACKEND_FLAGS.strategies
+      ? apiV2.botStrategyActivate(name)
+      : safeJson<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}/activate`, {
+          method: "POST",
+        }, { success: false }),
 
   botStrategyDeactivate: (name: string) =>
-    safeJson<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}/deactivate`, {
-      method: "POST",
-    }, { success: false }),
+    BACKEND_FLAGS.strategies
+      ? apiV2.botStrategyDeactivate(name)
+      : safeJson<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}/deactivate`, {
+          method: "POST",
+        }, { success: false }),
 
   botStrategyDelete: (name: string) =>
-    safeJson<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-    }, { success: false }),
+    BACKEND_FLAGS.strategies
+      ? apiV2.botStrategyDelete(name)
+      : safeJson<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}`, {
+          method: "DELETE",
+        }, { success: false }),
 
   // ─── Compartilhamento & Importação de estratégias ───
   botStrategyShare: (name: string) =>
-    safeJson<{ success: boolean; code?: string; error?: string }>(
-      `/bot/strategies/${encodeURIComponent(name)}/share`,
-      { method: "POST" },
-      { success: false, error: "Falha ao compartilhar estratégia" },
-    ),
+    BACKEND_FLAGS.strategies
+      ? apiV2.botStrategyShare(name)
+      : safeJson<{ success: boolean; code?: string; error?: string }>(
+          `/bot/strategies/${encodeURIComponent(name)}/share`,
+          { method: "POST" },
+          { success: false, error: "Falha ao compartilhar estratégia" },
+        ),
 
-  botStrategySharedGet: (code: string) =>
-    jsonAllowError<{ success: boolean; strategy?: ImportedStrategy & { code: string }; error?: string }>(
-      `/bot/strategies/shared/${encodeURIComponent(code)}`,
-      undefined,
-      { success: false, error: "Código inválido" },
-    ),
+  botStrategySharedGet: (code: string): Promise<{ success: boolean; strategy?: ImportedStrategy & { code: string }; error?: string }> =>
+    BACKEND_FLAGS.strategies
+      ? (apiV2.botStrategySharedGet(code) as Promise<{ success: boolean; strategy?: ImportedStrategy & { code: string }; error?: string }>)
+      : jsonAllowError<{ success: boolean; strategy?: ImportedStrategy & { code: string }; error?: string }>(
+          `/bot/strategies/shared/${encodeURIComponent(code)}`,
+          undefined,
+          { success: false, error: "Código inválido" },
+        ),
 
-  botStrategyImportTradingView: (payload: { url?: string; rawPineScript?: string }) =>
-    jsonAllowError<{ success: boolean; strategy?: ImportedStrategy; error?: string; reason?: string }>(
-      "/bot/strategies/import-tradingview",
-      { method: "POST", body: JSON.stringify(payload) },
-      { success: false, error: "Falha ao analisar o script" },
-    ),
+  botStrategyImportTradingView: (payload: { url?: string; rawPineScript?: string }): Promise<{ success: boolean; strategy?: ImportedStrategy; error?: string; reason?: string }> =>
+    BACKEND_FLAGS.strategies
+      ? (apiV2.botStrategyImportTradingView(payload) as Promise<{ success: boolean; strategy?: ImportedStrategy; error?: string; reason?: string }>)
+      : jsonAllowError<{ success: boolean; strategy?: ImportedStrategy; error?: string; reason?: string }>(
+          "/bot/strategies/import-tradingview",
+          { method: "POST", body: JSON.stringify(payload) },
+          { success: false, error: "Falha ao analisar o script" },
+        ),
 
   botBacktest: (plan: any) =>
-    safeJson<{ success: boolean; error?: string } & Partial<BacktestResult>>("/bot/backtest", {
-      method: "POST",
-      body: JSON.stringify(plan),
-    }, { success: false, error: "Falha ao executar análise" }),
+    BACKEND_FLAGS.strategies
+      ? (apiV2.botBacktest(plan) as ReturnType<typeof safeJson>)
+      : safeJson<{ success: boolean; error?: string } & Partial<BacktestResult>>("/bot/backtest", {
+          method: "POST",
+          body: JSON.stringify(plan),
+        }, { success: false, error: "Falha ao executar análise" }),
 
   botForceTrade: (params: { symbol: string; timeframe: string; side: string; amount?: number; mode: string }) =>
-    safeJson<{ success: boolean; exitCode?: number; stdout?: string; stderr?: string; error?: string }>("/bot/force-trade", {
-      method: "POST",
-      body: JSON.stringify(params),
-    }, { success: false, error: "Falha na requisição" }),
+    BACKEND_FLAGS.bots
+      ? apiV2.botForceTrade(params)
+      : safeJson<{ success: boolean; exitCode?: number; stdout?: string; stderr?: string; error?: string }>("/bot/force-trade", {
+          method: "POST",
+          body: JSON.stringify(params),
+        }, { success: false, error: "Falha na requisição" }),
 
   botPositions: () =>
-    safeJson<{
+    BACKEND_FLAGS.positions
+      ? (apiV2.botPositions() as ReturnType<typeof safeJson>)
+      : safeJson<{
       success: boolean;
       positions: {
         id: string;
@@ -516,11 +605,26 @@ export const api = {
         status: string;
         strategy?: string;
         plan?: string;
+        journalNote?: string;
       }[];
     }>("/bot/positions", undefined, { success: false, positions: [] }),
 
+  botSavePositionNote: (id: string, note: string) =>
+    BACKEND_FLAGS.positions
+      ? apiV2.botSavePositionNote(id, note)
+      : safeJson<{ success: boolean }>(
+          `/bot/positions/${encodeURIComponent(id)}/note`,
+          {
+            method: "POST",
+            body: JSON.stringify({ note }),
+          },
+          { success: false }
+        ),
+
   botReconcile: () =>
-    safeJson<{
+    BACKEND_FLAGS.positions
+      ? (apiV2.botReconcile() as ReturnType<typeof safeJson>)
+      : safeJson<{
       success: boolean;
       error?: string;
       checked?: number;
@@ -531,73 +635,108 @@ export const api = {
     }>("/bot/reconcile", { method: "POST" }, { success: false, error: "Falha ao reconciliar" }),
 
   botClosePosition: (id: string, markOnly?: boolean) =>
-    safeJson<{ success: boolean; error?: string }>(`/bot/positions/${encodeURIComponent(id)}/close${markOnly ? "?markOnly=true" : ""}`, {
-      method: "POST",
-    }, { success: false, error: "Falha na requisição" }),
+    BACKEND_FLAGS.positions
+      ? apiV2.botClosePosition(id, markOnly)
+      : safeJson<{ success: boolean; error?: string }>(`/bot/positions/${encodeURIComponent(id)}/close${markOnly ? "?markOnly=true" : ""}`, {
+          method: "POST",
+        }, { success: false, error: "Falha na requisição" }),
 
   // ─── Multi-Account API Endpoints ───
   accountsList: () =>
-    safeJson<{
-      success: boolean;
-      accounts: {
-        id: string;
-        name: string;
-        apiKey: string;
-        isActive: boolean;
-        isTestnet: boolean;
-        createdAt: string;
-      }[];
-    }>("/accounts", undefined, { success: false, accounts: [] }),
+    BACKEND_FLAGS.accounts
+      ? (apiV2.accountsList() as Promise<{
+          success: boolean;
+          accounts: { id: string; name: string; apiKey: string; isActive: boolean; isTestnet: boolean; createdAt: string }[];
+        }>)
+      : safeJson<{
+          success: boolean;
+          accounts: {
+            id: string;
+            name: string;
+            apiKey: string;
+            isActive: boolean;
+            isTestnet: boolean;
+            createdAt: string;
+          }[];
+        }>("/accounts", undefined, { success: false, accounts: [] }),
 
   accountCreate: (params: { name: string; apiKey: string; secretKey: string; isTestnet: boolean }) =>
-    safeJson<{ success: boolean; id?: string; error?: string }>("/accounts", {
-      method: "POST",
-      body: JSON.stringify(params),
-    }, { success: false, error: "Falha ao criar conta" }),
+    BACKEND_FLAGS.accounts
+      ? apiV2.accountCreate(params)
+      : safeJson<{ success: boolean; id?: string; error?: string }>("/accounts", {
+          method: "POST",
+          body: JSON.stringify(params),
+        }, { success: false, error: "Falha ao criar conta" }),
 
   accountActivate: (id: string) =>
-    safeJson<{ success: boolean; error?: string }>(`/accounts/${encodeURIComponent(id)}/activate`, {
-      method: "POST",
-    }, { success: false, error: "Falha ao ativar conta" }),
+    BACKEND_FLAGS.accounts
+      ? apiV2.accountActivate(id)
+      : safeJson<{ success: boolean; error?: string }>(`/accounts/${encodeURIComponent(id)}/activate`, {
+          method: "POST",
+        }, { success: false, error: "Falha ao ativar conta" }),
 
   accountDelete: (id: string) =>
-    safeJson<{ success: boolean; error?: string }>(`/accounts/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    }, { success: false, error: "Falha ao deletar conta" }),
+    BACKEND_FLAGS.accounts
+      ? apiV2.accountDelete(id)
+      : safeJson<{ success: boolean; error?: string }>(`/accounts/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        }, { success: false, error: "Falha ao deletar conta" }),
 
   // ─── Authentication Endpoints ───
   login: (params: { email: string; password?: string }) =>
-    safeJson<{ success: boolean; token?: string; user?: any; error?: string }>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify(params),
-    }, { success: false, error: "Falha na autenticação" }),
+    BACKEND_FLAGS.auth
+      ? apiV2.login(params)
+      : safeJson<{ success: boolean; token?: string; user?: any; error?: string }>("/auth/login", {
+          method: "POST",
+          body: JSON.stringify(params),
+        }, { success: false, error: "Falha na autenticação" }),
+
+  loginGoogle: (credential: string) =>
+    apiV2.loginGoogle(credential),
 
   register: (params: { email: string; password?: string }) =>
-    safeJson<{ success: boolean; token?: string; user?: any; error?: string }>("/auth/register", {
-      method: "POST",
-      body: JSON.stringify(params),
-    }, { success: false, error: "Falha no registro" }),
+    BACKEND_FLAGS.auth
+      ? apiV2.register(params)
+      : safeJson<{ success: boolean; token?: string; user?: any; error?: string }>("/auth/register", {
+          method: "POST",
+          body: JSON.stringify(params),
+        }, { success: false, error: "Falha no registro" }),
 
   me: () =>
-    safeJson<{ success: boolean; user?: any }>("/auth/me", undefined, { success: false }),
+    BACKEND_FLAGS.auth
+      ? apiV2.me()
+      : safeJson<{ success: boolean; user?: any }>("/auth/me", undefined, { success: false }),
 
   // ─── Notifications Endpoints ───
   notifications: (limit?: number) =>
-    safeJson<{ success: boolean; notifications: SystemNotification[] }>(
-      `/notifications${limit ? `?limit=${limit}` : ""}`,
-      undefined,
-      { success: false, notifications: [] }
-    ),
+    BACKEND_FLAGS.notifications
+      ? apiV2.notifications(limit)
+      : safeJson<{ success: boolean; notifications: SystemNotification[] }>(
+          `/notifications${limit ? `?limit=${limit}` : ""}`,
+          undefined,
+          { success: false, notifications: [] }
+        ),
 
   notificationsRead: (ids?: string[]) =>
-    safeJson<{ success: boolean }>(
-      "/notifications/read",
-      {
-        method: "POST",
-        body: ids ? JSON.stringify({ ids }) : undefined,
-      },
-      { success: false }
-    ),
+    BACKEND_FLAGS.notifications
+      ? apiV2.notificationsRead(ids)
+      : safeJson<{ success: boolean }>(
+          "/notifications/read",
+          {
+            method: "POST",
+            body: ids ? JSON.stringify({ ids }) : undefined,
+          },
+          { success: false }
+        ),
+
+  systemStatus: () =>
+    BACKEND_FLAGS.auth
+      ? apiV2.systemStatus()
+      : safeJson<{ success: boolean; database: string; worker: string; beat: string; redis: string; backend: string }>(
+          "/status",
+          undefined,
+          { success: false, database: "down", worker: "down", beat: "down", redis: "down", backend: "down" }
+        ),
 };
 
 /** Modelo de estratégia devolvido pelo importador (IA / código P2P). */
@@ -613,6 +752,10 @@ export interface ImportedStrategy {
   sl: any;
   tp: any;
   winRateTarget?: number | null;
+  /** Recomendação da IA (timeframe/ativo) — só vem na importação via TradingView. */
+  recommendedTimeframes?: string[];
+  recommendedSymbols?: string[];
+  recommendationReason?: string;
 }
 
 export interface SystemNotification {

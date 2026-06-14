@@ -11,10 +11,10 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Trading SaaS — Painel de Operações",
+  title: "Vexa Cripto — Painel de Operações",
   description:
     "Painel inteligente para acompanhar seus bots, mercado e operações em tempo real.",
-  applicationName: "Trading SaaS",
+  applicationName: "Vexa Cripto",
 };
 
 export const viewport: Viewport = {

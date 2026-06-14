@@ -21,7 +21,15 @@ const BASES = [
     desc: "Opera os extremos: compra no suporte e vende na resistência quando RSI e Estocástico confirmam exaustão. Ideal para mercados laterais.",
     perfil: "Long e short (short apenas em Futuros), alvos curtos na borda oposta do range.",
   },
+  {
+    key: "custom",
+    title: "Personalizada — Crie suas Regras",
+    icon: FlaskConical,
+    desc: "Controle absoluto: monte uma estratégia livre definindo o gatilho, a base de entrada, a proteção de SL/TP por porcentagem ou ATR, e múltiplos filtros de regime simultâneos.",
+    perfil: "Ideal para traders avançados testarem e operarem setups híbridos e autorais.",
+  },
 ] as const;
+
 
 const SYMBOL_OPTIONS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "LTCUSDT", "AVAXUSDT"];
 const TF_OPTIONS = ["15m", "1H", "4H", "1D"];
@@ -31,7 +39,7 @@ const TF_OPTIONS = ["15m", "1H", "4H", "1D"];
  * renderizar dinamicamente os indicadores de uma estratégia CUSTOM importada —
  * cada filtro presente vira um controle editável, com nome legível em PT-BR.
  */
-type FilterKind = "bool" | "number";
+type FilterKind = "bool" | "number" | "matype";
 interface FilterMeta {
   label: string;
   hint?: string;
@@ -40,6 +48,7 @@ interface FilterMeta {
   max?: number;
   step?: number;
 }
+const MA_TYPE_OPTIONS = ["ema", "sma", "rma", "hma", "wma"];
 const FILTER_META: Record<string, FilterMeta> = {
   ema_triple: { label: "EMA Tripla (tendência)", hint: "EMA9 > EMA21 > EMA55 > EMA200", kind: "bool" },
   macd_positive: { label: "MACD positivo", hint: "Histograma do MACD > 0", kind: "bool" },
@@ -61,9 +70,65 @@ const FILTER_META: Record<string, FilterMeta> = {
   supertrend_period: { label: "Supertrend período", kind: "number", min: 5, max: 30, step: 1 },
   supertrend_mult: { label: "Supertrend multiplicador", kind: "number", min: 1, max: 6, step: 0.1 },
   choppiness_min: { label: "Choppiness mínimo (lateral)", kind: "number", min: 30, max: 60, step: 1 },
+  // Adaptive Volatility Envelope
+  adapt_length: { label: "Adaptação (lookback)", hint: "Bars p/ detectar tendência vs lateral", kind: "number", min: 2, max: 50, step: 1 },
+  choppy_speed: { label: "Velocidade em lateral", hint: "Reação da centerline em mercado choppy", kind: "number", min: 0.01, max: 0.5, step: 0.01 },
+  trend_speed: { label: "Velocidade em tendência", hint: "Quão colada a centerline segue o preço", kind: "number", min: 0.5, max: 0.99, step: 0.01 },
+  vol_length: { label: "Período de volatilidade (ATR)", kind: "number", min: 1, max: 50, step: 1 },
+  color_sens: { label: "Sensibilidade do momentum", kind: "number", min: 1, max: 20, step: 0.5 },
+  // State-aware MA Cross
+  base_period: { label: "Período da média base (estado)", kind: "number", min: 2, max: 200, step: 1 },
 };
+
+const FILTER_DEFAULTS: Record<string, any> = {
+  ema_triple: true,
+  macd_positive: true,
+  macd_growing: true,
+  di_direction: true,
+  bb_range: true,
+  rsi_range_mid: true,
+  adx_min: 20,
+  adx_max: 28,
+  rsi_min: 30,
+  rsi_max: 70,
+  rsi_period: 14,
+  volume_mult: 1.3,
+  volume_max_mult: 2.0,
+  bb_period: 20,
+  bb_mult: 2.0,
+  bb_pct_b_min: 0.05,
+  bb_pct_b_max: 0.95,
+  supertrend_period: 10,
+  supertrend_mult: 3.0,
+  choppiness_min: 45,
+  adapt_length: 14,
+  choppy_speed: 0.1,
+  trend_speed: 0.8,
+  vol_length: 14,
+  color_sens: 10.0,
+};
+
+// Rótulos legíveis dos estados do State-aware MA Cross.
+const STATE_LABELS: Record<string, string> = {
+  "00": "Baixa + abaixo da base",
+  "01": "Baixa + acima da base",
+  "10": "Alta + abaixo da base",
+  "11": "Alta + acima da base",
+};
+function stateMaMeta(key: string): FilterMeta | null {
+  // ex.: s10_short_type / s01_long_len
+  const m = key.match(/^s(00|01|10|11)_(short|long)_(type|len)$/);
+  if (!m) return null;
+  const [, st, side, attr] = m;
+  const sideLabel = side === "short" ? "curta" : "longa";
+  const stLabel = STATE_LABELS[st] ?? st;
+  if (attr === "type") {
+    return { label: `Estado ${st} (${stLabel}) — tipo MA ${sideLabel}`, kind: "matype" };
+  }
+  return { label: `Estado ${st} (${stLabel}) — período MA ${sideLabel}`, kind: "number", min: 2, max: 200, step: 1 };
+}
 function metaFor(key: string): FilterMeta {
-  return FILTER_META[key] || { label: key.replace(/_/g, " "), kind: typeof key === "string" ? "number" : "number" };
+  return FILTER_META[key] || stateMaMeta(key) || { label: key.replace(/_/g, " "), kind: "number" };
 }
 
 /** Estratégia existente para edição (personalização) — pré-preenche o wizard. */
@@ -77,7 +142,7 @@ export interface StrategyInitial {
   leverage?: number;
   sl?: { type?: string; multiplier?: number } | null;
   tp?: { type?: string; multiplier?: number } | null;
-  filters?: Record<string, number | boolean> | null;
+  filters?: Record<string, number | boolean | string> | null;
   winRateTarget?: number | null;
 }
 
@@ -95,10 +160,13 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
   // Estratégia importada do TradingView: lógica "custom" (qualquer coisa que não
   // seja uma das bases nativas). Nesse caso renderizamos os filtros REAIS dela.
   const isCustom = !!initial?.strategy && initial.strategy !== "warrior" && initial.strategy !== "range-v2";
+  // Lógica que o motor NÃO executa de fato (cai no fallback warrior ao vivo).
+  const SUPPORTED = ["warrior", "range-v2", "volatility-envelope", "state-ma-cross", "micro-dip", "turbo-reversion"];
+  const isUnsupported = !!initial?.strategy && !SUPPORTED.includes(initial.strategy);
 
   // Passo 1
-  const [strategyType, setStrategyType] = useState<"warrior" | "range-v2">(
-    initial?.strategy === "range-v2" ? "range-v2" : "warrior"
+  const [strategyType, setStrategyType] = useState<"warrior" | "range-v2" | "custom">(
+    initial?.strategy === "range-v2" ? "range-v2" : (initial?.strategy === "warrior" ? "warrior" : (initial?.strategy ? "custom" : "warrior"))
   );
 
   // Passo 2 — pré-preenchido na edição
@@ -112,31 +180,70 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
   const [slMultiplier, setSlMultiplier] = useState(initial?.sl?.multiplier ?? 1.5);
   const [tpMultiplier, setTpMultiplier] = useState(initial?.tp?.multiplier ?? 2.0);
   const [winRateTarget, setWinRateTarget] = useState(initial?.winRateTarget ?? 55);
+  
   // filtros warrior
   const [emaTriple, setEmaTriple] = useState(f.ema_triple != null ? !!f.ema_triple : true);
   const [adxMin, setAdxMin] = useState(Number(f.adx_min ?? 20));
   const [volumeMult, setVolumeMult] = useState(Number(f.volume_mult ?? 1.3));
+  
   // filtros range
   const [adxMax, setAdxMax] = useState(Number(f.adx_max ?? 28));
   const [choppinessMin, setChoppinessMin] = useState(Number(f.choppiness_min ?? 45));
   const [rsiLongMax, setRsiLongMax] = useState(Number(f.rsi_long_max ?? 42));
   const [rsiShortMin, setRsiShortMin] = useState(Number(f.rsi_short_min ?? 58));
-  // Filtros dinâmicos de uma estratégia CUSTOM importada (preserva os reais).
-  const [customFilters, setCustomFilters] = useState<Record<string, number | boolean>>(
-    isCustom && initial?.filters && typeof initial.filters === "object"
-      ? { ...(initial.filters as Record<string, number | boolean>) }
+
+  // Variáveis para a opção TOTALMENTE personalizada
+  const [customStrategyBase, setCustomStrategyBase] = useState<string>(
+    isCustom ? initial.strategy! : "warrior"
+  );
+  const [customSlType, setCustomSlType] = useState<"atr" | "pct">(
+    isCustom && (initial.sl?.type === "pct" || (initial.sl as any)?.type === "percentage") ? "pct" : "atr"
+  );
+  const [customSlValue, setCustomSlValue] = useState<number>(
+    isCustom && (initial.sl?.type === "pct" || (initial.sl as any)?.type === "percentage") ? Number((initial.sl as any).value ?? 1.5) : 1.5
+  );
+  const [customSlMultiplier, setCustomSlMultiplier] = useState<number>(
+    isCustom && initial.sl?.multiplier ? initial.sl.multiplier : 1.5
+  );
+  const [customTpType, setCustomTpType] = useState<"atr" | "pct" | "boundary">(
+    isCustom && initial.tp?.type === "boundary" ? "boundary" : (isCustom && (initial.tp?.type === "pct" || (initial.tp as any)?.type === "percentage") ? "pct" : "atr")
+  );
+  const [customTpValue, setCustomTpValue] = useState<number>(
+    isCustom && (initial.tp?.type === "pct" || (initial.tp as any)?.type === "percentage") ? Number((initial.tp as any).value ?? 3.0) : 3.0
+  );
+  const [customTpMultiplier, setCustomTpMultiplier] = useState<number>(
+    isCustom && initial.tp?.multiplier ? initial.tp.multiplier : 2.0
+  );
+
+  // Filtros dinâmicos de uma estratégia CUSTOM/Personalizada
+  const [customFilters, setCustomFilters] = useState<Record<string, number | boolean | string>>(
+    (strategyType === "custom" || isCustom) && initial?.filters && typeof initial.filters === "object"
+      ? { ...(initial.filters as Record<string, number | boolean | string>) }
       : {}
   );
+
   // SL/TP de estratégia importada costumam ser percentuais (type: pct/percentage).
   const slIsPct = isCustom && (initial?.sl?.type === "pct" || (initial?.sl as any)?.type === "percentage");
   const tpIsPct = isCustom && (initial?.tp?.type === "pct" || (initial?.tp as any)?.type === "percentage");
   const [slPct, setSlPct] = useState<number>(Number((initial?.sl as any)?.value ?? 1.5));
   const [tpPct, setTpPct] = useState<number>(Number((initial?.tp as any)?.value ?? 3.0));
 
-  const setCustomFilter = (key: string, value: number | boolean) =>
+  const setCustomFilter = (key: string, value: number | boolean | string) =>
     setCustomFilters((prev) => ({ ...prev, [key]: value }));
   const removeCustomFilter = (key: string) =>
     setCustomFilters((prev) => { const next = { ...prev }; delete next[key]; return next; });
+
+  const toggleCustomFilter = (key: string) => {
+    setCustomFilters((prev) => {
+      const next = { ...prev };
+      if (next[key] !== undefined) {
+        delete next[key];
+      } else {
+        next[key] = FILTER_DEFAULTS[key] !== undefined ? FILTER_DEFAULTS[key] : true;
+      }
+      return next;
+    });
+  };
 
   // Passo 3
   const reqIdRef = useRef(0);
@@ -148,20 +255,26 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
   const comboCount = symbols.length * timeframes.length;
 
   const buildPlan = () => {
-    // Estratégia importada: preserva a lógica "custom" e seus filtros reais,
-    // em vez de reescrevê-los com os defaults de warrior/range.
-    if (isCustom) {
+    // Estratégia importada ou criada personalizada:
+    if (strategyType === "custom" || isCustom) {
+      const filters = { ...customFilters };
       return {
         name: name.replace(/\s+/g, "_"),
         description,
         symbols,
         timeframes,
-        strategy: initial!.strategy!, // mantém "custom" (ou o que veio)
+        strategy: customStrategyBase,
         mode,
         leverage: mode === "futures" ? leverage : 1,
-        sl: slIsPct ? { type: "pct", value: slPct } : { type: "atr", multiplier: slMultiplier },
-        tp: tpIsPct ? { type: "pct", value: tpPct } : { type: "atr", multiplier: tpMultiplier },
-        filters: customFilters,
+        sl: customSlType === "pct"
+          ? { type: "pct", value: customSlValue }
+          : { type: "atr", multiplier: customSlMultiplier },
+        tp: customTpType === "boundary"
+          ? { type: "boundary", multiplier: 1.0 }
+          : customTpType === "pct"
+          ? { type: "pct", value: customTpValue }
+          : { type: "atr", multiplier: customTpMultiplier },
+        filters,
         winRateTarget,
       };
     }
@@ -363,6 +476,37 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
               )}
             </div>
 
+            {(strategyType === "custom" || isCustom) && (
+              <div className="p-4 bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] space-y-4">
+                <h4 className="text-xs font-bold text-[var(--color-text)] uppercase tracking-wider">Configuração Básica do Gatilho</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-[var(--color-text)]">Gatilho de Entrada Principal</label>
+                    <select 
+                      value={customStrategyBase} 
+                      onChange={(e) => setCustomStrategyBase(e.target.value)} 
+                      className={inputCls}
+                    >
+                      <option value="warrior">Warrior (Seguidor de Tendência)</option>
+                      <option value="range-v2">Range v2 (Reversão à Média)</option>
+                      <option value="state-ma-cross">State-aware MA Cross (Cruzamento Adaptativo)</option>
+                      <option value="volatility-envelope">Volatility Envelope (Envelope de Volatilidade)</option>
+                    </select>
+                  </div>
+                  
+                  <div className="space-y-1 text-xs text-muted flex flex-col justify-center">
+                    <span className="font-semibold text-[var(--color-text)]">Descrição do Gatilho</span>
+                    <span className="text-[10px]">
+                      {customStrategyBase === "warrior" && "Entra quando o preço está acima da VWAP com EMAs alinhadas e momentum."}
+                      {customStrategyBase === "range-v2" && "Opera nos extremos do canal dinâmico quando RSI e Estocástico confirmam exaustão."}
+                      {customStrategyBase === "state-ma-cross" && "Média Móvel de período dinâmico baseado no regime de mercado."}
+                      {customStrategyBase === "volatility-envelope" && "Cria envelopes adaptativos com base na volatilidade histórica (ATR)."}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Meta de win rate */}
             <div className="p-3 bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] space-y-2">
               <div className="flex justify-between text-xs font-medium">
@@ -375,19 +519,79 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
                 A análise de mercado vai medir o win rate real desta configuração e comparar com a sua meta.
               </p>
             </div>
-
-            {/* SL/TP */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-[var(--color-border)] pt-4">
-              {isCustom && slIsPct ? (
-                <div className="space-y-1">
-                  <div className="flex justify-between text-xs font-medium">
-                    <span className="text-[var(--color-text)]">Stop Loss (%)</span>
-                    <span className="text-[var(--color-brand-500)]">{slPct}%</span>
+            {(strategyType === "custom" || isCustom) ? (
+              <div className="p-4 bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] space-y-4">
+                <h4 className="text-xs font-bold text-[var(--color-text)] uppercase tracking-wider">Proteção (Stop Loss & Take Profit)</h4>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Stop Loss */}
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-[var(--color-text)]">Tipo de Stop Loss</label>
+                      <select value={customSlType} onChange={(e) => setCustomSlType(e.target.value as any)} className={inputCls}>
+                        <option value="atr">Baseado em ATR (Volatilidade)</option>
+                        <option value="pct">Porcentagem Fixa (%)</option>
+                      </select>
+                    </div>
+                    {customSlType === "pct" ? (
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-xs font-medium">
+                          <span className="text-muted">Valor do Stop (%)</span>
+                          <span className="text-[var(--color-brand-500)] font-semibold">{customSlValue}%</span>
+                        </div>
+                        <input type="range" min={0.2} max={10} step={0.1} value={customSlValue}
+                          onChange={(e) => setCustomSlValue(parseFloat(e.target.value))} className="w-full accent-[var(--color-brand-500)]" />
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-xs font-medium">
+                          <span className="text-muted">Multiplicador ATR</span>
+                          <span className="text-[var(--color-brand-500)] font-semibold">{customSlMultiplier}x</span>
+                        </div>
+                        <input type="range" min={0.5} max={4} step={0.1} value={customSlMultiplier}
+                          onChange={(e) => setCustomSlMultiplier(parseFloat(e.target.value))} className="w-full accent-[var(--color-brand-500)]" />
+                      </div>
+                    )}
                   </div>
-                  <input type="range" min={0.2} max={10} step={0.1} value={slPct}
-                    onChange={(e) => setSlPct(parseFloat(e.target.value))} className="w-full accent-[var(--color-brand-500)]" />
+
+                  {/* Take Profit */}
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-[var(--color-text)]">Tipo de Take Profit</label>
+                      <select value={customTpType} onChange={(e) => setCustomTpType(e.target.value as any)} className={inputCls}>
+                        <option value="atr">Baseado em ATR (Volatilidade)</option>
+                        <option value="pct">Porcentagem Fixa (%)</option>
+                        <option value="boundary">Borda oposta do canal (Boundary)</option>
+                      </select>
+                    </div>
+                    {customTpType === "pct" ? (
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-xs font-medium">
+                          <span className="text-muted">Valor do Alvo (%)</span>
+                          <span className="text-[var(--color-brand-500)] font-semibold">{customTpValue}%</span>
+                        </div>
+                        <input type="range" min={0.4} max={20} step={0.1} value={customTpValue}
+                          onChange={(e) => setCustomTpValue(parseFloat(e.target.value))} className="w-full accent-[var(--color-brand-500)]" />
+                      </div>
+                    ) : customTpType === "atr" ? (
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-xs font-medium">
+                          <span className="text-muted">Multiplicador ATR</span>
+                          <span className="text-[var(--color-brand-500)] font-semibold">{customTpMultiplier}x</span>
+                        </div>
+                        <input type="range" min={0.5} max={6} step={0.1} value={customTpMultiplier}
+                          onChange={(e) => setCustomTpMultiplier(parseFloat(e.target.value))} className="w-full accent-[var(--color-brand-500)]" />
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted flex flex-col justify-center h-12">
+                        <span>Alvo dinâmico na borda oposta.</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              ) : (
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-[var(--color-border)] pt-4">
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs font-medium">
                     <span className="text-[var(--color-text)]">Stop Loss (ATR)</span>
@@ -396,18 +600,7 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
                   <input type="range" min={0.5} max={4} step={0.1} value={slMultiplier}
                     onChange={(e) => setSlMultiplier(parseFloat(e.target.value))} className="w-full accent-[var(--color-brand-500)]" />
                 </div>
-              )}
-              {isCustom ? (
-                tpIsPct ? (
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-xs font-medium">
-                      <span className="text-[var(--color-text)]">Take Profit (%)</span>
-                      <span className="text-[var(--color-brand-500)]">{tpPct}%</span>
-                    </div>
-                    <input type="range" min={0.4} max={20} step={0.1} value={tpPct}
-                      onChange={(e) => setTpPct(parseFloat(e.target.value))} className="w-full accent-[var(--color-brand-500)]" />
-                  </div>
-                ) : (
+                {strategyType === "warrior" ? (
                   <div className="space-y-1">
                     <div className="flex justify-between text-xs font-medium">
                       <span className="text-[var(--color-text)]">Take Profit (ATR)</span>
@@ -416,83 +609,107 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
                     <input type="range" min={0.5} max={6} step={0.1} value={tpMultiplier}
                       onChange={(e) => setTpMultiplier(parseFloat(e.target.value))} className="w-full accent-[var(--color-brand-500)]" />
                   </div>
-                )
-              ) : strategyType === "warrior" ? (
-                <div className="space-y-1">
-                  <div className="flex justify-between text-xs font-medium">
-                    <span className="text-[var(--color-text)]">Take Profit (ATR)</span>
-                    <span className="text-[var(--color-brand-500)]">{tpMultiplier}x</span>
+                ) : (
+                  <div className="space-y-1 text-xs text-muted flex flex-col justify-center">
+                    <span className="font-medium text-[var(--color-text)]">Take Profit: borda oposta do range</span>
+                    <span className="text-[10px]">No Range v2 o alvo é a resistência/suporte oposto, calculado a cada sinal.</span>
                   </div>
-                  <input type="range" min={0.5} max={6} step={0.1} value={tpMultiplier}
-                    onChange={(e) => setTpMultiplier(parseFloat(e.target.value))} className="w-full accent-[var(--color-brand-500)]" />
-                </div>
-              ) : (
-                <div className="space-y-1 text-xs text-muted flex flex-col justify-center">
-                  <span className="font-medium text-[var(--color-text)]">Take Profit: borda oposta do range</span>
-                  <span className="text-[10px]">No Range v2 o alvo é a resistência/suporte oposto, calculado a cada sinal.</span>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
             {/* Filtros específicos */}
             <div className="space-y-3 border-t border-[var(--color-border)] pt-4">
               <label className="text-xs font-medium text-[var(--color-text)] block">
-                {isCustom ? "Indicadores detectados" : "Filtros da estratégia"}
+                {(strategyType === "custom" || isCustom) ? "Indicadores e Filtros de Regime" : "Filtros da estratégia"}
               </label>
-              {isCustom && (
+              {isUnsupported && (
+                <div className="flex gap-2.5 p-3 -mt-2 rounded-[var(--radius-sm)] border border-[var(--color-down-600)]/40 bg-[var(--color-down-600)]/10">
+                  <span className="text-[11px] leading-relaxed text-[var(--color-text-2)]">
+                    <span className="font-semibold text-[var(--color-text)]">⚠ Lógica não suportada pelo robô.</span>{" "}
+                    Se você ativar esta estratégia, o bot operará com a regra padrão (Warrior — seguidor de
+                    tendência), e não com o indicador importado. O backtest também usa a regra padrão.
+                  </span>
+                </div>
+              )}
+              {(strategyType === "custom" || isCustom) && !isUnsupported && (
                 <p className="text-[10px] text-muted -mt-2">
-                  Indicadores extraídos do Pine Script importado. Ajuste os valores como quiser — o bot usa exatamente estes filtros.
+                  Ative e configure os limites de cada indicador. Apenas os filtros marcados serão aplicados.
                 </p>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {isCustom ? (
-                  Object.keys(customFilters).length === 0 ? (
-                    <p className="text-xs text-muted col-span-full">
-                      Nenhum indicador mapeável foi detectado neste script. Você pode adicionar filtros manualmente reimportando ou usando uma estratégia base.
-                    </p>
-                  ) : (
-                    Object.entries(customFilters).map(([key, val]) => {
-                      const meta = metaFor(key);
-                      if (meta.kind === "bool") {
-                        return (
-                          <label key={key} className="flex items-start gap-3 p-3 bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={!!val}
-                              onChange={(e) => setCustomFilter(key, e.target.checked)}
-                              className="mt-0.5 accent-[var(--color-brand-500)]"
-                            />
-                            <div>
-                              <span className="text-xs font-semibold text-[var(--color-text)] block">{meta.label}</span>
-                              {meta.hint && <span className="text-[10px] text-muted">{meta.hint}</span>}
-                            </div>
-                          </label>
-                        );
-                      }
-                      const num = Number(val);
-                      const min = meta.min ?? 0;
-                      const max = meta.max ?? Math.max(100, num * 2);
-                      const step = meta.step ?? 1;
+                {(strategyType === "custom" || isCustom) ? (
+                  Object.entries(FILTER_META).map(([key, meta]) => {
+                    const active = customFilters[key] !== undefined;
+                    if (meta.kind === "bool") {
                       return (
-                        <div key={key} className="p-3 bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] space-y-2">
-                          <div className="flex justify-between text-xs">
-                            <span className="font-semibold text-[var(--color-text)]">{meta.label}</span>
-                            <span className="font-bold text-[var(--color-brand-500)]">{Number.isInteger(num) ? num : num.toFixed(2)}</span>
-                          </div>
+                        <label key={key} className={`flex items-start gap-3 p-3 rounded-[var(--radius-sm)] border cursor-pointer transition-all ${
+                          active ? "bg-brand-soft border-[var(--color-brand-500)]" : "bg-[var(--color-surface-3)] border-[var(--color-border)] hover:border-muted"
+                        }`}>
                           <input
-                            type="range"
-                            min={min}
-                            max={max}
-                            step={step}
-                            value={num}
-                            onChange={(e) => setCustomFilter(key, parseFloat(e.target.value))}
-                            className="w-full accent-[var(--color-brand-500)]"
+                            type="checkbox"
+                            checked={active}
+                            onChange={() => toggleCustomFilter(key)}
+                            className="mt-0.5 accent-[var(--color-brand-500)]"
                           />
-                          {meta.hint && <p className="text-[10px] text-muted">{meta.hint}</p>}
-                        </div>
+                          <div>
+                            <span className="text-xs font-semibold text-[var(--color-text)] block">{meta.label}</span>
+                            {meta.hint && <span className="text-[10px] text-muted">{meta.hint}</span>}
+                          </div>
+                        </label>
                       );
-                    })
-                  )
+                    }
+                    return (
+                      <div key={key} className={`p-3 rounded-[var(--radius-sm)] border transition-all ${
+                        active ? "bg-brand-soft border-[var(--color-brand-500)] space-y-2" : "bg-[var(--color-surface-3)] border-[var(--color-border)]"
+                      }`}>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={active}
+                            onChange={() => toggleCustomFilter(key)}
+                            className="accent-[var(--color-brand-500)]"
+                          />
+                          <span className="text-xs font-semibold text-[var(--color-text)]">{meta.label}</span>
+                        </label>
+                        {active && (
+                          <div className="pt-1">
+                            {meta.kind === "matype" ? (
+                              <select
+                                value={String(customFilters[key])}
+                                onChange={(e) => setCustomFilter(key, e.target.value)}
+                                className="w-full h-8 text-xs rounded-[var(--radius-xs)] bg-[var(--color-surface)] border border-[var(--color-border-strong)] px-2 text-[var(--color-text)] outline-none focus:border-[var(--color-brand-500)]"
+                              >
+                                {MA_TYPE_OPTIONS.map((opt) => (
+                                  <option key={opt} value={opt}>{opt.toUpperCase()}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <>
+                                <div className="flex justify-between text-[11px] mb-1">
+                                  <span className="text-muted">Ajustar limite</span>
+                                  <span className="font-bold text-[var(--color-brand-500)]">
+                                    {Number(customFilters[key]).toFixed(meta.step && meta.step < 1 ? 2 : 0)}
+                                    {key.includes("max_mult") || key.includes("mult") ? "x" : ""}
+                                  </span>
+                                </div>
+                                <input
+                                  type="range"
+                                  min={meta.min ?? 0}
+                                  max={meta.max ?? 100}
+                                  step={meta.step ?? 1}
+                                  value={Number(customFilters[key])}
+                                  onChange={(e) => setCustomFilter(key, parseFloat(e.target.value))}
+                                  className="w-full accent-[var(--color-brand-500)]"
+                                />
+                              </>
+                            )}
+                            {meta.hint && <p className="text-[10px] text-muted mt-1">{meta.hint}</p>}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
                 ) : strategyType === "warrior" ? (
                   <>
                     <label className="flex items-start gap-3 p-3 bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] cursor-pointer">

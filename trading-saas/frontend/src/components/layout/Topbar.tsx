@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Moon, Sun, Search, Bell, ChevronDown, Check, LogOut, TrendingUp, CheckCheck, Inbox } from "lucide-react";
 import { navItems } from "@/config/navigation";
 import { Badge } from "@/components/ui";
@@ -19,12 +20,33 @@ export function Topbar() {
 
   const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [firstName, setFirstName] = useState<string>("");
+  const [avatar, setAvatar] = useState<string>("");
 
   useEffect(() => {
-    try {
-      const u = JSON.parse(localStorage.getItem("user") || "null");
-      if (u?.name) setFirstName(String(u.name).split(" ")[0]);
-    } catch {}
+    async function loadUserProfile() {
+      try {
+        const res = await api.me();
+        if (res.success && res.user) {
+          localStorage.setItem("user", JSON.stringify(res.user));
+          if (res.user.name) {
+            setFirstName(String(res.user.name).split(" ")[0]);
+          } else if (res.user.email) {
+            setFirstName(res.user.email.split("@")[0]);
+          }
+          if (res.user.picture) {
+            setAvatar(res.user.picture);
+          }
+        }
+      } catch (e) {
+        try {
+          const u = JSON.parse(localStorage.getItem("user") || "null");
+          if (u?.name) setFirstName(String(u.name).split(" ")[0]);
+          else if (u?.email) setFirstName(u.email.split("@")[0]);
+          if (u?.picture) setAvatar(u.picture);
+        } catch {}
+      }
+    }
+    loadUserProfile();
   }, []);
   const [balance, setBalance] = useState<{ spot: number; futures: number }>({ spot: 0, futures: 0 });
   const [pnl24h, setPnl24h] = useState(0);
@@ -165,17 +187,44 @@ export function Topbar() {
     <header className="sticky top-0 z-20 bg-[var(--color-bg)]/70 backdrop-blur-xl">
       <div className="max-w-6xl mx-auto h-16 flex items-center gap-3 px-4 sm:px-6">
         <div className="min-w-0 flex-1 flex items-center gap-4">
+          {/* Vexa Cripto Brand Logo */}
+          <Link href="/" className="flex items-center gap-2 shrink-0 mr-1 hover:opacity-85 transition-opacity">
+            <svg className="h-8 w-8 shrink-0" viewBox="0 0 48 48" fill="none" aria-label="Vexa Cripto">
+              <rect x="1" y="1" width="46" height="46" rx="13" fill="#0d0f14" stroke="#1f232c"/>
+              <defs>
+                <linearGradient id="g-topbar" x1="14" y1="34" x2="34" y2="12" gradientUnits="userSpaceOnUse">
+                  <stop stopColor="#0fae7e"/><stop offset="1" stopColor="#2ee6a6"/>
+                </linearGradient>
+              </defs>
+              <path d="M13 14 L23 32 L31 18 L40 8" stroke="url(#g-topbar)" strokeWidth="3.4"
+                    strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M34 8 L40 8 L40 14" stroke="#2ee6a6" stroke-width="3.4"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span className="hidden sm:inline font-bold tracking-wider text-sm text-[var(--color-text)]">VEXA</span>
+            <div className="h-4 w-px bg-[var(--color-border)] hidden sm:block mx-1" />
+          </Link>
+
           {/* Logo + saudação (estilo "Hello, Sam" do Fey) */}
           <div className="flex items-center gap-3 min-w-0">
-            <div 
-              style={{ backgroundColor: "var(--color-text)", color: "var(--color-bg)" }}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
-            >
-              <TrendingUp size={15} strokeWidth={2.5} />
-            </div>
+            {avatar ? (
+              <img
+                src={avatar}
+                alt={firstName || "Perfil"}
+                referrerPolicy="no-referrer"
+                className="h-8 w-8 shrink-0 rounded-full object-cover border border-[var(--color-border)]"
+              />
+            ) : (
+              <div 
+                style={{ backgroundColor: "var(--color-text)", color: "var(--color-bg)" }}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+              >
+                <TrendingUp size={15} strokeWidth={2.5} />
+              </div>
+            )}
             <div className="min-w-0">
               <div className="text-sm font-semibold text-[var(--color-text)] truncate">
-                {firstName ? `Olá, ${firstName}` : current?.label ?? "Trading SaaS"}
+                {firstName ? `Olá, ${firstName}` : current?.label ?? "Vexa Cripto"}
               </div>
               <div className="text-[10px] text-muted truncate capitalize">
                 {new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" })}

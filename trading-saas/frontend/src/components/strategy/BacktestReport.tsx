@@ -46,8 +46,21 @@ function EquityCurve({ points }: { points: { time: number; equity: number }[] })
   );
 }
 
+/** Período coberto pela análise: menor periodStart e maior periodEnd entre as
+ * combinações symbol×timeframe. Retorna null se o backend não enviou as datas. */
+function analysisPeriod(data: BacktestResult): { start: number; end: number } | null {
+  const starts = data.results.map((r) => r.periodStart).filter((t): t is number => !!t);
+  const ends = data.results.map((r) => r.periodEnd).filter((t): t is number => !!t);
+  if (!starts.length || !ends.length) return null;
+  return { start: Math.min(...starts), end: Math.max(...ends) };
+}
+
+const fmtDate = (ms: number) =>
+  new Date(ms).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" });
+
 export function BacktestReport({ data }: { data: BacktestResult }) {
   const c = data.combined;
+  const period = analysisPeriod(data);
 
   if (!c) {
     return (
@@ -73,6 +86,19 @@ export function BacktestReport({ data }: { data: BacktestResult }) {
 
   return (
     <div className="space-y-5">
+      {/* Período coberto pela análise — visível logo no topo */}
+      {period && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--color-surface-3)] border border-[var(--color-border)]">
+          <Clock size={14} className="text-[var(--color-brand-500)] shrink-0" />
+          <span className="text-xs text-[var(--color-text-2)]">
+            Período analisado:{" "}
+            <span className="font-semibold text-[var(--color-text)]">{fmtDate(period.start)}</span>
+            {" "}até{" "}
+            <span className="font-semibold text-[var(--color-text)]">{fmtDate(period.end)}</span>
+          </span>
+        </div>
+      )}
+
       {/* Veredito vs meta */}
       {data.winRateTarget != null && (
         <div className={`flex items-center gap-3 p-3 rounded-[var(--radius-sm)] border ${
@@ -200,7 +226,7 @@ export function BacktestReport({ data }: { data: BacktestResult }) {
                 {[...data.recentTrades].reverse().map((t, idx) => (
                   <tr key={idx}>
                     <td className="p-2.5 text-muted">
-                      {new Date(t.entryTime).toLocaleString("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                      {new Date(t.entryTime).toLocaleString("pt-BR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
                     </td>
                     <td className="p-2.5 font-semibold">{t.symbol || "—"}</td>
                     <td className="p-2.5"><Badge tone={t.side === "LONG" ? "up" : "down"} size="sm">{t.side}</Badge></td>
@@ -217,6 +243,9 @@ export function BacktestReport({ data }: { data: BacktestResult }) {
       )}
 
       <p className="text-[10px] text-muted">
+        {period && (
+          <>Período analisado: <span className="font-semibold text-[var(--color-text-2)]">{fmtDate(period.start)} — {fmtDate(period.end)}</span>. </>
+        )}
         Análise executada em {new Date(data.ranAt).toLocaleString("pt-BR")} sobre candles públicos da Binance
         {data.feePctPerSide != null ? `, com taxas de ${data.feePctPerSide}% por lado incluídas` : ""}.
         Desempenho passado não garante resultados futuros.

@@ -119,12 +119,6 @@ export default function BotsPage() {
   const [decisionDetailsOpen, setDecisionDetailsOpen] = useState(false);
   const [selectedDecision, setSelectedDecision] = useState<any | null>(null);
 
-  // Headers com JWT para os fetch diretos (endpoints exigem login)
-  const legacyAuthHeaders = (): Record<string, string> => {
-    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  };
-
   // Function to load all bot statuses
   const refreshStatuses = async () => {
     try {
@@ -132,7 +126,7 @@ export default function BotsPage() {
         api.botMasterStatus(),
         api.microScalperStatus(),
         api.botFuturesStatus(),
-        fetch("/api/legacy/micro-scalper/log?limit=5", { headers: legacyAuthHeaders() }).then(r => r.json()).catch(() => null),
+        api.microScalperLog(5).catch(() => null),
       ]);
 
       setBots(prev => prev.map(bot => {
@@ -282,31 +276,17 @@ export default function BotsPage() {
     setSavingConfig(true);
 
     try {
-      // O endpoint /bot/config agora exige login (ativa plano por usuário) —
-      // anexa o JWT igual ao cliente api.ts, senão dá "Token ausente".
-      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-      const authHeaders: Record<string, string> = {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      };
-
-      let res;
+      // Salva via api.ts (delega para o backend Python quando a flag bots liga;
+      // mantém o legado enquanto OFF). O JWT é anexado pelo próprio cliente.
+      let res: { success: boolean; error?: string } | undefined;
       if (selectedBotId === "masterbot" || selectedBotId === "futures") {
-        res = await fetch("/api/legacy/bot/config", {
-          method: "PATCH",
-          headers: authHeaders,
-          body: JSON.stringify(masterConfig),
-        }).then(r => r.json());
+        res = await api.botConfigSave(masterConfig);
       } else if (selectedBotId === "micro-scalper") {
         // Endpoint EXCLUSIVO do Micro Scalper — não toca nas configs do MasterBot
-        res = await fetch("/api/legacy/micro-scalper/config", {
-          method: "PATCH",
-          headers: authHeaders,
-          body: JSON.stringify({
-            max_trade_usdt: microConfig.max_trade_usdt,
-            timeout_enabled: microConfig.timeout_enabled,
-          }),
-        }).then(r => r.json());
+        res = await api.microScalperConfigSave({
+          max_trade_usdt: microConfig.max_trade_usdt,
+          timeout_enabled: microConfig.timeout_enabled,
+        });
       }
 
       if (res && res.success) {
@@ -332,7 +312,7 @@ export default function BotsPage() {
 
     try {
       if (botId === "micro-scalper") {
-        const logData = await fetch("/api/legacy/micro-scalper/log?limit=25", { headers: legacyAuthHeaders() }).then(r => r.json());
+        const logData = await api.microScalperLog(25);
         if (logData.success && logData.trades) {
           const lines = logData.trades.map((tr: any) => {
             const timeStr = new Date(tr.t).toLocaleTimeString();
@@ -601,8 +581,11 @@ export default function BotsPage() {
                     <SymbolIcon symbol={item.symbol} size={30} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sm text-[var(--color-text)]">
+                          {String(item.symbol || "").replace("USDT", "")}
+                        </span>
                         {isMaster ? (
-                          <Badge tone={item.signal === "NEUTRO" ? "neutral" : item.signal === "SEM SALDO" ? "down" : "up"} size="sm">
+                          <Badge tone={item.signal === "SEM SALDO" ? "down" : item.allPass ? "up" : "neutral"} size="sm">
                             {item.signal === "NEUTRO" ? "SEM SINAL" : item.signal}
                           </Badge>
                         ) : (
@@ -610,17 +593,19 @@ export default function BotsPage() {
                             {isEntry ? "COMPRA" : "VENDA"}
                           </Badge>
                         )}
-                        <span className="font-semibold text-sm text-[var(--color-text)]">
-                          {String(item.symbol || "").replace("USDT", "")}
-                        </span>
                         <span className="text-[10px] text-muted">{isMaster ? "MasterBot" : "Micro Scalper"}</span>
                       </div>
-                      <div className="text-muted mt-0.5 truncate">
-                        {isMaster
-                          ? `${item.timeframe ?? ""}${item.strategy ? ` · ${labelFor(item.strategy)}` : ""}`
-                          : isEntry
+                      <div className="text-muted mt-0.5 truncate text-[11px] flex items-center gap-1.5">
+                        {isMaster ? (
+                          <>
+                            {item.plan ? <span className="font-medium text-[var(--color-text)] bg-[var(--color-surface-3)] px-1 py-0.5 rounded border border-[var(--color-border)]">{item.plan}</span> : null}
+                            {item.strategy ? <span className="opacity-60">• {labelFor(item.strategy)}</span> : null}
+                          </>
+                        ) : (
+                          isEntry
                             ? `Sinal: ${labelFor(item.signal)}`
-                            : `Motivo: ${labelFor(item.reason)}`}
+                            : `Motivo: ${labelFor(item.reason)}`
+                        )}
                       </div>
                     </div>
                     <div className="text-right shrink-0">
@@ -632,7 +617,14 @@ export default function BotsPage() {
                             : `font-bold tabular-nums ${isWin ? "text-up" : "text-down"}`
                       }>
                         {isMaster
-                          ? (item.price != null ? fmtUSD(item.price) : "—")
+                          ? (item.price != null
+                              ? fmtUSD(item.price)
+                              : (() => {
+                                  const approved = (item.conditions || []).filter((c: any) => c.pass).length;
+                                  const refused = (item.conditions || []).filter((c: any) => !c.pass).length;
+                                  return `${approved} OK | ${refused} Recusados`;
+                                })()
+                            )
                           : isEntry
                             ? fmtUSD(item.entryPrice)
                             : `${item.pnlPct > 0 ? "+" : ""}${(item.pnlPct * 100).toFixed(2)}%`}
