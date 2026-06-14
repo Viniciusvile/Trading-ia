@@ -318,10 +318,13 @@ def apply_plan_filters(candles: list[Candle], plan: dict) -> list[dict]:
         e55, e200 = calc_ema(closes, 55), calc_ema(closes, 200)
         extra.append({"label": "EMA9>EMA21>EMA55>EMA200", "pass": e9 > e21 > e55 > e200})
 
-    if f.get("adx_min") is not None or f.get("di_direction"):
+    if f.get("adx_min") is not None or f.get("adx_max") is not None or f.get("di_direction"):
         di = calc_adx(candles, 14)
         if f.get("adx_min") is not None:
             extra.append({"label": f"ADX >= {f['adx_min']}", "pass": di is not None and di["adx"] >= f["adx_min"]})
+        if f.get("adx_max") is not None:
+            # mercado lateral: ADX abaixo do maximo (sem tendencia forte)
+            extra.append({"label": f"ADX <= {f['adx_max']}", "pass": di is not None and di["adx"] <= f["adx_max"]})
         if f.get("di_direction"):
             extra.append({"label": "DI+ > DI-", "pass": di is not None and di["pdi"] > di["mdi"]})
 
