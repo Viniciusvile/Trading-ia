@@ -13,6 +13,15 @@ export async function v2<T>(path: string, init?: RequestInit, fallback?: T): Pro
       if (token) headers["Authorization"] = `Bearer ${token}`;
     }
     const res = await fetch(`${V2_BASE}${path}`, { ...init, headers, cache: "no-store" });
+    // Token expirado/invalido: em vez de mostrar telas vazias (fallback) silenciosamente,
+    // limpa a sessao e manda pro login. Nao redireciona se ja estiver no /login (evita loop)
+    // nem na propria chamada de login.
+    if ((res.status === 401 || res.status === 403) && typeof window !== "undefined" && !path.startsWith("/auth/login")) {
+      localStorage.removeItem("token");
+      if (!window.location.pathname.startsWith("/login")) {
+        window.location.href = "/login";
+      }
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return (await res.json()) as T;
   } catch (err) {
