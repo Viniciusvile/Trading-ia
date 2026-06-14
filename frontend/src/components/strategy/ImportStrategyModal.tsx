@@ -1,9 +1,19 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, KeyRound, FileCode2, ArrowLeft, Check } from "lucide-react";
+import { Sparkles, KeyRound, FileCode2, ArrowLeft, Check, AlertTriangle } from "lucide-react";
 import { Modal, Button, Input } from "@/components/ui";
 import { api, type ImportedStrategy } from "@/lib/api";
+
+/** Lógicas que o motor do bot realmente executa. Qualquer outra (ex: "custom")
+ * cai no fallback "warrior" ao vivo — ou seja, NÃO opera o indicador importado. */
+const SUPPORTED_STRATEGIES = new Set([
+  "warrior",
+  "range-v2",
+  "volatility-envelope",
+  "micro-dip",
+  "turbo-reversion",
+]);
 
 interface ImportStrategyModalProps {
   onClose: () => void;
@@ -206,6 +216,19 @@ export function ImportStrategyModal({ onClose, onSaved, initialCode }: ImportStr
               onChange={(e) => setPreview({ ...preview, description: e.target.value })}
             />
           </div>
+
+          {!SUPPORTED_STRATEGIES.has(preview.strategy) && (
+            <div className="flex gap-2.5 p-3 rounded-[var(--radius-sm)] border border-[var(--color-warn-600,#b45309)]/40 bg-[var(--color-warn-600,#b45309)]/10">
+              <AlertTriangle size={16} className="text-[var(--color-text-down)] shrink-0 mt-0.5" />
+              <p className="text-[11px] leading-relaxed text-[var(--color-text-2)]">
+                <span className="font-semibold text-[var(--color-text)]">Lógica não suportada pelo robô.</span>{" "}
+                Este script usa uma estratégia que o motor ainda não sabe executar. Você pode salvá-la
+                como referência, mas se ativá-la o bot operará com a <span className="font-semibold">regra
+                padrão (Warrior — seguidor de tendência)</span>, e não com o indicador importado. O
+                backtest também refletirá a regra padrão, não o script.
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div className="p-3 rounded-[var(--radius-sm)] bg-[var(--color-surface-3)] border border-[var(--color-border)]">

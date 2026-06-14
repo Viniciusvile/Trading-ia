@@ -101,6 +101,9 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
   // Estratégia importada do TradingView: lógica "custom" (qualquer coisa que não
   // seja uma das bases nativas). Nesse caso renderizamos os filtros REAIS dela.
   const isCustom = !!initial?.strategy && initial.strategy !== "warrior" && initial.strategy !== "range-v2";
+  // Lógica que o motor NÃO executa de fato (cai no fallback warrior ao vivo).
+  const SUPPORTED = ["warrior", "range-v2", "volatility-envelope", "micro-dip", "turbo-reversion"];
+  const isUnsupported = !!initial?.strategy && !SUPPORTED.includes(initial.strategy);
 
   // Passo 1
   const [strategyType, setStrategyType] = useState<"warrior" | "range-v2">(
@@ -445,7 +448,16 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
               <label className="text-xs font-medium text-[var(--color-text)] block">
                 {isCustom ? "Indicadores detectados" : "Filtros da estratégia"}
               </label>
-              {isCustom && (
+              {isUnsupported && (
+                <div className="flex gap-2.5 p-3 -mt-2 rounded-[var(--radius-sm)] border border-[var(--color-down-600)]/40 bg-[var(--color-down-600)]/10">
+                  <span className="text-[11px] leading-relaxed text-[var(--color-text-2)]">
+                    <span className="font-semibold text-[var(--color-text)]">⚠ Lógica não suportada pelo robô.</span>{" "}
+                    Se você ativar esta estratégia, o bot operará com a regra padrão (Warrior — seguidor de
+                    tendência), e não com o indicador importado. O backtest também usa a regra padrão.
+                  </span>
+                </div>
+              )}
+              {isCustom && !isUnsupported && (
                 <p className="text-[10px] text-muted -mt-2">
                   Indicadores extraídos do Pine Script importado. Ajuste os valores como quiser — o bot usa exatamente estes filtros.
                 </p>
