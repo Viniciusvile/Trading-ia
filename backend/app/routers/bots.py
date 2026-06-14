@@ -363,6 +363,63 @@ def create_strategy(
     return {"success": True, "strategy": _plan_to_ui(plan)}
 
 
+# ─── Compartilhamento & Importação de estratégias ───
+
+# Campos da config que NUNCA são compartilhados (dados sensíveis / por-usuário).
+_SHARE_BLOCKLIST = {"apiKey", "secretKey", "credentials", "userId", "user_id"}
+
+
+def _public_strategy_data(data: dict) -> dict:
+    """Copia da config sem dados sensíveis, pronta para importar por terceiros."""
+    src = dict(data or {})
+    out = {k: v for k, v in src.items() if k not in _SHARE_BLOCKLIST}
+    out.pop("shareCode", None)
+    return out
+
+
+@router.post("/strategies/{name}/share")
+def share_strategy(name: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Gera (ou reusa) um código de compartilhamento para a estratégia do usuário."""
+    import secrets
+
+    plan = (
+        db.query(MasterPlan)
+        .filter(MasterPlan.user_id == current_user.id, MasterPlan.name == name)
+        .first()
+    )
+    if not plan:
+        return {"success": False, "error": "Estratégia não encontrada"}
+
+    data = dict(plan.data or {})
+    code = data.get("shareCode")
+    if not code:
+        code = secrets.token_urlsafe(6).replace("-", "").replace("_", "")[:8].upper()
+        data["shareCode"] = code
+        plan.data = data
+        flag_modified(plan, "data")
+        db.commit()
+    return {"success": True, "code": code}
+
+
+@router.get("/strategies/shared/{code}")
+def get_shared_strategy(code: str, db: Session = Depends(get_db)):
+    """Busca a config pública de uma estratégia pelo código (sem auth — link público)."""
+    code = (code or "").strip().upper()
+    if not code:
+        return {"success": False, "error": "Código inválido"}
+    plan = (
+        db.query(MasterPlan)
+        .filter(text("data->>'shareCode' = :code"))
+        .params(code=code)
+        .first()
+    )
+    if not plan:
+        return {"success": False, "error": "Código inválido"}
+    pub = _public_strategy_data(plan.data or {})
+    pub["code"] = code
+    return {"success": True, "strategy": pub}
+
+
 def _set_plan_active(db: Session, user_id: str, name: str, active: bool) -> dict:
     plan = (
         db.query(MasterPlan)
