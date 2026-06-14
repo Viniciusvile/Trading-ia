@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { Moon, Sun, Search, Bell, ChevronDown, Check, LogOut, TrendingUp, CheckCheck, Inbox } from "lucide-react";
 import { navItems } from "@/config/navigation";
@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui";
 import { fmtUSD } from "@/lib/format";
 import { api, type SystemNotification } from "@/lib/api";
 import { BalanceChartModal } from "@/components/fx";
+import { toast } from "sonner";
 
 export function Topbar() {
   const pathname = usePathname();
@@ -93,6 +94,7 @@ export function Topbar() {
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const seenNotificationIds = useRef<Set<string>>(new Set());
 
   async function handleMarkAllAsRead() {
     try {
@@ -151,6 +153,24 @@ export function Topbar() {
           setPnl24h(sumRes.pnlToday ?? 0);
         }
         if (active && notifRes && notifRes.success) {
+          const isFirstLoad = seenNotificationIds.current.size === 0;
+          if (isFirstLoad) {
+            notifRes.notifications.forEach(n => seenNotificationIds.current.add(n.id));
+          } else {
+            notifRes.notifications.forEach(n => {
+              if (!seenNotificationIds.current.has(n.id)) {
+                seenNotificationIds.current.add(n.id);
+                // Exibe o popup toast
+                const isSuccess = n.type === 'success';
+                const isError = n.type === 'error';
+                const toastFn = isSuccess ? toast.success : isError ? toast.error : toast;
+                toastFn(n.title, {
+                  description: n.message,
+                  duration: 6000,
+                });
+              }
+            });
+          }
           setNotifications(notifRes.notifications);
           setUnreadCount(notifRes.notifications.filter(n => !n.isRead).length);
         }
