@@ -44,6 +44,16 @@ def decide_signal_for_plan(plan: dict, candles: list[dict]) -> dict:
         st = mb.calc_plan_stop_tp(price, atr, plan, safety["side"])
         return {"action": "enter", "side": safety["side"], "stop": st["stop"], "tp": st["tp"], "strategy": strategy, "conditions": safety.get("results", [])}
 
+    if strategy == "state-ma-cross":
+        safety = mb.run_safety_check_state_ma_cross(candles, plan.get("filters") or {})
+        if not safety["allPass"] or not safety["side"]:
+            return {"action": "none", "reason": "state-ma-cross sem cruzamento",
+                    "strategy": strategy, "conditions": safety.get("results", [])}
+        # script original é long-only (crossunder fecha, não abre short)
+        st = mb.calc_plan_stop_tp(price, atr, plan, "LONG")
+        return {"action": "enter", "side": "LONG", "stop": st["stop"], "tp": st["tp"],
+                "strategy": strategy, "conditions": safety.get("results", [])}
+
     if strategy == "volatility-envelope":
         safety = mb.run_safety_check_volatility_envelope(candles, plan.get("filters") or {})
         if not safety["allPass"] or not safety["side"]:

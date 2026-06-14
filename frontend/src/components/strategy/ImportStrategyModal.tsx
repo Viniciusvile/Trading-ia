@@ -11,6 +11,7 @@ const SUPPORTED_STRATEGIES = new Set([
   "warrior",
   "range-v2",
   "volatility-envelope",
+  "state-ma-cross",
   "micro-dip",
   "turbo-reversion",
 ]);

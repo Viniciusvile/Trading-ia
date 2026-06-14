@@ -527,6 +527,31 @@ def _envelope_filters(raw_filters) -> dict:
     return out
 
 
+_MA_TYPES = {"ema", "sma", "rma", "hma", "wma"}
+# Defaults do "State-aware MA Cross Strategy" (© chikaharu).
+_STATE_MA_DEFAULTS = {
+    "base_period": 20,
+    "s00_short_type": "ema", "s00_short_len": 15, "s00_long_type": "hma", "s00_long_len": 24,
+    "s01_short_type": "sma", "s01_short_len": 19, "s01_long_type": "rma", "s01_long_len": 45,
+    "s10_short_type": "rma", "s10_short_len": 16, "s10_long_type": "hma", "s10_long_len": 59,
+    "s11_short_type": "rma", "s11_short_len": 12, "s11_long_type": "rma", "s11_long_len": 36,
+}
+
+
+def _state_ma_filters(raw_filters) -> dict:
+    """Extrai os params do state-ma-cross dos filters da IA, com defaults do script."""
+    f = raw_filters if isinstance(raw_filters, dict) else {}
+    out: dict = {}
+    for k, dflt in _STATE_MA_DEFAULTS.items():
+        v = f.get(k)
+        if k.endswith("_type"):
+            out[k] = v.lower() if isinstance(v, str) and v.lower() in _MA_TYPES else dflt
+        else:
+            n = _num(v)
+            out[k] = int(n) if n is not None and n > 0 else dflt
+    return out
+
+
 def _normalize_imported_strategy(raw) -> dict:
     out = raw if isinstance(raw, dict) else {}
     name = out.get("name")
@@ -535,6 +560,8 @@ def _normalize_imported_strategy(raw) -> dict:
     strategy = out.get("strategy") if isinstance(out.get("strategy"), str) else "custom"
     if strategy == "volatility-envelope":
         filters = _envelope_filters(out.get("filters"))
+    elif strategy == "state-ma-cross":
+        filters = _state_ma_filters(out.get("filters"))
     else:
         filters = _flatten_imported_filters(out.get("filters"))
     return {
@@ -581,6 +608,20 @@ def _map_pine_with_gemini(pine_script: str, api_key: str) -> dict:
         "{\"adapt_length\": <Adaptation Length>, \"choppy_speed\": <Choppy Market Speed>, "
         "\"trend_speed\": <Trending Market Speed>, \"vol_length\": <Volatility Length>, "
         "\"color_sens\": <Color Sensitivity>}.\n"
+        "- \"state-ma-cross\": estrategias que definem um ESTADO de mercado (ex.: posicao do preco "
+        "vs uma media base e a inclinacao dela) e, para cada estado, usam um PAR de medias moveis "
+        "(short/long) de tipos possivelmente diferentes (ema/sma/rma/hma/wma), entrando no CRUZAMENTO "
+        "(crossover) da media curta sobre a longa (ex.: 'State-aware MA Cross Strategy'). "
+        "Para este, preencha filters com os parametros detectados, usando tipos em minusculo "
+        "(ema/sma/rma/hma/wma): "
+        "{\"base_period\": <periodo da media base do estado>, "
+        "\"s00_short_type\",\"s00_short_len\",\"s00_long_type\",\"s00_long_len\", "
+        "\"s01_short_type\",\"s01_short_len\",\"s01_long_type\",\"s01_long_len\", "
+        "\"s10_short_type\",\"s10_short_len\",\"s10_long_type\",\"s10_long_len\", "
+        "\"s11_short_type\",\"s11_short_len\",\"s11_long_type\",\"s11_long_len\"}. "
+        "Os estados seguem a convencao: '00'=slope para baixo e preco abaixo da base; "
+        "'01'=slope para baixo e preco acima; '10'=slope para cima e preco abaixo; "
+        "'11'=slope para cima e preco acima.\n"
         "- \"range-v2\": reversao a media / suporte-resistencia com RSI + estocastico.\n"
         "- \"warrior\": seguidor de tendencia (preco>VWAP, EMAs alinhadas, RSI).\n"
         "- \"custom\": quando nao se encaixa em nenhum acima.\n\n"
@@ -588,7 +629,7 @@ def _map_pine_with_gemini(pine_script: str, api_key: str) -> dict:
         '{\n'
         '  "name": "Nome sugerido",\n'
         '  "description": "Breve descrição do comportamento do script",\n'
-        '  "strategy": "volatility-envelope" | "range-v2" | "warrior" | "custom",\n'
+        '  "strategy": "volatility-envelope" | "state-ma-cross" | "range-v2" | "warrior" | "custom",\n'
         '  "filters": {},\n'
         '  "sl": { "type": "percentage", "value": 1.5 },\n'
         '  "tp": { "type": "percentage", "value": 3.0 }\n'

@@ -216,6 +216,8 @@ def get_plan_warnings(plan: dict) -> list[str]:
         warnings.append("Modo spot: sinais SHORT do Range v2 são descartados (sem venda a descoberto), igual ao bot ao vivo.")
     if plan.get("mode") != "futures" and plan.get("strategy") == "volatility-envelope":
         warnings.append("Modo spot: só as viradas de momentum para CIMA (compra) operam; viradas para baixo são descartadas (sem venda a descoberto).")
+    if plan.get("strategy") == "state-ma-cross":
+        warnings.append("Saída por cruzamento inverso de médias não é nativa — o robô fecha por Stop/Take/tempo máximo. Os resultados podem diferir do script original do TradingView.")
     if plan.get("strategy") in ("micro-dip", "turbo-reversion"):
         warnings.append("O backtest do scalper avalia candles fechados; o robô ao vivo reage em tempo real — os resultados são uma aproximação.")
     return warnings

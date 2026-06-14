@@ -27,6 +27,105 @@ def calc_ema(closes: list[float], period: int) -> float:
     return ema
 
 
+# ─── Medias em SERIE (alinhadas a `values`, na = None) — para gatilhos de cruzamento ───
+# Fieis ao Pine: ta.sma / ta.ema / ta.rma / ta.wma / ta.hma.
+
+def sma_series(values: list[float], period: int) -> list[float | None]:
+    out: list[float | None] = [None] * len(values)
+    if period <= 0:
+        return out
+    run = 0.0
+    for i, v in enumerate(values):
+        run += v
+        if i >= period:
+            run -= values[i - period]
+        if i >= period - 1:
+            out[i] = run / period
+    return out
+
+
+def ema_series(values: list[float], period: int) -> list[float | None]:
+    """ta.ema: seed = SMA(period) na barra period-1, depois recursivo."""
+    out: list[float | None] = [None] * len(values)
+    if period <= 0 or len(values) < period:
+        return out
+    mult = 2 / (period + 1)
+    ema = sum(values[:period]) / period
+    out[period - 1] = ema
+    for i in range(period, len(values)):
+        ema = values[i] * mult + ema * (1 - mult)
+        out[i] = ema
+    return out
+
+
+def rma_series(values: list[float], period: int) -> list[float | None]:
+    """ta.rma (Wilder): alpha=1/period, seed = SMA(period)."""
+    out: list[float | None] = [None] * len(values)
+    if period <= 0 or len(values) < period:
+        return out
+    alpha = 1.0 / period
+    rma = sum(values[:period]) / period
+    out[period - 1] = rma
+    for i in range(period, len(values)):
+        rma = alpha * values[i] + (1 - alpha) * rma
+        out[i] = rma
+    return out
+
+
+def wma_series(values: list[float], period: int) -> list[float | None]:
+    """ta.wma: pesos lineares (period, period-1, ..., 1)."""
+    out: list[float | None] = [None] * len(values)
+    if period <= 0 or len(values) < period:
+        return out
+    denom = period * (period + 1) / 2.0
+    for i in range(period - 1, len(values)):
+        s = 0.0
+        for k in range(period):
+            # peso maior para o valor mais recente (Pine: ultimo = peso `period`)
+            s += values[i - k] * (period - k)
+        out[i] = s / denom
+    return out
+
+
+def hma_series(values: list[float], period: int) -> list[float | None]:
+    """ta.hma: WMA(2*WMA(n/2) - WMA(n), round(sqrt(n)))."""
+    import math
+    out: list[float | None] = [None] * len(values)
+    if period <= 1 or len(values) < period:
+        return out
+    half = max(1, period // 2)
+    sqrt_n = max(1, round(math.sqrt(period)))
+    wma_half = wma_series(values, half)
+    wma_full = wma_series(values, period)
+    diff_vals: list[float] = []
+    idx_map: list[int] = []
+    for i in range(len(values)):
+        if wma_half[i] is not None and wma_full[i] is not None:
+            diff_vals.append(2 * wma_half[i] - wma_full[i])
+            idx_map.append(i)
+    if len(diff_vals) < sqrt_n:
+        return out
+    hma_of_diff = wma_series(diff_vals, sqrt_n)
+    for j, i in enumerate(idx_map):
+        if hma_of_diff[j] is not None:
+            out[i] = hma_of_diff[j]
+    return out
+
+
+def ma_series(kind: str, values: list[float], period: int) -> list[float | None]:
+    """Despacha por tipo de media (ema/sma/rma/wma/hma)."""
+    k = (kind or "ema").lower()
+    if k == "sma":
+        return sma_series(values, period)
+    if k == "rma":
+        return rma_series(values, period)
+    if k == "wma":
+        return wma_series(values, period)
+    if k == "hma":
+        return hma_series(values, period)
+    return ema_series(values, period)
+
+
 def calc_rsi(closes: list[float], period: int = 14) -> float:
     """RSI do bot.js: ganhos/perdas medios na janela completa (Wilder simples)."""
     if len(closes) < period + 1:
@@ -243,6 +342,93 @@ def run_safety_check_warrior(candles: list[Candle], now_ms: int | None = None) -
         "side": "LONG" if all_pass else None,
         "stopPrice": stop_price,
         "indicators": {"ema9": ema9, "ema20": ema20, "vwap": vwap, "rsi14": rsi14},
+    }
+
+
+# Defaults do "State-aware MA Cross Strategy" (© chikaharu) — valores fixos do script.
+_STATE_MA_DEFAULTS = {
+    "base_period": 20,
+    # estado: [tipo_short, periodo_short, tipo_long, periodo_long]
+    "s00_short_type": "ema", "s00_short_len": 15, "s00_long_type": "hma", "s00_long_len": 24,
+    "s01_short_type": "sma", "s01_short_len": 19, "s01_long_type": "rma", "s01_long_len": 45,
+    "s10_short_type": "rma", "s10_short_len": 16, "s10_long_type": "hma", "s10_long_len": 59,
+    "s11_short_type": "rma", "s11_short_len": 12, "s11_long_type": "rma", "s11_long_len": 36,
+}
+
+
+def run_safety_check_state_ma_cross(candles: list[Candle], plan_filters: dict | None = None) -> dict:
+    """Gatilho 'state-ma-cross' — port do 'State-aware MA Cross Strategy' (© chikaharu).
+
+    1) Define o ESTADO de mercado por base EMA(20): slope (sobe/desce) x preco (acima/abaixo).
+       state = slope_up ? (above?'11':'10') : (above?'01':'00')
+    2) Cada estado usa um PAR de medias (short/long) de tipos diferentes (ema/sma/rma/hma).
+    3) ENTRA LONG no crossover(short, long). O crossunder fecha posicao (saida via SL/TP
+       do motor; o motor nao tem saida por sinal, ver warning no backtest).
+
+    Params (filters) sobrescrevem os defaults do script (_STATE_MA_DEFAULTS).
+    """
+    pf = {**_STATE_MA_DEFAULTS, **(plan_filters or {})}
+    closes = [c["close"] for c in candles]
+    base_period = int(pf["base_period"])
+
+    # historico minimo: maior periodo usado + folga p/ HMA e p/ comparar 2 barras
+    max_len = max(int(pf[f"s{st}_{side}_len"]) for st in ("00", "01", "10", "11") for side in ("short", "long"))
+    need = max(max_len, base_period) + 10
+    if len(closes) < need:
+        return {"results": [{"label": "Dados insuficientes", "pass": False}],
+                "allPass": False, "side": None, "stopPrice": None, "takeProfitPrice": None,
+                "indicators": {}}
+
+    base = ema_series(closes, base_period)
+    i = len(closes) - 1
+    if base[i] is None or base[i - 1] is None:
+        return {"results": [{"label": "Base MA indisponível", "pass": False}],
+                "allPass": False, "side": None, "stopPrice": None, "takeProfitPrice": None,
+                "indicators": {}}
+
+    def state_at(idx: int) -> str:
+        slope_up = (base[idx] - base[idx - 1]) > 0
+        above = closes[idx] > base[idx]
+        if slope_up:
+            return "11" if above else "10"
+        return "01" if above else "00"
+
+    # Estado calculado na barra atual e na anterior (igual ao Pine, que usa o estado corrente).
+    st_now = state_at(i)
+    st_prev = state_at(i - 1)
+
+    def ma_pair(state: str):
+        s = ma_series(pf[f"s{state}_short_type"], closes, int(pf[f"s{state}_short_len"]))
+        l = ma_series(pf[f"s{state}_long_type"], closes, int(pf[f"s{state}_long_len"]))
+        return s, l
+
+    s_now, l_now = ma_pair(st_now)
+    s_prev_series, l_prev_series = ma_pair(st_prev)
+
+    if None in (s_now[i], l_now[i], s_prev_series[i - 1], l_prev_series[i - 1]):
+        return {"results": [{"label": "Médias indisponíveis", "pass": False}],
+                "allPass": False, "side": None, "stopPrice": None, "takeProfitPrice": None,
+                "indicators": {"state": st_now}}
+
+    # crossover(short, long): short estava <= long e agora está > long.
+    cross_up = s_prev_series[i - 1] <= l_prev_series[i - 1] and s_now[i] > l_now[i]
+    cross_down = s_prev_series[i - 1] >= l_prev_series[i - 1] and s_now[i] < l_now[i]
+
+    side = "LONG" if cross_up else None
+    results = [
+        {"label": f"Estado de mercado: {st_now}", "pass": True},
+        {"label": "MA curta cruzou ACIMA da MA longa", "pass": cross_up},
+    ]
+    if cross_down:
+        results.append({"label": "MA curta cruzou ABAIXO (sinal de saída)", "pass": False})
+
+    return {
+        "results": results,
+        "allPass": side is not None,
+        "side": side,
+        "stopPrice": None,
+        "takeProfitPrice": None,
+        "indicators": {"state": st_now, "shortMA": s_now[i], "longMA": l_now[i]},
     }
 
 

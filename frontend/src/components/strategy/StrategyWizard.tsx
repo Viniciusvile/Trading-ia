@@ -31,7 +31,7 @@ const TF_OPTIONS = ["15m", "1H", "4H", "1D"];
  * renderizar dinamicamente os indicadores de uma estratégia CUSTOM importada —
  * cada filtro presente vira um controle editável, com nome legível em PT-BR.
  */
-type FilterKind = "bool" | "number";
+type FilterKind = "bool" | "number" | "matype";
 interface FilterMeta {
   label: string;
   hint?: string;
@@ -40,6 +40,7 @@ interface FilterMeta {
   max?: number;
   step?: number;
 }
+const MA_TYPE_OPTIONS = ["ema", "sma", "rma", "hma", "wma"];
 const FILTER_META: Record<string, FilterMeta> = {
   ema_triple: { label: "EMA Tripla (tendência)", hint: "EMA9 > EMA21 > EMA55 > EMA200", kind: "bool" },
   macd_positive: { label: "MACD positivo", hint: "Histograma do MACD > 0", kind: "bool" },
@@ -67,9 +68,30 @@ const FILTER_META: Record<string, FilterMeta> = {
   trend_speed: { label: "Velocidade em tendência", hint: "Quão colada a centerline segue o preço", kind: "number", min: 0.5, max: 0.99, step: 0.01 },
   vol_length: { label: "Período de volatilidade (ATR)", kind: "number", min: 1, max: 50, step: 1 },
   color_sens: { label: "Sensibilidade do momentum", kind: "number", min: 1, max: 20, step: 0.5 },
+  // State-aware MA Cross
+  base_period: { label: "Período da média base (estado)", kind: "number", min: 2, max: 200, step: 1 },
 };
+// Rótulos legíveis dos estados do State-aware MA Cross.
+const STATE_LABELS: Record<string, string> = {
+  "00": "Baixa + abaixo da base",
+  "01": "Baixa + acima da base",
+  "10": "Alta + abaixo da base",
+  "11": "Alta + acima da base",
+};
+function stateMaMeta(key: string): FilterMeta | null {
+  // ex.: s10_short_type / s01_long_len
+  const m = key.match(/^s(00|01|10|11)_(short|long)_(type|len)$/);
+  if (!m) return null;
+  const [, st, side, attr] = m;
+  const sideLabel = side === "short" ? "curta" : "longa";
+  const stLabel = STATE_LABELS[st] ?? st;
+  if (attr === "type") {
+    return { label: `Estado ${st} (${stLabel}) — tipo MA ${sideLabel}`, kind: "matype" };
+  }
+  return { label: `Estado ${st} (${stLabel}) — período MA ${sideLabel}`, kind: "number", min: 2, max: 200, step: 1 };
+}
 function metaFor(key: string): FilterMeta {
-  return FILTER_META[key] || { label: key.replace(/_/g, " "), kind: typeof key === "string" ? "number" : "number" };
+  return FILTER_META[key] || stateMaMeta(key) || { label: key.replace(/_/g, " "), kind: "number" };
 }
 
 /** Estratégia existente para edição (personalização) — pré-preenche o wizard. */
@@ -83,7 +105,7 @@ export interface StrategyInitial {
   leverage?: number;
   sl?: { type?: string; multiplier?: number } | null;
   tp?: { type?: string; multiplier?: number } | null;
-  filters?: Record<string, number | boolean> | null;
+  filters?: Record<string, number | boolean | string> | null;
   winRateTarget?: number | null;
 }
 
@@ -102,7 +124,7 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
   // seja uma das bases nativas). Nesse caso renderizamos os filtros REAIS dela.
   const isCustom = !!initial?.strategy && initial.strategy !== "warrior" && initial.strategy !== "range-v2";
   // Lógica que o motor NÃO executa de fato (cai no fallback warrior ao vivo).
-  const SUPPORTED = ["warrior", "range-v2", "volatility-envelope", "micro-dip", "turbo-reversion"];
+  const SUPPORTED = ["warrior", "range-v2", "volatility-envelope", "state-ma-cross", "micro-dip", "turbo-reversion"];
   const isUnsupported = !!initial?.strategy && !SUPPORTED.includes(initial.strategy);
 
   // Passo 1
@@ -131,9 +153,9 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
   const [rsiLongMax, setRsiLongMax] = useState(Number(f.rsi_long_max ?? 42));
   const [rsiShortMin, setRsiShortMin] = useState(Number(f.rsi_short_min ?? 58));
   // Filtros dinâmicos de uma estratégia CUSTOM importada (preserva os reais).
-  const [customFilters, setCustomFilters] = useState<Record<string, number | boolean>>(
+  const [customFilters, setCustomFilters] = useState<Record<string, number | boolean | string>>(
     isCustom && initial?.filters && typeof initial.filters === "object"
-      ? { ...(initial.filters as Record<string, number | boolean>) }
+      ? { ...(initial.filters as Record<string, number | boolean | string>) }
       : {}
   );
   // SL/TP de estratégia importada costumam ser percentuais (type: pct/percentage).
@@ -142,7 +164,7 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
   const [slPct, setSlPct] = useState<number>(Number((initial?.sl as any)?.value ?? 1.5));
   const [tpPct, setTpPct] = useState<number>(Number((initial?.tp as any)?.value ?? 3.0));
 
-  const setCustomFilter = (key: string, value: number | boolean) =>
+  const setCustomFilter = (key: string, value: number | boolean | string) =>
     setCustomFilters((prev) => ({ ...prev, [key]: value }));
   const removeCustomFilter = (key: string) =>
     setCustomFilters((prev) => { const next = { ...prev }; delete next[key]; return next; });
@@ -485,6 +507,22 @@ export function StrategyWizard({ onClose, onSaved, initial }: Props) {
                               {meta.hint && <span className="text-[10px] text-muted">{meta.hint}</span>}
                             </div>
                           </label>
+                        );
+                      }
+                      if (meta.kind === "matype") {
+                        return (
+                          <div key={key} className="p-3 bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] space-y-2">
+                            <span className="text-xs font-semibold text-[var(--color-text)] block">{meta.label}</span>
+                            <select
+                              value={String(val)}
+                              onChange={(e) => setCustomFilter(key, e.target.value)}
+                              className="w-full h-8 text-xs rounded-[var(--radius-xs)] bg-[var(--color-surface)] border border-[var(--color-border-strong)] px-2 text-[var(--color-text)] outline-none focus:border-[var(--color-brand-500)]"
+                            >
+                              {MA_TYPE_OPTIONS.map((opt) => (
+                                <option key={opt} value={opt}>{opt.toUpperCase()}</option>
+                              ))}
+                            </select>
+                          </div>
                         );
                       }
                       const num = Number(val);
