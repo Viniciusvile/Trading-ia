@@ -7,9 +7,17 @@ from app.models.binance_config import BinanceConfig
 from app.services.crypto import decrypt
 
 def get_binance_client(db: Session, user_id: str) -> Client:
-    config = db.query(BinanceConfig).filter(BinanceConfig.user_id == user_id).first()
-    if not config or not config.is_valid:
-        raise ValueError("API Binance não configurada ou inválida")
+    # Pega a conta ATIVA do usuario (determinstico). is_valid nao e mantido, entao
+    # nao bloqueamos por ele; a Binance rejeita credencial invalida na 1a chamada.
+    config = (
+        db.query(BinanceConfig)
+        .filter(BinanceConfig.user_id == user_id, BinanceConfig.is_active == True)  # noqa: E712
+        .first()
+    )
+    if not config:
+        config = db.query(BinanceConfig).filter(BinanceConfig.user_id == user_id).first()
+    if not config:
+        raise ValueError("API Binance nao configurada")
     return Client(decrypt(config.encrypted_api_key), decrypt(config.encrypted_secret_key), testnet=config.is_testnet)
 
 def execute_buy(db: Session, user_id: str, strategy_id: str, symbol: str, size_percent: float) -> TradeLog:

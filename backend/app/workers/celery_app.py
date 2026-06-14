@@ -11,6 +11,7 @@ celery = Celery(
         "app.workers.bot_runner_micro",
         "app.workers.bot_runner_master",
         "app.workers.bot_runner_adaptive",
+        "app.workers.bot_runner_micro_real",
         "app.workers.sync_runner",
     ],
 )
@@ -41,6 +42,12 @@ celery.conf.update(
         # DESLIGAR na Fase 6 (quando o legado parar e o Python assumir execucao real).
         "sync-positions": {
             "task": "sync_positions",
+            "schedule": 60.0,
+        },
+        # Micro-Scalper REAL (executa ordem). Opt-in DUPLO por usuario (micro_enabled
+        # E config.live). Hoje so o user de teste, com conta TESTNET ativa (fake).
+        "micro-scalper-real": {
+            "task": "run_micro_scalper_real",
             "schedule": 60.0,
         },
     },
