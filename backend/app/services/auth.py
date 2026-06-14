@@ -29,6 +29,8 @@ def decode_token(token: str) -> str:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido ou expirado")
 
 def register_user(db: Session, email: str, password: str) -> User:
+    if not password or len(password) < 8:
+        raise HTTPException(status_code=400, detail="A senha deve ter pelo menos 8 caracteres")
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(status_code=400, detail="Email já cadastrado")
     user = User(email=email, hashed_password=hash_password(password))
