@@ -6,7 +6,7 @@ adaptive_params/adaptive_heartbeat/adaptive_trades).
 """
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Depends, Body
+from fastapi import APIRouter, Depends, Body, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -18,6 +18,7 @@ from app.models.user import User
 from app.models.master import MasterConfig, MasterPlan
 from app.models.bot_state import UserBotState, is_bot_enabled
 from app.models.position import Position
+from app.models.notification import Notification
 
 router = APIRouter()
 
@@ -176,8 +177,30 @@ def list_positions(current_user: User = Depends(get_current_user), db: Session =
             "status": p.status,
             "strategy": p.strategy,
             "plan": p.plan,
+            "journalNote": d.get("journal_note") or "",
         })
     return {"success": True, "positions": positions}
+
+
+@router.post("/positions/{pos_id}/note")
+def update_position_note(
+    pos_id: str,
+    body: dict = Body(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    pos = db.query(Position).filter(Position.id == pos_id, Position.user_id == current_user.id).first()
+    if not pos:
+        raise HTTPException(status_code=404, detail="Posição não encontrada")
+    
+    note = body.get("note", "").strip()
+    data = dict(pos.data or {})
+    data["journal_note"] = note
+    pos.data = data
+    
+    flag_modified(pos, "data")
+    db.commit()
+    return {"success": True, "message": "Nota salva com sucesso"}
 
 
 # Campos gerais do MasterBot salvos em master_config.data.
@@ -207,6 +230,7 @@ def update_master_config(
     if isinstance(body.get("activePlans"), list):
         active = set(body["activePlans"])
         data["activePlans"] = body["activePlans"]
+        data["active_plans"] = body["activePlans"]  # Sincroniza snake_case legado no JSONB
         plans = db.query(MasterPlan).filter(MasterPlan.user_id == current_user.id).all()
         for plan in plans:
             plan.is_active = plan.name in active
@@ -692,7 +716,10 @@ def _map_pine_with_gemini(pine_script: str, api_key: str) -> dict:
         '}\n\n'
         "### Pine Script:\n```\n" + pine_script[:20000] + "\n```"
     )
-    models = ["gemini-2.5-flash", "gemini-1.5-flash"]
+    # Modelos atuais da API Gemini (v1beta). O 1.5-flash foi descontinuado em set/2025
+    # e retorna "is not found for API version v1beta"; usamos *-latest como fallback
+    # estável para não quebrar quando o Google renomear/aposentar versões.
+    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]
     last_err = None
     for model in models:
         try:
@@ -706,7 +733,11 @@ def _map_pine_with_gemini(pine_script: str, api_key: str) -> dict:
             )
             data = resp.json()
             if data.get("error"):
-                last_err = RuntimeError(data["error"].get("message", "Erro Gemini"))
+                msg = data["error"].get("message", "Erro Gemini")
+                last_err = RuntimeError(msg)
+                # "not found" => modelo indisponível nessa chave: tenta o próximo.
+                # Outros erros (cota, chave inválida) tendem a se repetir, mas
+                # seguimos tentando os demais modelos mesmo assim.
                 continue
             try:
                 txt = data["candidates"][0]["content"]["parts"][0]["text"]
@@ -881,14 +912,43 @@ def close_position(
         return {"success": True, "error": None}
     pos.status = "closed"
     pos.closed_at = datetime.now(timezone.utc)
+    
+    # Fetch current ticker price to calculate closed PnL
+    exit_price = pos.entry_price or 0.0
+    try:
+        from binance.client import Client as BinanceClient
+        client = BinanceClient()
+        ticker = client.get_symbol_ticker(symbol=pos.symbol)
+        exit_price = float(ticker["price"])
+    except Exception:
+        pass
+
+    pos.exit_price = exit_price
+    qty = pos.quantity or 0.0
+    side_multiplier = 1.0 if pos.side == "LONG" else -1.0
+    pnl_val = (exit_price - (pos.entry_price or 0.0)) * side_multiplier * qty
+    pos.pnl = round(pnl_val, 4)
+
     d = dict(pos.data or {})
     d["status"] = "closed"
     d["closedAt"] = pos.closed_at.isoformat()
     d["exitReason"] = "manual_paper" if not markOnly else "mark_only"
+    d["exitPrice"] = exit_price
+    d["pnl"] = pos.pnl
     pos.data = d
     flag_modified(pos, "data")
+    
+    pnl_val = pos.pnl or 0.0
+    notif_type = "success" if pnl_val >= 0 else "error"
+    db.add(Notification(
+        user_id=current_user.id,
+        title=f"Fechou {pos.symbol}",
+        message=f"Posição fechada manualmente. PnL: {'+' if pnl_val >= 0 else ''}${pnl_val:.4f}",
+        type=notif_type,
+    ))
     db.commit()
     return {"success": True}
+
 
 
 @router.post("/reconcile")
