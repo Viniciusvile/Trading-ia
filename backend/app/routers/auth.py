@@ -3,7 +3,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.auth import (
     RegisterRequest, LoginRequest, TokenResponse,
-    UserResponse, PasswordResetRequest, PasswordResetConfirm
+    UserResponse, PasswordResetRequest, PasswordResetConfirm,
+    GoogleLoginRequest
 )
 from app.services import auth as auth_service
 from app.deps import get_current_user
@@ -18,6 +19,11 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
 @router.post("/login", response_model=TokenResponse)
 def login(body: LoginRequest, db: Session = Depends(get_db)):
     token = auth_service.login_user(db, body.email, body.password)
+    return TokenResponse(access_token=token)
+
+@router.post("/google", response_model=TokenResponse)
+def login_google(body: GoogleLoginRequest, db: Session = Depends(get_db)):
+    token = auth_service.login_google_user(db, body.credential)
     return TokenResponse(access_token=token)
 
 @router.get("/me", response_model=UserResponse)

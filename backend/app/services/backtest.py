@@ -110,22 +110,55 @@ def simulate_trades(candles: list[dict], plan: dict, warmup: int = 250, max_hold
         result = "timeout"
         last_idx = min(n - 1, i + max_hold)
 
+        # Configurações de Trailing Stop
+        sl = plan.get("sl") or {}
+        sl_type = sl.get("type")
+        trail_pct = sl.get("value") or sl.get("multiplier") or 1.5
+        highest_price = entry_price
+        lowest_price = entry_price
+
+        # Configurações de Saída por Sinal (Exit Conditions)
+        exit_conditions = plan.get("exit_conditions") or []
+
         for j in range(i + 1, last_idx + 1):
             b = candles[j]
+
+            # Atualiza Trailing Stop
+            if sl_type == "trail":
+                if side == "LONG":
+                    highest_price = max(highest_price, b["high"])
+                    stop = highest_price * (1 - trail_pct / 100)
+                else:
+                    lowest_price = min(lowest_price, b["low"])
+                    stop = lowest_price * (1 + trail_pct / 100)
+
+            # Verifica SL / TP
             if side == "LONG":
                 if b["low"] <= stop:
-                    exit_price, exit_idx, result = stop, j, "loss"
+                    exit_price, exit_idx, result = stop, j, "loss" if sl_type != "trail" else "trail"
                     break
                 if b["high"] >= tp:
                     exit_price, exit_idx, result = tp, j, "win"
                     break
             else:
                 if b["high"] >= stop:
-                    exit_price, exit_idx, result = stop, j, "loss"
+                    exit_price, exit_idx, result = stop, j, "loss" if sl_type != "trail" else "trail"
                     break
                 if b["low"] <= tp:
                     exit_price, exit_idx, result = tp, j, "win"
                     break
+
+            # Verifica Saída por Sinal
+            if exit_conditions:
+                try:
+                    from app.services.condition_evaluator import evaluate_candle_conditions
+                    window_at_j = candles[: j + 1]
+                    eval_res = evaluate_candle_conditions(exit_conditions, window_at_j)
+                    if eval_res["allPass"]:
+                        exit_price, exit_idx, result = b["close"], j, "exit_signal"
+                        break
+                except Exception:
+                    pass
 
         if exit_price is None:
             exit_idx = last_idx

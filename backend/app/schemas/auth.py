@@ -15,6 +15,8 @@ class TokenResponse(BaseModel):
 class UserResponse(BaseModel):
     id: str
     email: str
+    name: str | None = None
+    picture: str | None = None
     plan: str
     max_bots: int
     is_active: bool
@@ -28,3 +30,7 @@ class PasswordResetRequest(BaseModel):
 class PasswordResetConfirm(BaseModel):
     token: str
     new_password: str
+
+class GoogleLoginRequest(BaseModel):
+    credential: str
+

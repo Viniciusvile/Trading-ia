@@ -338,6 +338,9 @@ def _plan_to_ui(plan: MasterPlan) -> dict:
         "filters": d.get("filters", {}),
         "sl": d.get("sl", {}),
         "tp": d.get("tp", {}),
+        "entry_conditions": d.get("entry_conditions", []),
+        "entry_side": d.get("entry_side", "LONG"),
+        "exit_conditions": d.get("exit_conditions", []),
         "statsSource": "backtest" if lb else "sem-dados",
         "realStats": None,
         "winRateTarget": win_rate_target,
@@ -632,6 +635,41 @@ def _normalize_imported_strategy(raw) -> dict:
     final_tfs = (timeframes if isinstance(timeframes, list) and timeframes
                  else (reco_tfs or ["1H"]))
 
+    # entry_conditions: condições programáveis (strategy="custom").
+    # Preserva a lista da IA validando que cada item tem os campos mínimos.
+    raw_conditions = out.get("entry_conditions") or []
+    entry_conditions = []
+    for c in raw_conditions:
+        if not isinstance(c, dict) or not c.get("indicator"):
+            continue
+        entry_conditions.append({
+            "indicator": str(c["indicator"]).upper(),
+            "indicator_period": int(c.get("indicator_period", 14)),
+            "operator": c.get("operator", "greater_than"),
+            "value": c.get("value"),
+            "compare_to_indicator": c.get("compare_to_indicator"),
+        })
+
+    # exit_conditions: condições programáveis de saída (strategy="custom").
+    raw_exit_conditions = out.get("exit_conditions") or []
+    exit_conditions = []
+    for c in raw_exit_conditions:
+        if not isinstance(c, dict) or not c.get("indicator"):
+            continue
+        exit_conditions.append({
+            "indicator": str(c["indicator"]).upper(),
+            "indicator_period": int(c.get("indicator_period", 14)),
+            "operator": c.get("operator", "greater_than"),
+            "value": c.get("value"),
+            "compare_to_indicator": c.get("compare_to_indicator"),
+        })
+
+    entry_side = out.get("entry_side", "LONG")
+    if isinstance(entry_side, str):
+        entry_side = entry_side.upper()
+    if entry_side not in ("LONG", "SHORT"):
+        entry_side = "LONG"
+
     return {
         "name": name.strip() if isinstance(name, str) and name.strip() else "Estratégia Importada",
         "description": out.get("description") if isinstance(out.get("description"), str) else "",
@@ -640,6 +678,9 @@ def _normalize_imported_strategy(raw) -> dict:
         "timeframes": final_tfs,
         "mode": "futures" if out.get("mode") == "futures" else "spot",
         "filters": filters,
+        "entry_conditions": entry_conditions,
+        "entry_side": entry_side,
+        "exit_conditions": exit_conditions,
         "sl": _normalize_sl_tp(out.get("sl"), 1.5),
         "tp": _normalize_sl_tp(out.get("tp"), 3.0),
         "recommendedTimeframes": reco_tfs,
@@ -699,21 +740,43 @@ def _map_pine_with_gemini(pine_script: str, api_key: str) -> dict:
         "Os estados seguem a convencao: '00'=slope para baixo e preco abaixo da base; "
         "'01'=slope para baixo e preco acima; '10'=slope para cima e preco abaixo; "
         "'11'=slope para cima e preco acima.\n"
-        "- \"range-v2\": reversao a media / suporte-resistencia com RSI + estocastico.\n"
-        "- \"warrior\": seguidor de tendencia (preco>VWAP, EMAs alinhadas, RSI).\n"
-        "- \"custom\": quando nao se encaixa em nenhum acima.\n\n"
+        "- \"custom\": quando nao se encaixa em nenhum acima. Para \"custom\", voce DEVE "
+        "decompor a logica de entrada do script em uma lista de condicoes programaveis "
+        "no campo \"entry_conditions\". "
+        "Se houver uma logica de saida explicita por sinal (ex: cruzamento de saida), voce pode "
+        "decompo-la no campo \"exit_conditions\". Cada condicao e um objeto com:\n"
+        "  - \"indicator\": um destes: CLOSE, HIGH, LOW, OPEN, EMA, SMA, RMA, HMA, WMA, RSI, "
+        "VWAP, ATR, ATR_PCT, ADX, PDI, MDI, MACD_HIST, MACD_LINE, MACD_SIGNAL, "
+        "BB_UPPER, BB_LOWER, BB_BASIS, BB_PCT_B, SUPERTREND, STOCH_K, STOCH_D, "
+        "CHOPPINESS, VOLUME, VOLUME_AVG, STOCH_RSI_K, STOCH_RSI_D, CCI, WILLIAMS_R, "
+        "OBV, MFI, CMF, VWMA, PIVOT, PIVOT_R1, PIVOT_R2, PIVOT_S1, PIVOT_S2, PSAR, PSAR_TREND, "
+        "ICHIMOKU_TENKAN, ICHIMOKU_KIJUN, ICHIMOKU_SENKOU_A, ICHIMOKU_SENKOU_B, ICHIMOKU_CLOUD_TOP, ICHIMOKU_CLOUD_BOTTOM.\n"
+        "  - \"indicator_period\": periodo numerico do indicador (ex: 14 para RSI).\n"
+        "  - \"operator\": um destes: \"greater_than\", \"less_than\", "
+        "\"crosses_above\", \"crosses_below\".\n"
+        "  - \"value\": valor numerico fixo para comparacao (ex: 30 para RSI < 30). "
+        "Use este OU compare_to_indicator, nao ambos.\n"
+        "  - \"compare_to_indicator\": nome de outro indicador para comparar "
+        "(ex: \"EMA_21\" para cruzamento EMA9 > EMA21). Formato: NOME_PERIODO.\n"
+        "Tambem preencha \"entry_side\": \"LONG\" ou \"SHORT\".\n"
+        "Se a estrategia usar trailing stop, configure sl como: { \"type\": \"trail\", \"value\": <porcentagem do trail> }.\n\n"
         "Retorne APENAS um objeto JSON válido, sem markdown ou explicações externas, no seguinte formato:\n"
         '{\n'
         '  "name": "Nome sugerido",\n'
         '  "description": "Breve descrição do comportamento do script",\n'
         '  "strategy": "volatility-envelope" | "state-ma-cross" | "range-v2" | "warrior" | "custom",\n'
         '  "filters": {},\n'
-        '  "sl": { "type": "percentage", "value": 1.5 },\n'
+        '  "entry_conditions": [{"indicator": "RSI", "indicator_period": 14, "operator": "less_than", "value": 30}],\n'
+        '  "exit_conditions": [],\n'
+        '  "entry_side": "LONG",\n'
+        '  "sl": { "type": "percentage" | "trail", "value": 1.5 },\n'
         '  "tp": { "type": "percentage", "value": 3.0 },\n'
         '  "recommendedTimeframes": ["4H", "1D"],\n'
         '  "recommendedSymbols": ["BTCUSDT", "ETHUSDT"],\n'
         '  "recommendationReason": "Por que esses timeframes e ativos combinam com a estratégia."\n'
-        '}\n\n'
+        '}\n'
+        'NOTA: entry_conditions, exit_conditions e entry_side so sao OBRIGATORIOS quando strategy=\"custom\". '
+        'Para os outros tipos (warrior, range-v2, etc.) podem ser omitidos.\n\n'
         "### Pine Script:\n```\n" + pine_script[:20000] + "\n```"
     )
     # Modelos atuais da API Gemini (v1beta). O 1.5-flash foi descontinuado em set/2025

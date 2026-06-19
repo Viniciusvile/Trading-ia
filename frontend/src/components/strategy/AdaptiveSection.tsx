@@ -89,7 +89,7 @@ export function AdaptiveSection() {
                 )}
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-6 shrink-0">
+            <div className="grid grid-cols-3 gap-2 sm:gap-6 w-full sm:w-auto shrink-0">
               <Stat label="Trades (30d)" value={String(status.stats30d.trades)} size="sm" />
               <Stat label="Win Rate" value={`${(status.stats30d.winRate * 100).toFixed(0)}%`} size="sm" />
               <Stat

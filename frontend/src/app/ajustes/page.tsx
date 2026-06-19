@@ -323,6 +323,18 @@ export default function AjustesPage() {
               </div>
 
               <div className="flex gap-3">
+                <span className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-[var(--color-brand-500)]/10 text-[var(--color-brand-500)] font-bold text-xs">
+                  4
+                </span>
+                <div>
+                  <p className="font-semibold text-[var(--color-text)]">Restringir acesso por IP (Obrigatório)</p>
+                  <p className="text-xs text-muted mt-0.5">
+                    Selecione <strong>"Restringir o acesso apenas a IPs confiáveis"</strong> e adicione o IP do servidor: <code className="bg-[var(--color-surface-3)] px-1.5 py-0.5 rounded text-[var(--color-brand-500)] font-mono text-[11px] font-bold select-all">137.131.141.14</code>. Clique em <strong>"Confirmar"</strong> na Binance.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
                 <span className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-red-500/10 text-red-500 font-bold text-xs">
                   !
                 </span>

@@ -86,3 +86,55 @@ def update_config(
     flag_modified(cfg, "data")
     db.commit()
     return {"success": True, "config": data}
+
+
+@router.patch("/strategy")
+def update_strategy(
+    body: dict = Body(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Ativa/desativa ou atualiza parâmetros de uma estratégia específica do Micro-Scalper."""
+    symbol = body.get("symbol")
+    if not symbol:
+        return {"success": False, "error": "Symbol is required"}
+
+    cfg = db.get(UserMicroConfig, current_user.id)
+    if not cfg:
+        cfg = UserMicroConfig(user_id=current_user.id, data={})
+        db.add(cfg)
+    data = dict(cfg.data or {})
+
+    # 1. Active toggle
+    active = body.get("active")
+    active_symbols = list(data.get("active_symbols") or [])
+    if active is not None:
+        if active:
+            if symbol not in active_symbols:
+                active_symbols.append(symbol)
+        else:
+            active_symbols = [s for s in active_symbols if s != symbol]
+    data["active_symbols"] = active_symbols
+
+    # 2. Plan update
+    plan = body.get("plan")
+    plans = dict(data.get("plans") or {})
+    if plan is not None:
+        symbol_plan = dict(plans.get(symbol) or {})
+        for k, v in plan.items():
+            symbol_plan[k] = v
+        plans[symbol] = symbol_plan
+    data["plans"] = plans
+
+    # 3. Global update
+    global_cfg = body.get("global")
+    if global_cfg is not None:
+        for k, v in global_cfg.items():
+            data[k] = v
+
+    cfg.data = data
+    flag_modified(cfg, "data")
+    db.commit()
+
+    return {"success": True, "restarted": True, "config": data}
+

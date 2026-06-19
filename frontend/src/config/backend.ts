@@ -11,6 +11,7 @@ export const BACKEND_FLAGS = {
   bots: true,      // Fatia F — status/start/stop bots + balance + futures stub
   backtest: true,  // Fatia G — backtest (STUB; motor real é Fase 7)
   accounts: true,  // Fatia H — contas Binance (multi-conta)
+  notifications: true, // Notificações dos trades
 } as const;
 // VIRADA DO AUTH 2026-06-13: todas as fatias ligadas juntas (JWT Python). Login
 // passa a emitir token Python; todas as chamadas autenticadas vão ao :8000.

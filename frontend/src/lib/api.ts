@@ -439,10 +439,13 @@ export const api = {
     active?: boolean;
     global?: Record<string, number>;
   }) =>
-    safeJson<{ success: boolean; restarted?: boolean; error?: string }>("/micro-scalper/strategy", {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    }, { success: false, error: "Falha ao salvar estratégia do scalper" }),
+    BACKEND_FLAGS.positions
+      ? apiV2.microScalperStrategySave(payload)
+      : safeJson<{ success: boolean; restarted?: boolean; error?: string }>("/micro-scalper/strategy", {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        }, { success: false, error: "Falha ao salvar estratégia do scalper" }),
+
 
   microScalperSignal: (symbol: string) =>
     safeJson<{ action: string; confidence: number; reason: string } | null>(
@@ -602,8 +605,21 @@ export const api = {
         status: string;
         strategy?: string;
         plan?: string;
+        journalNote?: string;
       }[];
     }>("/bot/positions", undefined, { success: false, positions: [] }),
+
+  botSavePositionNote: (id: string, note: string) =>
+    BACKEND_FLAGS.positions
+      ? apiV2.botSavePositionNote(id, note)
+      : safeJson<{ success: boolean }>(
+          `/bot/positions/${encodeURIComponent(id)}/note`,
+          {
+            method: "POST",
+            body: JSON.stringify({ note }),
+          },
+          { success: false }
+        ),
 
   botReconcile: () =>
     BACKEND_FLAGS.positions
@@ -693,21 +709,34 @@ export const api = {
 
   // ─── Notifications Endpoints ───
   notifications: (limit?: number) =>
-    safeJson<{ success: boolean; notifications: SystemNotification[] }>(
-      `/notifications${limit ? `?limit=${limit}` : ""}`,
-      undefined,
-      { success: false, notifications: [] }
-    ),
+    BACKEND_FLAGS.notifications
+      ? apiV2.notifications(limit)
+      : safeJson<{ success: boolean; notifications: SystemNotification[] }>(
+          `/notifications${limit ? `?limit=${limit}` : ""}`,
+          undefined,
+          { success: false, notifications: [] }
+        ),
 
   notificationsRead: (ids?: string[]) =>
-    safeJson<{ success: boolean }>(
-      "/notifications/read",
-      {
-        method: "POST",
-        body: ids ? JSON.stringify({ ids }) : undefined,
-      },
-      { success: false }
-    ),
+    BACKEND_FLAGS.notifications
+      ? apiV2.notificationsRead(ids)
+      : safeJson<{ success: boolean }>(
+          "/notifications/read",
+          {
+            method: "POST",
+            body: ids ? JSON.stringify({ ids }) : undefined,
+          },
+          { success: false }
+        ),
+
+  systemStatus: () =>
+    BACKEND_FLAGS.auth
+      ? apiV2.systemStatus()
+      : safeJson<{ success: boolean; database: string; worker: string; beat: string; redis: string; backend: string }>(
+          "/status",
+          undefined,
+          { success: false, database: "down", worker: "down", beat: "down", redis: "down", backend: "down" }
+        ),
 };
 
 /** Modelo de estratégia devolvido pelo importador (IA / código P2P). */
@@ -722,6 +751,10 @@ export interface ImportedStrategy {
   filters: Record<string, any>;
   sl: any;
   tp: any;
+  /** Condições programáveis de entrada (strategy="custom"). */
+  entry_conditions?: { indicator: string; indicator_period: number; operator: string; value?: number | null; compare_to_indicator?: string | null }[];
+  entry_side?: string;
+  exit_conditions?: { indicator: string; indicator_period: number; operator: string; value?: number | null; compare_to_indicator?: string | null }[];
   winRateTarget?: number | null;
   /** Recomendação da IA (timeframe/ativo) — só vem na importação via TradingView. */
   recommendedTimeframes?: string[];

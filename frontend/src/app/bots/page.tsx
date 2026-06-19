@@ -581,8 +581,11 @@ export default function BotsPage() {
                     <SymbolIcon symbol={item.symbol} size={30} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sm text-[var(--color-text)]">
+                          {String(item.symbol || "").replace("USDT", "")}
+                        </span>
                         {isMaster ? (
-                          <Badge tone={item.signal === "NEUTRO" ? "neutral" : item.signal === "SEM SALDO" ? "down" : "up"} size="sm">
+                          <Badge tone={item.signal === "SEM SALDO" ? "down" : item.allPass ? "up" : "neutral"} size="sm">
                             {item.signal === "NEUTRO" ? "SEM SINAL" : item.signal}
                           </Badge>
                         ) : (
@@ -590,17 +593,19 @@ export default function BotsPage() {
                             {isEntry ? "COMPRA" : "VENDA"}
                           </Badge>
                         )}
-                        <span className="font-semibold text-sm text-[var(--color-text)]">
-                          {String(item.symbol || "").replace("USDT", "")}
-                        </span>
                         <span className="text-[10px] text-muted">{isMaster ? "MasterBot" : "Micro Scalper"}</span>
                       </div>
-                      <div className="text-muted mt-0.5 truncate">
-                        {isMaster
-                          ? `${item.timeframe ?? ""}${item.strategy ? ` · ${labelFor(item.strategy)}` : ""}`
-                          : isEntry
+                      <div className="text-muted mt-0.5 truncate text-[11px] flex items-center gap-1.5">
+                        {isMaster ? (
+                          <>
+                            {item.plan ? <span className="font-medium text-[var(--color-text)] bg-[var(--color-surface-3)] px-1 py-0.5 rounded border border-[var(--color-border)]">{item.plan}</span> : null}
+                            {item.strategy ? <span className="opacity-60">• {labelFor(item.strategy)}</span> : null}
+                          </>
+                        ) : (
+                          isEntry
                             ? `Sinal: ${labelFor(item.signal)}`
-                            : `Motivo: ${labelFor(item.reason)}`}
+                            : `Motivo: ${labelFor(item.reason)}`
+                        )}
                       </div>
                     </div>
                     <div className="text-right shrink-0">
@@ -612,7 +617,14 @@ export default function BotsPage() {
                             : `font-bold tabular-nums ${isWin ? "text-up" : "text-down"}`
                       }>
                         {isMaster
-                          ? (item.price != null ? fmtUSD(item.price) : "—")
+                          ? (item.price != null
+                              ? fmtUSD(item.price)
+                              : (() => {
+                                  const approved = (item.conditions || []).filter((c: any) => c.pass).length;
+                                  const refused = (item.conditions || []).filter((c: any) => !c.pass).length;
+                                  return `${approved} OK | ${refused} Recusados`;
+                                })()
+                            )
                           : isEntry
                             ? fmtUSD(item.entryPrice)
                             : `${item.pnlPct > 0 ? "+" : ""}${(item.pnlPct * 100).toFixed(2)}%`}

@@ -22,7 +22,15 @@ export async function v2<T>(path: string, init?: RequestInit, fallback?: T): Pro
         window.location.href = "/login";
       }
     }
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      try {
+        const errJson = await res.json();
+        if (errJson && errJson.detail) {
+          throw new Error(errJson.detail);
+        }
+      } catch {}
+      throw new Error(`HTTP ${res.status}`);
+    }
     return (await res.json()) as T;
   } catch (err) {
     if (fallback !== undefined) return fallback;
@@ -91,21 +99,38 @@ export const apiV2 = {
     }
   },
 
+  loginGoogle: async (credential: string) => {
+    try {
+      const r = await v2<{ access_token?: string }>("/auth/google", {
+        method: "POST",
+        body: JSON.stringify({ credential }),
+      });
+      if (!r.access_token) return { success: false, error: "Falha na autenticação com Google" };
+      return { success: true, token: r.access_token };
+    } catch {
+      return { success: false, error: "Falha na autenticação com Google" };
+    }
+  },
+
   register: async (params: { email: string; password?: string }) => {
     try {
       const user = await v2<{ id: string; email: string }>("/auth/register", {
         method: "POST",
         body: JSON.stringify({ email: params.email, password: params.password ?? "" }),
       });
+      const loginRes = await apiV2.login({ email: params.email, password: params.password });
+      if (loginRes.success && loginRes.token) {
+        return { success: true, token: loginRes.token, user };
+      }
       return { success: true, user };
-    } catch {
-      return { success: false, error: "Falha no registro" };
+    } catch (err: any) {
+      return { success: false, error: err.message || "Falha no registro" };
     }
   },
 
   me: async () => {
     try {
-      const user = await v2<{ id: string; email: string }>("/auth/me");
+      const user = await v2<{ id: string; email: string; name?: string; picture?: string }>("/auth/me");
       return { success: true, user };
     } catch {
       return { success: false };
@@ -164,12 +189,24 @@ export const apiV2 = {
       { method: "PATCH", body: JSON.stringify(patch) },
       { success: false },
     ),
+  microScalperStrategySave: (payload: {
+    symbol: string;
+    plan?: Partial<any>;
+    active?: boolean;
+    global?: Record<string, number>;
+  }) =>
+    v2<{ success: boolean; restarted?: boolean; error?: string }>(
+      "/micro-scalper/strategy",
+      { method: "PATCH", body: JSON.stringify(payload) },
+      { success: false, error: "Falha ao salvar estratégia" },
+    ),
   botConfigSave: (patch: Record<string, unknown>) =>
     v2<{ success: boolean }>(
       "/bot/config",
       { method: "PATCH", body: JSON.stringify(patch) },
       { success: false },
     ),
+
 
   // ─── Fatia H: Contas Binance (multi-conta) ───
   accountsList: () =>
@@ -254,6 +291,24 @@ export const apiV2 = {
     v2<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}/deactivate`, { method: "POST" }, { success: false }),
   botStrategyDelete: (name: string) =>
     v2<{ success: boolean }>(`/bot/strategies/${encodeURIComponent(name)}`, { method: "DELETE" }, { success: false }),
+  botStrategyShare: (name: string) =>
+    v2<{ success: boolean; code?: string; error?: string }>(
+      `/bot/strategies/${encodeURIComponent(name)}/share`,
+      { method: "POST" },
+      { success: false, error: "Falha ao compartilhar estratégia" },
+    ),
+  botStrategySharedGet: (code: string) =>
+    v2<{ success: boolean; strategy?: unknown; error?: string }>(
+      `/bot/strategies/shared/${encodeURIComponent(code)}`,
+      undefined,
+      { success: false, error: "Código inválido" },
+    ),
+  botStrategyImportTradingView: (payload: { url?: string; rawPineScript?: string }) =>
+    v2<{ success: boolean; strategy?: unknown; error?: string; reason?: string }>(
+      "/bot/strategies/import-tradingview",
+      { method: "POST", body: JSON.stringify(payload) },
+      { success: false, error: "Falha ao analisar o script" },
+    ),
 
   // ─── Fatia C: Posições (leitura) ───
   botPositions: () =>
@@ -261,6 +316,16 @@ export const apiV2 = {
       "/bot/positions",
       undefined,
       { success: false, positions: [] },
+    ),
+
+  botSavePositionNote: (id: string, note: string) =>
+    v2<{ success: boolean }>(
+      `/bot/positions/${encodeURIComponent(id)}/note`,
+      {
+        method: "POST",
+        body: JSON.stringify({ note }),
+      },
+      { success: false }
     ),
 
   // ─── Fatia B: Dashboard (resumo, calculado das posições reais) ───
@@ -272,5 +337,30 @@ export const apiV2 = {
         success: false, pnlToday: 0, operationsToday: 0, winRate30d: null,
         totalTrades30d: 0, openPositions: 0, recentActivity: [],
       } as unknown as { success: boolean },
+    ),
+
+  // ─── Fatia I: Notifications ───
+  notifications: (limit?: number) =>
+    v2<{ success: boolean; notifications: any[] }>(
+      `/notifications${limit ? `?limit=${limit}` : ""}`,
+      undefined,
+      { success: false, notifications: [] }
+    ),
+
+  notificationsRead: (ids?: string[]) =>
+    v2<{ success: boolean }>(
+      "/notifications/read",
+      {
+        method: "POST",
+        body: ids ? JSON.stringify({ ids }) : undefined,
+      },
+      { success: false }
+    ),
+
+  systemStatus: () =>
+    v2<{ success: boolean; database: string; worker: string; beat: string; redis: string; backend: string }>(
+      "/status",
+      undefined,
+      { success: false, database: "down", worker: "down", beat: "down", redis: "down", backend: "down" }
     ),
 };

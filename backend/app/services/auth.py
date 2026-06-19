@@ -6,6 +6,8 @@ from fastapi import HTTPException, status
 from app.models.user import User
 from app.config import settings
 import secrets
+import httpx
+
 
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
@@ -46,6 +48,95 @@ def login_user(db: Session, email: str, password: str) -> str:
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Conta desativada")
     return create_access_token(user.id)
+
+def login_google_user(db: Session, credential: str) -> str:
+    # 1. Verificar credencial com a API do Google
+    try:
+        response = httpx.get(
+            f"https://oauth2.googleapis.com/tokeninfo?id_token={credential}",
+            timeout=10.0
+        )
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token do Google inválido ou expirado"
+            )
+        
+        token_info = response.json()
+        
+        # Verificar o emissor
+        iss = token_info.get("iss", "")
+        if iss not in ["accounts.google.com", "https://accounts.google.com"]:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Emissor do token inválido"
+            )
+            
+        # Verificar o client ID se estiver configurado
+        if settings.google_client_id:
+            aud = token_info.get("aud", "")
+            if aud != settings.google_client_id:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="ID de Cliente Google não correspondente"
+                )
+                
+        email = token_info.get("email")
+        if not email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email não fornecido pelo Google"
+            )
+            
+        email_verified = token_info.get("email_verified")
+        if email_verified not in [True, "true"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email do Google não verificado"
+            )
+            
+        name = token_info.get("name")
+        picture = token_info.get("picture")
+            
+    except httpx.RequestError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Não foi possível conectar ao serviço de autenticação do Google"
+        )
+        
+    # 2. Verificar se o usuário existe, senão registrar
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        random_pass = secrets.token_urlsafe(32)
+        user = User(
+            email=email,
+            hashed_password=hash_password(random_pass),
+            name=name,
+            picture=picture,
+            is_verified=True,
+            is_active=True
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    else:
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Conta desativada"
+            )
+        if name:
+            user.name = name
+        if picture:
+            user.picture = picture
+        if not user.is_verified:
+            user.is_verified = True
+        db.commit()
+        db.refresh(user)
+            
+    # 3. Retornar token do sistema
+    return create_access_token(user.id)
+
 
 def create_reset_token(db: Session, email: str) -> str:
     user = db.query(User).filter(User.email == email).first()

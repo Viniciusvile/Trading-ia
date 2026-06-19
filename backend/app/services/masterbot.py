@@ -9,6 +9,7 @@ servico do scalper).
 from __future__ import annotations
 
 from app.services import masterbot_signals as mb
+from app.services.condition_evaluator import evaluate_candle_conditions
 
 
 def decide_signal_for_plan(plan: dict, candles: list[dict]) -> dict:
@@ -65,6 +66,24 @@ def decide_signal_for_plan(plan: dict, candles: list[dict]) -> dict:
         st = mb.calc_plan_stop_tp(price, atr, plan, safety["side"])
         return {"action": "enter", "side": safety["side"], "stop": st["stop"], "tp": st["tp"],
                 "strategy": strategy, "conditions": safety.get("results", [])}
+
+    # custom (condições programáveis importadas da IA ou criadas pelo usuário)
+    if strategy == "custom":
+        entry_conditions = plan.get("entry_conditions") or []
+        if not entry_conditions:
+            return {"action": "none", "reason": "sem condições de entrada definidas",
+                    "strategy": "custom", "conditions": []}
+        eval_result = evaluate_candle_conditions(entry_conditions, candles)
+        if not eval_result["allPass"]:
+            return {"action": "none", "reason": "condições custom não atendidas",
+                    "strategy": "custom", "conditions": eval_result["results"]}
+        side = plan.get("entry_side", "LONG").upper()
+        if side == "SHORT" and not allow_short:
+            return {"action": "none", "reason": "short bloqueado (spot)",
+                    "strategy": "custom", "conditions": eval_result["results"]}
+        st = mb.calc_plan_stop_tp(price, atr, plan, side)
+        return {"action": "enter", "side": side, "stop": st["stop"], "tp": st["tp"],
+                "strategy": "custom", "conditions": eval_result["results"]}
 
     # warrior (long-only, seguidor de tendencia) — default
     safety = mb.run_safety_check_warrior(candles)

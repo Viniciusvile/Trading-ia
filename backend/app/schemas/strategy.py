@@ -4,7 +4,17 @@ from datetime import datetime
 
 ALLOWED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"]
 ALLOWED_TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h", "1d"]
-ALLOWED_INDICATORS = ["RSI", "EMA", "SMA", "BB_UPPER", "BB_LOWER", "VOLUME"]
+ALLOWED_INDICATORS = [
+    "RSI", "EMA", "SMA", "RMA", "HMA", "WMA", "VWAP", "ATR", "ATR_PCT",
+    "ADX", "PDI", "MDI", "MACD_HIST", "MACD_LINE", "MACD_SIGNAL",
+    "BB_UPPER", "BB_LOWER", "BB_BASIS", "BB_PCT_B", "SUPERTREND",
+    "STOCH_K", "STOCH_D", "CHOPPINESS", "VOLUME", "VOLUME_AVG",
+    "CLOSE", "HIGH", "LOW", "OPEN",
+    "STOCH_RSI_K", "STOCH_RSI_D", "CCI", "WILLIAMS_R", "OBV", "MFI", "CMF", "VWMA",
+    "PIVOT", "PIVOT_R1", "PIVOT_R2", "PIVOT_S1", "PIVOT_S2", "PSAR", "PSAR_TREND",
+    "ICHIMOKU_TENKAN", "ICHIMOKU_KIJUN", "ICHIMOKU_SENKOU_A", "ICHIMOKU_SENKOU_B",
+    "ICHIMOKU_CLOUD_TOP", "ICHIMOKU_CLOUD_BOTTOM"
+]
 ALLOWED_OPERATORS = ["greater_than", "less_than", "crosses_above", "crosses_below"]
 
 class Condition(BaseModel):

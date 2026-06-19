@@ -190,6 +190,9 @@ def calc_plan_stop_tp(price: float, atr: float, plan: dict, side: str = "LONG") 
         stop = price - dir_ * atr * plan["sl_atr_mult"]
     elif sl.get("type") == "pct":
         stop = price * (1 - dir_ * sl["value"] / 100)
+    elif sl.get("type") == "trail":
+        val = sl.get("value") or 1.5
+        stop = price * (1 - dir_ * val / 100)
     elif sl.get("multiplier") is not None:
         stop = price - dir_ * atr * sl["multiplier"]
     else:
@@ -568,13 +571,122 @@ def calc_choppiness(candles: list[Candle], period: int = 14) -> float | None:
     return 100 * (math.log10(sum_tr / (high - low)) / math.log10(period))
 
 
-def apply_plan_filters(candles: list[Candle], plan: dict) -> list[dict]:
-    """Port de applyPlanFilters (bot.js) — SO os filtros usados hoje pelas estrategias:
-    ema_triple, adx_min/adx_max, di_direction, rsi_min/rsi_max, volume_mult,
-    volume_max_mult, choppiness_min. Cada um vira {label, pass}.
+def calc_macd(closes: list[float], fast_period: int = 12, slow_period: int = 26, signal_period: int = 9) -> dict | None:
+    if len(closes) < max(fast_period, slow_period) + signal_period:
+        return None
+    fast_ema_arr = ema_series(closes, fast_period)
+    slow_ema_arr = ema_series(closes, slow_period)
+    
+    macd_vals = []
+    for f, s in zip(fast_ema_arr, slow_ema_arr):
+        if f is not None and s is not None:
+            macd_vals.append(f - s)
+        else:
+            macd_vals.append(None)
+            
+    valid_macd = [v for v in macd_vals if v is not None]
+    if len(valid_macd) < signal_period:
+        return None
+    signal_ema_arr = ema_series(valid_macd, signal_period)
+    padded_signal = [None] * (len(macd_vals) - len(signal_ema_arr)) + signal_ema_arr
+    
+    macd_val = macd_vals[-1]
+    signal_val = padded_signal[-1]
+    if macd_val is None or signal_val is None:
+        return None
+        
+    hist = macd_val - signal_val
+    prev_macd_val = macd_vals[-2]
+    prev_signal_val = padded_signal[-2]
+    prev_hist = None
+    if prev_macd_val is not None and prev_signal_val is not None:
+        prev_hist = prev_macd_val - prev_signal_val
+        
+    return {"macd": macd_val, "signal": signal_val, "hist": hist, "prev_hist": prev_hist}
 
-    CRITICO: a signalFn do legado roda isto ANTES do safety check e exige que TODOS
-    passem. Sem isto, o bot opera em regime errado (gera trades ruins demais).
+
+def calc_bollinger(closes: list[float], period: int = 20, mult: float = 2.0) -> dict | None:
+    if len(closes) < period:
+        return None
+    subset = closes[-period:]
+    basis = sum(subset) / period
+    import math
+    variance = sum((x - basis) ** 2 for x in subset) / period
+    std_dev = math.sqrt(variance)
+    upper = basis + mult * std_dev
+    lower = basis - mult * std_dev
+    price = closes[-1]
+    pct_b = (price - lower) / (upper - lower) if upper != lower else 0.5
+    width = upper - lower
+    compressed = (width / basis) < 0.05 if basis != 0 else False
+    return {"basis": basis, "upper": upper, "lower": lower, "pct_b": pct_b, "compressed": compressed}
+
+
+def calc_supertrend(candles: list[Candle], period: int = 10, mult: float = 3.0) -> dict | None:
+    if len(candles) < period + 1:
+        return None
+    trs = []
+    for i in range(1, len(candles)):
+        h = candles[i]["high"]
+        l = candles[i]["low"]
+        pc = candles[i - 1]["close"]
+        trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+    
+    if len(trs) < period:
+        return None
+        
+    atr_vals = rma_series(trs, period)
+    n = len(candles)
+    final_upper = [0.0] * n
+    final_lower = [0.0] * n
+    trend = [1] * n
+    
+    start_idx = period + 1
+    if start_idx >= n:
+        return None
+        
+    for i in range(start_idx, n):
+        h = candles[i]["high"]
+        l = candles[i]["low"]
+        c = candles[i]["close"]
+        hl2 = (h + l) / 2.0
+        atr = atr_vals[i - 1]
+        if atr is None:
+            continue
+            
+        basic_upper = hl2 + mult * atr
+        basic_lower = hl2 - mult * atr
+        
+        prev_close = candles[i - 1]["close"]
+        prev_upper = final_upper[i - 1]
+        prev_lower = final_lower[i - 1]
+        prev_trend = trend[i - 1]
+        
+        if basic_upper < prev_upper or prev_close > prev_upper:
+            final_upper[i] = basic_upper
+        else:
+            final_upper[i] = prev_upper
+            
+        if basic_lower > prev_lower or prev_close < prev_lower:
+            final_lower[i] = basic_lower
+        else:
+            final_lower[i] = prev_lower
+            
+        if c > final_upper[i]:
+            trend[i] = 1
+        elif c < final_lower[i]:
+            trend[i] = -1
+        else:
+            trend[i] = prev_trend
+            
+    return {"trend": trend[-1], "upper": final_upper[-1], "lower": final_lower[-1]}
+
+
+def apply_plan_filters(candles: list[Candle], plan: dict) -> list[dict]:
+    """Port de applyPlanFilters (bot.js) — Com suporte para todas as regras customizadas:
+    ema_triple, adx_min/adx_max, di_direction, rsi_min/rsi_max, volume_mult,
+    volume_max_mult, choppiness_min, macd_positive, macd_growing, bb_range,
+    bb_pct_b_min, bb_pct_b_max, rsi_range_mid, supertrend.
     """
     f = (plan or {}).get("filters") or {}
     closes = [c["close"] for c in candles]
@@ -590,13 +702,12 @@ def apply_plan_filters(candles: list[Candle], plan: dict) -> list[dict]:
         if f.get("adx_min") is not None:
             extra.append({"label": f"ADX >= {f['adx_min']}", "pass": di is not None and di["adx"] >= f["adx_min"]})
         if f.get("adx_max") is not None:
-            # mercado lateral: ADX abaixo do maximo (sem tendencia forte)
             extra.append({"label": f"ADX <= {f['adx_max']}", "pass": di is not None and di["adx"] <= f["adx_max"]})
         if f.get("di_direction"):
             extra.append({"label": "DI+ > DI-", "pass": di is not None and di["pdi"] > di["mdi"]})
 
     if f.get("rsi_min") is not None or f.get("rsi_max") is not None:
-        rsi = calc_rsi(closes, 14)
+        rsi = calc_rsi(closes, int(f.get("rsi_period", 14)))
         mn, mx = f.get("rsi_min", 0), f.get("rsi_max", 100)
         extra.append({"label": f"RSI {mn}-{mx}", "pass": rsi is not None and mn <= rsi <= mx})
 
@@ -616,4 +727,307 @@ def apply_plan_filters(candles: list[Candle], plan: dict) -> list[dict]:
         chop = calc_choppiness(candles, 14)
         extra.append({"label": f"Choppiness >= {f['choppiness_min']}", "pass": chop is not None and chop >= f["choppiness_min"]})
 
+    # MACD
+    if f.get("macd_positive") or f.get("macd_growing"):
+        macd = calc_macd(closes)
+        if f.get("macd_positive"):
+            extra.append({"label": "MACD > 0", "pass": macd is not None and macd["hist"] > 0})
+        if f.get("macd_growing"):
+            extra.append({"label": "MACD Acelerando", "pass": macd is not None and macd["prev_hist"] is not None and macd["hist"] > macd["prev_hist"]})
+
+    # Bollinger Bands
+    if f.get("bb_range") or f.get("bb_pct_b_min") is not None or f.get("bb_pct_b_max") is not None:
+        period = int(f.get("bb_period", 20))
+        mult = float(f.get("bb_mult", 2.0))
+        bb = calc_bollinger(closes, period, mult)
+        if f.get("bb_range"):
+            extra.append({"label": "Bollinger Comprimido", "pass": bb is not None and bb["compressed"]})
+        if f.get("bb_pct_b_min") is not None:
+            extra.append({"label": f"%B >= {f['bb_pct_b_min']}", "pass": bb is not None and bb["pct_b"] >= float(f["bb_pct_b_min"])})
+        if f.get("bb_pct_b_max") is not None:
+            extra.append({"label": f"%B <= {f['bb_pct_b_max']}", "pass": bb is not None and bb["pct_b"] <= float(f["bb_pct_b_max"])})
+
+    # RSI range mid
+    if f.get("rsi_range_mid"):
+        rsi = calc_rsi(closes, int(f.get("rsi_period", 14)))
+        extra.append({"label": "RSI Neutro (40-60)", "pass": rsi is not None and 40 <= rsi <= 60})
+
+    # Supertrend
+    if f.get("supertrend_period") is not None or f.get("supertrend_mult") is not None:
+        period = int(f.get("supertrend_period", 10))
+        mult = float(f.get("supertrend_mult", 3.0))
+        st = calc_supertrend(candles, period, mult)
+        if st is not None:
+            extra.append({"label": f"Supertrend ({period},{mult})", "pass": st["trend"] == 1})
+
     return extra
+
+
+# ─── FASE 2: Novos indicadores (Gargalo 3) ─────────────────────────────────
+#
+# 10 indicadores populares do TradingView que estavam faltando no motor.
+# Cada um é puro Python (sem pandas), seguindo as fórmulas padrão do TV.
+
+
+def calc_stoch_rsi(closes: list[float], rsi_period: int = 14,
+                   stoch_period: int = 14, k_smooth: int = 3,
+                   d_smooth: int = 3) -> dict | None:
+    """Stochastic RSI — RSI normalizado entre 0-100 como um estocástico.
+
+    Retorna {"k": float, "d": float} ou None se dados insuficientes.
+    """
+    need = rsi_period + stoch_period + max(k_smooth, d_smooth)
+    if len(closes) < need:
+        return None
+
+    # Calcula série de RSI para os últimos (stoch_period + k_smooth + d_smooth) candles
+    rsi_values: list[float] = []
+    for i in range(stoch_period + k_smooth + d_smooth):
+        end = len(closes) - (stoch_period + k_smooth + d_smooth) + i + 1
+        rsi_values.append(calc_rsi(closes[:end], rsi_period))
+
+    # Estocástico sobre RSI
+    raw_k: list[float] = []
+    for i in range(stoch_period - 1, len(rsi_values)):
+        window = rsi_values[i - stoch_period + 1: i + 1]
+        hi, lo = max(window), min(window)
+        raw_k.append(((rsi_values[i] - lo) / (hi - lo) * 100) if hi != lo else 50.0)
+
+    # Suaviza %K com SMA
+    k_vals = sma_series(raw_k, k_smooth)
+    k = k_vals[-1] if k_vals and k_vals[-1] is not None else None
+    # %D = SMA de %K
+    k_clean = [v for v in k_vals if v is not None]
+    d_vals = sma_series(k_clean, d_smooth) if len(k_clean) >= d_smooth else []
+    d = d_vals[-1] if d_vals and d_vals[-1] is not None else k
+
+    if k is None:
+        return None
+    return {"k": k, "d": d if d is not None else k}
+
+
+def calc_cci(candles: list[Candle], period: int = 20) -> float | None:
+    """Commodity Channel Index — mede desvio do preço típico vs média."""
+    if len(candles) < period:
+        return None
+    tp = [(c["high"] + c["low"] + c["close"]) / 3 for c in candles[-period:]]
+    mean_tp = sum(tp) / period
+    mean_dev = sum(abs(t - mean_tp) for t in tp) / period
+    if mean_dev == 0:
+        return 0.0
+    return (tp[-1] - mean_tp) / (0.015 * mean_dev)
+
+
+def calc_williams_r(candles: list[Candle], period: int = 14) -> float | None:
+    """Williams %R — oscilador momentum entre -100 e 0."""
+    if len(candles) < period:
+        return None
+    window = candles[-period:]
+    highest = max(c["high"] for c in window)
+    lowest = min(c["low"] for c in window)
+    if highest == lowest:
+        return -50.0
+    return ((highest - candles[-1]["close"]) / (highest - lowest)) * -100
+
+
+def calc_obv(candles: list[Candle]) -> float:
+    """On-Balance Volume — acumula volume por direção do preço."""
+    if not candles:
+        return 0.0
+    obv = 0.0
+    for i in range(1, len(candles)):
+        vol = candles[i].get("volume", candles[i].get("vol", 0)) or 0
+        if candles[i]["close"] > candles[i - 1]["close"]:
+            obv += vol
+        elif candles[i]["close"] < candles[i - 1]["close"]:
+            obv -= vol
+    return obv
+
+
+def calc_mfi(candles: list[Candle], period: int = 14) -> float | None:
+    """Money Flow Index — RSI ponderado por volume (0-100)."""
+    if len(candles) < period + 1:
+        return None
+    pos_flow = 0.0
+    neg_flow = 0.0
+    for i in range(len(candles) - period, len(candles)):
+        tp_curr = (candles[i]["high"] + candles[i]["low"] + candles[i]["close"]) / 3
+        tp_prev = (candles[i - 1]["high"] + candles[i - 1]["low"] + candles[i - 1]["close"]) / 3
+        vol = candles[i].get("volume", candles[i].get("vol", 0)) or 0
+        raw = tp_curr * vol
+        if tp_curr > tp_prev:
+            pos_flow += raw
+        elif tp_curr < tp_prev:
+            neg_flow += raw
+    if neg_flow == 0:
+        return 100.0
+    if pos_flow == 0:
+        return 0.0
+    ratio = pos_flow / neg_flow
+    return 100 - 100 / (1 + ratio)
+
+
+def calc_cmf(candles: list[Candle], period: int = 20) -> float | None:
+    """Chaikin Money Flow — mede pressão de compra/venda."""
+    if len(candles) < period:
+        return None
+    window = candles[-period:]
+    mf_vol_sum = 0.0
+    vol_sum = 0.0
+    for c in window:
+        hl = c["high"] - c["low"]
+        vol = c.get("volume", c.get("vol", 0)) or 0
+        clv = ((c["close"] - c["low"]) - (c["high"] - c["close"])) / hl if hl != 0 else 0
+        mf_vol_sum += clv * vol
+        vol_sum += vol
+    if vol_sum == 0:
+        return 0.0
+    return mf_vol_sum / vol_sum
+
+
+def calc_vwma(candles: list[Candle], period: int = 20) -> float | None:
+    """Volume-Weighted Moving Average."""
+    if len(candles) < period:
+        return None
+    window = candles[-period:]
+    sum_cv = sum(c["close"] * (c.get("volume", c.get("vol", 0)) or 0) for c in window)
+    sum_v = sum((c.get("volume", c.get("vol", 0)) or 0) for c in window)
+    if sum_v == 0:
+        return None
+    return sum_cv / sum_v
+
+
+def calc_pivot_points(candles: list[Candle]) -> dict | None:
+    """Pivot Points tradicionais (baseado no candle anterior).
+
+    Retorna {"pivot": float, "r1": float, "r2": float, "r3": float,
+             "s1": float, "s2": float, "s3": float}.
+    """
+    if len(candles) < 2:
+        return None
+    prev = candles[-2]
+    h, l, c = prev["high"], prev["low"], prev["close"]
+    pivot = (h + l + c) / 3
+    return {
+        "pivot": pivot,
+        "r1": 2 * pivot - l,
+        "s1": 2 * pivot - h,
+        "r2": pivot + (h - l),
+        "s2": pivot - (h - l),
+        "r3": h + 2 * (pivot - l),
+        "s3": l - 2 * (h - pivot),
+    }
+
+
+def calc_parabolic_sar(candles: list[Candle], af_start: float = 0.02,
+                       af_step: float = 0.02, af_max: float = 0.2) -> dict | None:
+    """Parabolic SAR — stop-and-reverse trailing indicator.
+
+    Retorna {"sar": float, "trend": 1 (bull) | -1 (bear)}.
+    """
+    if len(candles) < 3:
+        return None
+
+    # Inicializa
+    trend = 1  # 1 = bull, -1 = bear
+    sar = candles[0]["low"]
+    ep = candles[0]["high"]  # extreme point
+    af = af_start
+
+    for i in range(1, len(candles)):
+        prev_sar = sar
+        sar = prev_sar + af * (ep - prev_sar)
+
+        if trend == 1:
+            # Limite: SAR não pode estar acima dos últimos 2 lows
+            if i >= 2:
+                sar = min(sar, candles[i - 1]["low"], candles[i - 2]["low"])
+            else:
+                sar = min(sar, candles[i - 1]["low"])
+
+            if candles[i]["low"] < sar:
+                # Reversal → bear
+                trend = -1
+                sar = ep
+                ep = candles[i]["low"]
+                af = af_start
+            else:
+                if candles[i]["high"] > ep:
+                    ep = candles[i]["high"]
+                    af = min(af + af_step, af_max)
+        else:
+            # Bear: SAR não pode estar abaixo dos últimos 2 highs
+            if i >= 2:
+                sar = max(sar, candles[i - 1]["high"], candles[i - 2]["high"])
+            else:
+                sar = max(sar, candles[i - 1]["high"])
+
+            if candles[i]["high"] > sar:
+                # Reversal → bull
+                trend = 1
+                sar = ep
+                ep = candles[i]["high"]
+                af = af_start
+            else:
+                if candles[i]["low"] < ep:
+                    ep = candles[i]["low"]
+                    af = min(af + af_step, af_max)
+
+    return {"sar": sar, "trend": trend}
+
+
+def calc_ichimoku(candles: list[Candle], tenkan_period: int = 9,
+                  kijun_period: int = 26, senkou_b_period: int = 52) -> dict | None:
+    """Ichimoku Cloud — componentes principais.
+
+    Retorna {"tenkan": float, "kijun": float, "senkou_a": float,
+             "senkou_b": float, "chikou": float,
+             "cloud_top": float, "cloud_bottom": float,
+             "price_above_cloud": bool}.
+    """
+    need = max(tenkan_period, kijun_period, senkou_b_period)
+    if len(candles) < need + kijun_period:
+        return None
+
+    def mid(period: int, end_idx: int) -> float:
+        window = candles[end_idx - period + 1: end_idx + 1]
+        return (max(c["high"] for c in window) + min(c["low"] for c in window)) / 2
+
+    last = len(candles) - 1
+    tenkan = mid(tenkan_period, last)
+    kijun = mid(kijun_period, last)
+
+    # Senkou Span A e B são calculados com deslocamento de kijun_period para frente,
+    # mas aqui mostramos o valor ATUAL da nuvem (kijun_period barras atrás no cálculo)
+    senkou_a_idx = last - kijun_period
+    if senkou_a_idx >= max(tenkan_period, kijun_period) - 1:
+        sa_tenkan = mid(tenkan_period, senkou_a_idx)
+        sa_kijun = mid(kijun_period, senkou_a_idx)
+        senkou_a = (sa_tenkan + sa_kijun) / 2
+    else:
+        senkou_a = (tenkan + kijun) / 2
+
+    senkou_b_idx = last - kijun_period
+    if senkou_b_idx >= senkou_b_period - 1:
+        senkou_b = mid(senkou_b_period, senkou_b_idx)
+    else:
+        senkou_b = mid(senkou_b_period, last)
+
+    cloud_top = max(senkou_a, senkou_b)
+    cloud_bottom = min(senkou_a, senkou_b)
+    price = candles[-1]["close"]
+
+    # Chikou Span = close deslocado kijun_period para trás
+    chikou_idx = last - kijun_period
+    chikou = candles[chikou_idx]["close"] if chikou_idx >= 0 else price
+
+    return {
+        "tenkan": tenkan,
+        "kijun": kijun,
+        "senkou_a": senkou_a,
+        "senkou_b": senkou_b,
+        "chikou": chikou,
+        "cloud_top": cloud_top,
+        "cloud_bottom": cloud_bottom,
+        "price_above_cloud": price > cloud_top,
+    }

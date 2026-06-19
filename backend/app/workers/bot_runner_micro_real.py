@@ -26,6 +26,7 @@ from app.models.user import User  # noqa: F401  (registra 'users' p/ FK)
 from app.models.micro import UserMicroConfig, MicroHeartbeat
 from app.models.position import Position
 from app.models.bot_state import is_bot_enabled
+from app.models.notification import Notification
 from app.services import micro_scalper as scalper
 from app.services import order_real as o
 from app.services import scalper_executor as se
@@ -57,19 +58,30 @@ def _open_positions(db, user_id: str) -> list[Position]:
     )
 
 
-def _register_exit(pos: Position, exit_price: float, reason: str) -> None:
+def _register_exit(db, pos: Position, exit_price: float, reason: str) -> None:
     now = datetime.now(timezone.utc)
     pos.status = "closed"
     pos.exit_price = exit_price
     pos.closed_at = now
+    pnl_val = 0.0
     if pos.entry_price and exit_price and pos.quantity:
-        pos.pnl = (exit_price - pos.entry_price) * pos.quantity
+        pnl_val = (exit_price - pos.entry_price) * pos.quantity
+        pos.pnl = pnl_val
     d = dict(pos.data or {})
     d.update({"status": "closed", "closedAt": now.isoformat(),
               "exitPrice": exit_price, "exitReason": reason})
     pos.data = d
     from sqlalchemy.orm.attributes import flag_modified
     flag_modified(pos, "data")
+    
+    # Adiciona notificação
+    notif_type = "success" if pnl_val >= 0 else "error"
+    db.add(Notification(
+        user_id=pos.user_id,
+        title=f"Fechou {pos.symbol}",
+        message=f"PnL: {'+' if pnl_val >= 0 else ''}${pnl_val:.4f} | Saída: ${exit_price:.4f} ({reason})",
+        type=notif_type,
+    ))
 
 
 def _manage_position(db, client, pos: Position, cfg_plan: dict) -> dict:
@@ -82,7 +94,7 @@ def _manage_position(db, client, pos: Position, cfg_plan: dict) -> dict:
     if oco_id:
         st = o.get_oco(client, oco_id)
         if st.get("ok") and st.get("status") == "ALL_DONE":
-            _register_exit(pos, st.get("filled_price") or pos.take_profit_price or 0, "binance_oco_filled")
+            _register_exit(db, pos, st.get("filled_price") or pos.take_profit_price or 0, "binance_oco_filled")
             return {"symbol": symbol, "result": "oco_filled"}
 
     # 2) breakeven / timeout
@@ -116,7 +128,7 @@ def _manage_position(db, client, pos: Position, cfg_plan: dict) -> dict:
 
     if decision["action"] == "timeout_exit":
         sell = o.close_long(client, symbol, pos.quantity or 0, cfg_plan, oco_id=oco_id)
-        _register_exit(pos, sell.get("exitPrice") or price, "timeout")
+        _register_exit(db, pos, sell.get("exitPrice") or price, "timeout")
         return {"symbol": symbol, "result": "timeout_exit", "sell_ok": sell.get("ok")}
 
     return {"symbol": symbol, "result": "hold"}
@@ -194,6 +206,12 @@ def run_micro_scalper_real():
                               "takeProfitPrice": levels["tp"], "strategy": plan.get("strategy_mode", "micro-dip"),
                               "signal": sig.get("signal"), "breakevenTriggered": False},
                         account_id="default",
+                    ))
+                    db.add(Notification(
+                        user_id=cfg.user_id,
+                        title=f"Abriu LONG {symbol}",
+                        message=f"Preço de Entrada: ${entry:.4f} | Quantidade: {qty:.4f}",
+                        type="info",
                     ))
                     db.commit()
                     results.append({"user": cfg.user_id, "symbol": symbol, "result": "opened",
