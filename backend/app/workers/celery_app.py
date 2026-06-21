@@ -46,5 +46,16 @@ celery.conf.update(
             "task": "run_micro_scalper_real",
             "schedule": 60.0,
         },
+        # Reanálise periódica das estratégias do Bot Master a cada 4 horas
+        "reanalyze-strategies": {
+            "task": "reanalyze_all_strategies",
+            "schedule": 14400.0,
+        },
+        # Otimização diária de IA/backtest do Micro-Scalper
+        "optimize-micro-scalper": {
+            "task": "optimize_micro_scalper_all_users",
+            "schedule": 86400.0,
+        },
     },
 )
+

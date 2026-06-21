@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Bot, Pause, Play, AlertTriangle, FileText, Settings, Zap, HelpCircle, CheckCircle2, XCircle, Info } from "lucide-react";
+import { Bot, Pause, Play, AlertTriangle, FileText, Settings, Zap, HelpCircle, CheckCircle2, XCircle, Info, Lock } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardHeader, Button, Badge, Stat, Tooltip, Modal, Input } from "@/components/ui";
 import { AnimatedNumber, SymbolIcon, PillTabs } from "@/components/fx";
@@ -35,6 +35,7 @@ interface BotData {
 }
 
 export default function BotsPage() {
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [bots, setBots] = useState<BotData[]>([
     {
       id: "masterbot",
@@ -192,7 +193,19 @@ export default function BotsPage() {
     }
   };
 
+  const loadUser = async () => {
+    try {
+      const res = await api.me();
+      if (res.success) {
+        setCurrentUser(res.user);
+      }
+    } catch (e) {
+      console.error("Erro ao carregar usuário:", e);
+    }
+  };
+
   useEffect(() => {
+    loadUser();
     refreshStatuses();
     const interval = setInterval(refreshStatuses, 5000);
     return () => clearInterval(interval);
@@ -389,6 +402,23 @@ export default function BotsPage() {
             d.kind === "master" ? bot.id !== "micro-scalper" : bot.id === "micro-scalper"
           );
 
+          const isBotAllowed = (id: string) => {
+            if (!currentUser) return true; // default true while loading
+            const plan = currentUser.plan || "free";
+            if (id === "masterbot") return true;
+            if (id === "micro-scalper") return plan === "pro" || plan === "ultra";
+            if (id === "futures") return plan === "ultra";
+            return true;
+          };
+
+          const getRequiredPlanLabel = (id: string) => {
+            if (id === "micro-scalper") return "Plus";
+            if (id === "futures") return "Pro";
+            return "";
+          };
+
+          const allowed = isBotAllowed(bot.id);
+
           return (
             <motion.div
               key={bot.id}
@@ -396,7 +426,23 @@ export default function BotsPage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: botIdx * 0.07, duration: 0.3, ease: "easeOut" }}
             >
-              <Card padding="lg" className={`h-full flex flex-col ${isOnline ? "border-[var(--color-up-500)]/25" : ""}`}>
+              <Card padding="lg" className={`relative overflow-hidden h-full flex flex-col ${isOnline ? "border-[var(--color-up-500)]/25" : ""}`}>
+                {!allowed && (
+                  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-4 bg-black/85 backdrop-blur-[2px] text-center animate-in fade-in duration-200">
+                    <Lock className="h-8 w-8 text-[var(--color-brand-500)] mb-2" />
+                    <div className="font-bold text-sm text-[var(--color-text)]">Robô Bloqueado</div>
+                    <p className="text-[11px] text-muted mt-1 mb-4 max-w-[180px]">
+                      O {bot.name} está disponível a partir do plano <strong className="text-[var(--color-brand-500)]">{getRequiredPlanLabel(bot.id)}</strong>.
+                    </p>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => window.location.href = "/planos"}
+                    >
+                      Fazer Upgrade
+                    </Button>
+                  </div>
+                )}
                 <CardHeader
                   icon={<Bot size={18} className={isOnline ? "text-[var(--color-up-300)]" : "text-[var(--color-muted)]"} />}
                   title={bot.name}

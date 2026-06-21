@@ -17,7 +17,7 @@ from app.services import micro_scalper as scalper
 
 # O scalper opera em candles curtos (5m por padrao no legado).
 SCALPER_INTERVAL = Client.KLINE_INTERVAL_5MINUTE
-CANDLE_LIMIT = 100
+CANDLE_LIMIT = 250
 
 
 def _fetch_candles(client: Client, symbol: str) -> list[dict]:
@@ -94,3 +94,27 @@ def _record_paper_signal(db, symbol: str, d: dict) -> None:
     else:
         db.add(MicroSession(session_start=day_start, symbol=symbol,
                             trades=[entry], account_id="paper"))
+
+
+@shared_task(name="optimize_micro_scalper_all_users")
+def optimize_micro_scalper_all_users():
+    import logging
+    from app.services.scalper_optimizer import optimize_symbol_for_user
+    logger = logging.getLogger(__name__)
+    db = _get_session_factory()()
+    results = []
+    try:
+        configs = db.query(UserMicroConfig).all()
+        for cfg in configs:
+            data = cfg.data or {}
+            plans = data.get("plans") or {}
+            for symbol in plans.keys():
+                try:
+                    res = optimize_symbol_for_user(db, cfg.user_id, symbol)
+                    results.append({"user": cfg.user_id, "symbol": symbol, "result": res})
+                except Exception as e:
+                    logger.error(f"Erro ao otimizar {symbol} para usuario {cfg.user_id}: {e}")
+                    results.append({"user": cfg.user_id, "symbol": symbol, "error": str(e)})
+        return {"status": "ok", "results": results}
+    finally:
+        db.close()

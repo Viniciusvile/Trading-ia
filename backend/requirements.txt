@@ -17,3 +17,4 @@ redis>=5.0.0
 pandas>=2.0.0
 python-binance>=1.0.0
 bcrypt>=4.0.0
+stripe==15.2.1

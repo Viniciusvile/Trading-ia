@@ -10,7 +10,7 @@ user_micro_config / micro_sessions / micro_heartbeat.
 """
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Depends, Query, Body
+from fastapi import APIRouter, Depends, Query, Body, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -73,6 +73,13 @@ def update_config(
     db: Session = Depends(get_db),
 ):
     """Mescla as chaves enviadas (ex.: max_trade_usdt, timeout_enabled) em user_micro_config.data."""
+    from app.services.plans import PLAN_CATALOG
+    plan_cfg = PLAN_CATALOG.get(current_user.plan, PLAN_CATALOG["free"])
+    if not plan_cfg.get("micro_custom", False):
+        non_active_keys = set(body or {}).difference({"active_symbols"})
+        if non_active_keys:
+            raise HTTPException(status_code=403, detail={"code": "plan_limit", "message": "Customização de parâmetros globais do Micro-Scalper só está disponível no plano Pro. Faça upgrade."})
+
     cfg = db.get(UserMicroConfig, current_user.id)
     if not cfg:
         cfg = UserMicroConfig(user_id=current_user.id, data={})
@@ -120,6 +127,11 @@ def update_strategy(
     plan = body.get("plan")
     plans = dict(data.get("plans") or {})
     if plan is not None:
+        from app.services.plans import PLAN_CATALOG
+        plan_cfg = PLAN_CATALOG.get(current_user.plan, PLAN_CATALOG["free"])
+        if not plan_cfg.get("micro_custom", False):
+            raise HTTPException(status_code=403, detail={"code": "plan_limit", "message": "Customização de parâmetros do Micro-Scalper só está disponível no plano Pro. Faça upgrade."})
+
         symbol_plan = dict(plans.get(symbol) or {})
         for k, v in plan.items():
             symbol_plan[k] = v
@@ -129,6 +141,11 @@ def update_strategy(
     # 3. Global update
     global_cfg = body.get("global")
     if global_cfg is not None:
+        from app.services.plans import PLAN_CATALOG
+        plan_cfg = PLAN_CATALOG.get(current_user.plan, PLAN_CATALOG["free"])
+        if not plan_cfg.get("micro_custom", False):
+            raise HTTPException(status_code=403, detail={"code": "plan_limit", "message": "Customização de parâmetros do Micro-Scalper só está disponível no plano Pro. Faça upgrade."})
+
         for k, v in global_cfg.items():
             data[k] = v
 
@@ -137,4 +154,27 @@ def update_strategy(
     db.commit()
 
     return {"success": True, "restarted": True, "config": data}
+
+
+@router.post("/optimize")
+def optimize_strategy(
+    body: dict = Body(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    symbol = (body or {}).get("symbol")
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Symbol is required")
+    
+    from app.services.plans import PLAN_CATALOG
+    plan_cfg = PLAN_CATALOG.get(current_user.plan, PLAN_CATALOG["free"])
+    if not plan_cfg.get("micro_custom", False):
+        raise HTTPException(status_code=403, detail={"code": "plan_limit", "message": "Otimização por IA do Micro-Scalper só está disponível no plano Pro. Faça upgrade."})
+
+    from app.services.scalper_optimizer import optimize_symbol_for_user
+    try:
+        res = optimize_symbol_for_user(db, current_user.id, symbol, force_ia=True)
+        return {"success": True, "restarted": True, **res}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 

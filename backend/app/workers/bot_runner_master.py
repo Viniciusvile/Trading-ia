@@ -373,3 +373,58 @@ def run_masterbot():
         return {"status": "ok", "ts": datetime.now(timezone.utc).isoformat(), "decisions": decisions}
     finally:
         db.close()
+
+
+@shared_task(name="reanalyze_all_strategies")
+def reanalyze_all_strategies():
+    from app.database import _get_session_factory
+    from app.models.master import MasterPlan
+    from app.services import backtest as bt
+    from sqlalchemy.orm.attributes import flag_modified
+    import time
+    
+    db = _get_session_factory()()
+    try:
+        plans = db.query(MasterPlan).all()
+        updated_count = 0
+        for mp in plans:
+            plan = dict(mp.data or {})
+            if not plan.get("name") or not plan.get("symbols") or not plan.get("timeframes"):
+                continue
+            
+            # Prepara os dados para o backtest
+            plan_data = {
+                "name": mp.name,
+                "strategy": plan.get("strategy", "warrior"),
+                "symbols": plan.get("symbols", []),
+                "timeframes": plan.get("timeframes", []),
+                "mode": plan.get("mode", "spot"),
+                "sl": plan.get("sl", {}),
+                "tp": plan.get("tp", {}),
+                "filters": plan.get("filters", {}),
+                "winRateTarget": plan.get("winRateTarget"),
+                "entry_conditions": plan.get("entry_conditions", []),
+                "entry_side": plan.get("entry_side", "LONG"),
+                "exit_conditions": plan.get("exit_conditions", []),
+            }
+            
+            try:
+                result = bt.run_plan_backtest(plan_data)
+                
+                # Salva o resultado
+                data = dict(mp.data or {})
+                data["lastBacktest"] = result
+                mp.data = data
+                flag_modified(mp, "data")
+                db.commit()
+                updated_count += 1
+                
+                # Sleep de 0.5s para evitar rate limits da API da Binance
+                time.sleep(0.5)
+            except Exception as e:
+                db.rollback()
+                continue
+        return {"status": "ok", "total_plans": len(plans), "updated_plans": updated_count}
+    finally:
+        db.close()
+

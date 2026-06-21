@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.deps import get_current_user
 from app.models.user import User
+from app.models.strategy import Strategy
 from app.schemas.strategy import StrategyCreate, StrategyConditions
 from app.services import strategy as strategy_service
+from app.services.plans import plan_max_strategies
 from datetime import datetime
 
 router = APIRouter()
@@ -20,6 +22,9 @@ def _serialize(s, conditions: StrategyConditions) -> dict:
 
 @router.post("", status_code=201)
 def create(body: StrategyCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    count = db.query(Strategy).filter(Strategy.user_id == user.id).count()
+    if count >= plan_max_strategies(user.plan):
+        raise HTTPException(status_code=403, detail={"code": "plan_limit", "message": "Limite de estratégias do seu plano atingido. Faça upgrade."})
     s = strategy_service.create_strategy(db, user, body)
     return _serialize(s, body.conditions)
 

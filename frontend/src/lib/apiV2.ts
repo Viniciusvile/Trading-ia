@@ -1,5 +1,5 @@
 // Cliente do backend Python (FastAPI :8000 via rewrite /api/v2).
-// Cresce uma fatia da migração por vez. Reaproveita as interfaces de ./api.ts.
+// Cresce uma fatia da migra????o por vez. Reaproveita as interfaces de ./api.ts.
 import { V2_BASE } from "@/config/backend";
 
 export async function v2<T>(path: string, init?: RequestInit, fallback?: T): Promise<T> {
@@ -55,7 +55,7 @@ type V2Ticker = {
 type V2Candle = { time: number; open: number; high: number; low: number; close: number; volume: number };
 
 export const apiV2 = {
-  // ─── Fatia A: Market (cotações/candles) ───
+  // ????????? Fatia A: Market (cota????es/candles) ?????????
   quote: async (symbol: string) => {
     const list = await v2<V2Ticker[]>(
       `/market/tickers?symbols=${encodeURIComponent(symbol)}`,
@@ -67,7 +67,7 @@ export const apiV2 = {
     return {
       symbol: t.symbol,
       last: t.price,
-      change: 0, // backend só expõe percentual; valor absoluto não é usado pela UI
+      change: 0, // backend s?? exp??e percentual; valor absoluto n??o ?? usado pela UI
       changePct: t.change_pct,
       high: t.high,
       low: t.low,
@@ -84,7 +84,7 @@ export const apiV2 = {
     return { bars };
   },
 
-  // ─── Fatia D: Auth (login/registro/me) ───
+  // ????????? Fatia D: Auth (login/registro/me) ?????????
   // O Python responde {access_token} / UserResponse; a UI espera {success, token, user, error}.
   login: async (params: { email: string; password?: string }) => {
     try {
@@ -92,10 +92,10 @@ export const apiV2 = {
         method: "POST",
         body: JSON.stringify({ email: params.email, password: params.password ?? "" }),
       });
-      if (!r.access_token) return { success: false, error: "Falha na autenticação" };
+      if (!r.access_token) return { success: false, error: "Falha na autentica????o" };
       return { success: true, token: r.access_token };
     } catch {
-      return { success: false, error: "Falha na autenticação" };
+      return { success: false, error: "Falha na autentica????o" };
     }
   },
 
@@ -105,10 +105,10 @@ export const apiV2 = {
         method: "POST",
         body: JSON.stringify({ credential }),
       });
-      if (!r.access_token) return { success: false, error: "Falha na autenticação com Google" };
+      if (!r.access_token) return { success: false, error: "Falha na autentica????o com Google" };
       return { success: true, token: r.access_token };
     } catch {
-      return { success: false, error: "Falha na autenticação com Google" };
+      return { success: false, error: "Falha na autentica????o com Google" };
     }
   },
 
@@ -137,7 +137,7 @@ export const apiV2 = {
     }
   },
 
-  // ─── Fatia F (parcial): Micro-Scalper (leitura de estado) ───
+  // ????????? Fatia F (parcial): Micro-Scalper (leitura de estado) ?????????
   microScalperStatus: () =>
     v2<{ success: boolean; running: boolean; activeSymbols?: string[] }>(
       "/micro-scalper/status",
@@ -176,7 +176,7 @@ export const apiV2 = {
   microScalperStart: () => v2<{ success: boolean }>("/bot/micro/start", { method: "POST" }, { success: false }),
   microScalperStop: () => v2<{ success: boolean }>("/bot/micro/stop", { method: "POST" }, { success: false }),
 
-  // log de trades do scalper (paper) e PATCH de config — substituem os fetch /api/legacy diretos
+  // log de trades do scalper (paper) e PATCH de config ??? substituem os fetch /api/legacy diretos
   microScalperLog: (limit = 25) =>
     v2<{ success: boolean; trades: unknown[] }>(
       `/micro-scalper/log?limit=${limit}`,
@@ -198,7 +198,13 @@ export const apiV2 = {
     v2<{ success: boolean; restarted?: boolean; error?: string }>(
       "/micro-scalper/strategy",
       { method: "PATCH", body: JSON.stringify(payload) },
-      { success: false, error: "Falha ao salvar estratégia" },
+      { success: false, error: "Falha ao salvar estrat??gia" },
+    ),
+  microScalperOptimize: (payload: { symbol: string }) =>
+    v2<{ success: boolean; restarted?: boolean; mode?: string; plan?: any; stats?: any; error?: string }>(
+      "/micro-scalper/optimize",
+      { method: "POST", body: JSON.stringify(payload) },
+      { success: false, error: "Falha ao otimizar estrat??gia" },
     ),
   botConfigSave: (patch: Record<string, unknown>) =>
     v2<{ success: boolean }>(
@@ -208,7 +214,7 @@ export const apiV2 = {
     ),
 
 
-  // ─── Fatia H: Contas Binance (multi-conta) ───
+  // ????????? Fatia H: Contas Binance (multi-conta) ?????????
   accountsList: () =>
     v2<{ success: boolean; accounts: unknown[] }>("/accounts", undefined, { success: false, accounts: [] }),
   accountCreate: (params: { name: string; apiKey: string; secretKey: string; isTestnet: boolean }) =>
@@ -218,7 +224,7 @@ export const apiV2 = {
   accountDelete: (id: string) =>
     v2<{ success: boolean }>(`/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }, { success: false }),
 
-  // ─── Config do MasterBot (modal de configurações: groupPlans + activePlans) ───
+  // ????????? Config do MasterBot (modal de configura????es: groupPlans + activePlans) ?????????
   botConfig: () =>
     v2<{ success: boolean } | null>("/bot/config", undefined, null),
   botMasterRawLog: () =>
@@ -228,7 +234,7 @@ export const apiV2 = {
       { success: false, lines: [] },
     ),
 
-  // ─── Fatia F5: escrita de posições (PAPER) + saldo + futures stub + backtest stub ───
+  // ????????? Fatia F5: escrita de posi????es (PAPER) + saldo + futures stub + backtest stub ?????????
   botBalance: () =>
     v2<{ success: boolean; spot?: number; futures?: number }>(
       "/bot/balance",
@@ -239,7 +245,7 @@ export const apiV2 = {
     v2<{ success: boolean; error?: string }>(
       `/bot/positions/${encodeURIComponent(id)}/close${markOnly ? "?markOnly=true" : ""}`,
       { method: "POST" },
-      { success: false, error: "Falha na requisição" },
+      { success: false, error: "Falha na requisi????o" },
     ),
   botReconcile: () =>
     v2<{ success: boolean; error?: string }>(
@@ -253,7 +259,7 @@ export const apiV2 = {
     v2<{ success: boolean; exitCode?: number; stdout?: string; stderr?: string; error?: string }>(
       "/bot/force-trade",
       { method: "POST", body: JSON.stringify(params) },
-      { success: false, error: "Falha na requisição" },
+      { success: false, error: "Falha na requisi????o" },
     ),
   botFuturesStatus: () =>
     v2<{ success: boolean; isAlive: boolean; status?: string }>(
@@ -269,10 +275,10 @@ export const apiV2 = {
     v2<{ success: boolean; error?: string }>(
       "/bot/backtest",
       { method: "POST", body: JSON.stringify(plan) },
-      { success: false, error: "Falha ao executar análise" },
+      { success: false, error: "Falha ao executar an??lise" },
     ),
 
-  // ─── Fatia E: Estratégias do MasterBot (planos master_plans) ───
+  // ????????? Fatia E: Estrat??gias do MasterBot (planos master_plans) ?????????
   botStrategies: () =>
     v2<{ success: boolean; strategies: unknown[] }>(
       "/bot/strategies",
@@ -295,13 +301,13 @@ export const apiV2 = {
     v2<{ success: boolean; code?: string; error?: string }>(
       `/bot/strategies/${encodeURIComponent(name)}/share`,
       { method: "POST" },
-      { success: false, error: "Falha ao compartilhar estratégia" },
+      { success: false, error: "Falha ao compartilhar estrat??gia" },
     ),
   botStrategySharedGet: (code: string) =>
     v2<{ success: boolean; strategy?: unknown; error?: string }>(
       `/bot/strategies/shared/${encodeURIComponent(code)}`,
       undefined,
-      { success: false, error: "Código inválido" },
+      { success: false, error: "C??digo inv??lido" },
     ),
   botStrategyImportTradingView: (payload: { url?: string; rawPineScript?: string }) =>
     v2<{ success: boolean; strategy?: unknown; error?: string; reason?: string }>(
@@ -310,7 +316,7 @@ export const apiV2 = {
       { success: false, error: "Falha ao analisar o script" },
     ),
 
-  // ─── Fatia C: Posições (leitura) ───
+  // ????????? Fatia C: Posi????es (leitura) ?????????
   botPositions: () =>
     v2<{ success: boolean; positions: unknown[] }>(
       "/bot/positions",
@@ -328,7 +334,7 @@ export const apiV2 = {
       { success: false }
     ),
 
-  // ─── Fatia B: Dashboard (resumo, calculado das posições reais) ───
+  // ????????? Fatia B: Dashboard (resumo, calculado das posi????es reais) ?????????
   dashboardSummary: (tzOffset?: number) =>
     v2<{ success: boolean }>(
       typeof tzOffset === "number" ? `/dashboard/summary?tzOffset=${tzOffset}` : "/dashboard/summary",
@@ -339,7 +345,7 @@ export const apiV2 = {
       } as unknown as { success: boolean },
     ),
 
-  // ─── Fatia I: Notifications ───
+  // ????????? Fatia I: Notifications ?????????
   notifications: (limit?: number) =>
     v2<{ success: boolean; notifications: any[] }>(
       `/notifications${limit ? `?limit=${limit}` : ""}`,
@@ -363,4 +369,24 @@ export const apiV2 = {
       undefined,
       { success: false, database: "down", worker: "down", beat: "down", redis: "down", backend: "down" }
     ),
+
+  billingPlans: () =>
+    v2<{ id: string; name: string; price_brl: number; max_bots: number; max_strategies: number; features: string[] }[]>(
+      "/billing/plans",
+      undefined,
+      [],
+    ),
+
+  billingCheckout: (plan: string) =>
+    v2<{ checkout_url: string }>(
+      `/billing/checkout/${encodeURIComponent(plan)}`,
+      { method: "POST" },
+    ),
+
+  billingPortal: () =>
+    v2<{ portal_url: string }>(
+      "/billing/portal",
+      { method: "POST" },
+    ),
 };
+

@@ -9,6 +9,7 @@ class PlanType(str, enum.Enum):
     free = "free"
     basic = "basic"
     pro = "pro"
+    ultra = "ultra"
 
 class User(Base):
     __tablename__ = "users"
@@ -22,6 +23,10 @@ class User(Base):
     picture: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     plan: Mapped[PlanType] = mapped_column(SAEnum(PlanType), default=PlanType.free)
     max_bots: Mapped[int] = mapped_column(Integer, default=3)
+    max_strategies: Mapped[int] = mapped_column(Integer, default=3)
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    plan_status: Mapped[str] = mapped_column(String(50), default="trialing")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     reset_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     reset_token_expires: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

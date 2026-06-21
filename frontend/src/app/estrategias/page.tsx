@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Card, Badge, Stat, Button } from "@/components/ui";
 import { fmtPct, fmtUSD } from "@/lib/format";
 import { api } from "@/lib/api";
+import { toast } from "sonner";
 import type { BacktestResult } from "@/lib/api";
 import { StrategyWizard } from "@/components/strategy/StrategyWizard";
 import { ShareStrategyModal } from "@/components/strategy/ShareStrategyModal";
@@ -64,6 +65,7 @@ function agoShort(ts?: number | null): string {
 }
 
 export default function EstrategiasPage() {
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -90,7 +92,19 @@ export default function EstrategiasPage() {
     }
   };
 
+  const loadUser = async () => {
+    try {
+      const res = await api.me();
+      if (res.success) {
+        setCurrentUser(res.user);
+      }
+    } catch (e) {
+      console.error("Erro ao carregar usuário:", e);
+    }
+  };
+
   useEffect(() => {
+    loadUser();
     fetchStrategies();
     // O servidor reanalisa os backtests a cada 4h — este refetch leve mantém
     // os cards atualizados sem o usuário precisar recarregar a página.
@@ -175,7 +189,7 @@ export default function EstrategiasPage() {
     <div className="space-y-6 max-w-7xl mx-auto px-4 pb-12">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <PageHeader
-          title="Estratégias"
+          title={`Estratégias (${strategies.length}/${currentUser?.max_strategies || 3})`}
           description="Monitore, ative e crie conjuntos de regras automatizadas para seus bots."
         />
         <div className="flex items-center gap-2 self-start sm:self-auto">
@@ -190,7 +204,14 @@ export default function EstrategiasPage() {
           <Button
             variant="primary"
             size="md"
-            onClick={() => setShowCreateModal(true)}
+            onClick={() => {
+              if (strategies.length >= (currentUser?.max_strategies || 3)) {
+                toast.error(`Limite de estratégias atingido (${currentUser?.max_strategies || 3}). Faça upgrade do seu plano para criar mais.`);
+                window.location.href = "/planos";
+              } else {
+                setShowCreateModal(true);
+              }
+            }}
             className="flex items-center gap-2 shadow-md"
           >
             <Plus size={16} /> Nova Estratégia
@@ -210,7 +231,19 @@ export default function EstrategiasPage() {
           <p className="text-xs text-muted mt-1 max-w-sm mx-auto">
             Crie sua primeira estratégia personalizada para começar a automatizar operações na sua conta Binance.
           </p>
-          <Button variant="outline" size="sm" onClick={() => setShowCreateModal(true)} className="mt-4">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => {
+              if (strategies.length >= (currentUser?.max_strategies || 3)) {
+                toast.error(`Limite de estratégias atingido (${currentUser?.max_strategies || 3}). Faça upgrade do seu plano para criar mais.`);
+                window.location.href = "/planos";
+              } else {
+                setShowCreateModal(true);
+              }
+            }} 
+            className="mt-4"
+          >
             Criar Estratégia
           </Button>
         </div>

@@ -1,9 +1,9 @@
 /**
  * Cliente leve para a API legada do dashboard (server.js antigo).
- * Em produção, Next rewrites delega /api/legacy/* → http://127.0.0.1:3334
- * (o servidor antigo continua rodando atrás do scenes, mas em outra porta).
+ * Em produ????o, Next rewrites delega /api/legacy/* ??? http://127.0.0.1:3334
+ * (o servidor antigo continua rodando atr??s do scenes, mas em outra porta).
  *
- * Em dev local sem servidor: as funções devolvem dados vazios para a UI não quebrar.
+ * Em dev local sem servidor: as fun????es devolvem dados vazios para a UI n??o quebrar.
  */
 
 import { BACKEND_FLAGS } from "@/config/backend";
@@ -154,9 +154,9 @@ async function safeJson<T>(path: string, init?: RequestInit, fallback?: T): Prom
 }
 
 /**
- * Como safeJson, mas devolve o corpo JSON MESMO em respostas 4xx — usado em
+ * Como safeJson, mas devolve o corpo JSON MESMO em respostas 4xx ??? usado em
  * endpoints onde a mensagem de erro do servidor (ex.: "script protegido, cole
- * o código") é importante para o usuário e não pode ser engolida pelo fallback.
+ * o c??digo") ?? importante para o usu??rio e n??o pode ser engolida pelo fallback.
  */
 async function jsonAllowError<T>(path: string, init?: RequestInit, fallback?: T): Promise<T> {
   try {
@@ -169,7 +169,7 @@ async function jsonAllowError<T>(path: string, init?: RequestInit, fallback?: T)
       if (token) headers["Authorization"] = `Bearer ${token}`;
     }
     const res = await fetch(`${BASE}${path}`, { ...init, headers, cache: "no-store" });
-    // Tenta sempre ler JSON; se a resposta não for JSON, cai no fallback.
+    // Tenta sempre ler JSON; se a resposta n??o for JSON, cai no fallback.
     return (await res.json()) as T;
   } catch (err) {
     if (fallback !== undefined) return fallback;
@@ -444,7 +444,15 @@ export const api = {
       : safeJson<{ success: boolean; restarted?: boolean; error?: string }>("/micro-scalper/strategy", {
           method: "PATCH",
           body: JSON.stringify(payload),
-        }, { success: false, error: "Falha ao salvar estratégia do scalper" }),
+        }, { success: false, error: "Falha ao salvar estrat??gia do scalper" }),
+
+  microScalperOptimize: (payload: { symbol: string }) =>
+    BACKEND_FLAGS.positions
+      ? apiV2.microScalperOptimize(payload)
+      : safeJson<{ success: boolean; restarted?: boolean; mode?: string; plan?: any; stats?: any; error?: string }>("/micro-scalper/optimize", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        }, { success: false, error: "Falha ao otimizar estrat??gia do scalper" }),
 
 
   microScalperSignal: (symbol: string) =>
@@ -541,14 +549,14 @@ export const api = {
           method: "DELETE",
         }, { success: false }),
 
-  // ─── Compartilhamento & Importação de estratégias ───
+  // ????????? Compartilhamento & Importa????o de estrat??gias ?????????
   botStrategyShare: (name: string) =>
     BACKEND_FLAGS.strategies
       ? apiV2.botStrategyShare(name)
       : safeJson<{ success: boolean; code?: string; error?: string }>(
           `/bot/strategies/${encodeURIComponent(name)}/share`,
           { method: "POST" },
-          { success: false, error: "Falha ao compartilhar estratégia" },
+          { success: false, error: "Falha ao compartilhar estrat??gia" },
         ),
 
   botStrategySharedGet: (code: string): Promise<{ success: boolean; strategy?: ImportedStrategy & { code: string }; error?: string }> =>
@@ -557,7 +565,7 @@ export const api = {
       : jsonAllowError<{ success: boolean; strategy?: ImportedStrategy & { code: string }; error?: string }>(
           `/bot/strategies/shared/${encodeURIComponent(code)}`,
           undefined,
-          { success: false, error: "Código inválido" },
+          { success: false, error: "C??digo inv??lido" },
         ),
 
   botStrategyImportTradingView: (payload: { url?: string; rawPineScript?: string }): Promise<{ success: boolean; strategy?: ImportedStrategy; error?: string; reason?: string }> =>
@@ -575,7 +583,7 @@ export const api = {
       : safeJson<{ success: boolean; error?: string } & Partial<BacktestResult>>("/bot/backtest", {
           method: "POST",
           body: JSON.stringify(plan),
-        }, { success: false, error: "Falha ao executar análise" }),
+        }, { success: false, error: "Falha ao executar an??lise" }),
 
   botForceTrade: (params: { symbol: string; timeframe: string; side: string; amount?: number; mode: string }) =>
     BACKEND_FLAGS.bots
@@ -583,7 +591,7 @@ export const api = {
       : safeJson<{ success: boolean; exitCode?: number; stdout?: string; stderr?: string; error?: string }>("/bot/force-trade", {
           method: "POST",
           body: JSON.stringify(params),
-        }, { success: false, error: "Falha na requisição" }),
+        }, { success: false, error: "Falha na requisi????o" }),
 
   botPositions: () =>
     BACKEND_FLAGS.positions
@@ -639,9 +647,9 @@ export const api = {
       ? apiV2.botClosePosition(id, markOnly)
       : safeJson<{ success: boolean; error?: string }>(`/bot/positions/${encodeURIComponent(id)}/close${markOnly ? "?markOnly=true" : ""}`, {
           method: "POST",
-        }, { success: false, error: "Falha na requisição" }),
+        }, { success: false, error: "Falha na requisi????o" }),
 
-  // ─── Multi-Account API Endpoints ───
+  // ????????? Multi-Account API Endpoints ?????????
   accountsList: () =>
     BACKEND_FLAGS.accounts
       ? (apiV2.accountsList() as Promise<{
@@ -682,14 +690,14 @@ export const api = {
           method: "DELETE",
         }, { success: false, error: "Falha ao deletar conta" }),
 
-  // ─── Authentication Endpoints ───
+  // ????????? Authentication Endpoints ?????????
   login: (params: { email: string; password?: string }) =>
     BACKEND_FLAGS.auth
       ? apiV2.login(params)
       : safeJson<{ success: boolean; token?: string; user?: any; error?: string }>("/auth/login", {
           method: "POST",
           body: JSON.stringify(params),
-        }, { success: false, error: "Falha na autenticação" }),
+        }, { success: false, error: "Falha na autentica????o" }),
 
   loginGoogle: (credential: string) =>
     apiV2.loginGoogle(credential),
@@ -707,7 +715,7 @@ export const api = {
       ? apiV2.me()
       : safeJson<{ success: boolean; user?: any }>("/auth/me", undefined, { success: false }),
 
-  // ─── Notifications Endpoints ───
+  // ????????? Notifications Endpoints ?????????
   notifications: (limit?: number) =>
     BACKEND_FLAGS.notifications
       ? apiV2.notifications(limit)
@@ -737,9 +745,13 @@ export const api = {
           undefined,
           { success: false, database: "down", worker: "down", beat: "down", redis: "down", backend: "down" }
         ),
+
+  billingPlans: () => apiV2.billingPlans(),
+  billingCheckout: (plan: string) => apiV2.billingCheckout(plan),
+  billingPortal: () => apiV2.billingPortal(),
 };
 
-/** Modelo de estratégia devolvido pelo importador (IA / código P2P). */
+/** Modelo de estrat??gia devolvido pelo importador (IA / c??digo P2P). */
 export interface ImportedStrategy {
   name: string;
   description: string;
@@ -751,12 +763,12 @@ export interface ImportedStrategy {
   filters: Record<string, any>;
   sl: any;
   tp: any;
-  /** Condições programáveis de entrada (strategy="custom"). */
+  /** Condi????es program??veis de entrada (strategy="custom"). */
   entry_conditions?: { indicator: string; indicator_period: number; operator: string; value?: number | null; compare_to_indicator?: string | null }[];
   entry_side?: string;
   exit_conditions?: { indicator: string; indicator_period: number; operator: string; value?: number | null; compare_to_indicator?: string | null }[];
   winRateTarget?: number | null;
-  /** Recomendação da IA (timeframe/ativo) — só vem na importação via TradingView. */
+  /** Recomenda????o da IA (timeframe/ativo) ??? s?? vem na importa????o via TradingView. */
   recommendedTimeframes?: string[];
   recommendedSymbols?: string[];
   recommendationReason?: string;
@@ -773,3 +785,4 @@ export interface SystemNotification {
 
 export type Quote = NonNullable<Awaited<ReturnType<typeof api.quote>>>;
 export type StrategyResults = NonNullable<Awaited<ReturnType<typeof api.strategyResults>>>;
+

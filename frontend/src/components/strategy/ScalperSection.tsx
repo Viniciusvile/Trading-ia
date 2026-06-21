@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Zap, X, ChevronLeft, FlaskConical, Target, Settings2 } from "lucide-react";
+import { Zap, X, ChevronLeft, FlaskConical, Target, Settings2, Sparkles } from "lucide-react";
 import { Card, Badge, Button } from "@/components/ui";
 import { api, type BacktestResult, type ScalperPlan } from "@/lib/api";
 import { BacktestReport } from "./BacktestReport";
+import { toast } from "sonner";
 
 const MODE_INFO: Record<string, { title: string; desc: string }> = {
   "micro-dip": {
@@ -274,6 +275,47 @@ function ScalperEditor({ symbol, initialPlan, onClose, onSaved }: {
     }
   };
 
+  const [optimizing, setOptimizing] = useState(false);
+
+  const applyPlanToStates = (p: any) => {
+    if (!p) return;
+    if (p.strategy_mode) setMode(p.strategy_mode);
+    if (p.tp_pct !== undefined) setTpPct(p.tp_pct * 100);
+    if (p.sl_pct !== undefined) setSlPct(p.sl_pct * 100);
+    if (p.breakeven_pct !== undefined) setBreakevenPct(p.breakeven_pct * 100);
+    if (p.ema_period !== undefined) setEmaPeriod(p.ema_period);
+    if (p.rsi_period !== undefined) setRsiPeriod(p.rsi_period);
+    if (p.min_dip_pct !== undefined) setMinDipPct(p.min_dip_pct * 100);
+    if (p.min_rsi !== undefined) setMinRsi(p.min_rsi);
+    if (p.max_rsi !== undefined) setMaxRsi(p.max_rsi);
+    if (p.bb_length !== undefined) setBbLength(p.bb_length);
+    if (p.bb_mult !== undefined) setBbMult(p.bb_mult);
+    if (p.rsi_limit !== undefined) setRsiLimit(p.rsi_limit);
+    if (p.vol_mult !== undefined) setVolMult(p.vol_mult);
+  };
+
+  const handleOptimizeAI = async () => {
+    setOptimizing(true);
+    setError(null);
+    try {
+      const res = await api.microScalperOptimize({ symbol });
+      if (res.success && res.plan) {
+        applyPlanToStates(res.plan);
+        toast.success("Estratégia otimizada com sucesso pelo Gemini!");
+        // Roda a análise após preencher os dados
+        setTimeout(() => {
+          runAnalysis();
+        }, 100);
+      } else {
+        setError(res.error || "Falha ao otimizar com IA. Verifique os limites do plano.");
+      }
+    } catch (err: any) {
+      setError("Erro ao solicitar otimização por IA.");
+    } finally {
+      setOptimizing(false);
+    }
+  };
+
   const selectCls = "w-full text-sm bg-[var(--color-surface-3)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-brand-500)]";
 
   return (
@@ -338,6 +380,15 @@ function ScalperEditor({ symbol, initialPlan, onClose, onSaved }: {
             <div className="flex flex-col sm:flex-row justify-between gap-3 border-t border-[var(--color-border)] pt-4">
               <Button variant="ghost" onClick={onClose}>Cancelar</Button>
               <div className="flex gap-2 justify-end">
+                <Button 
+                  variant="outline"
+                  className="border-violet-500/50 hover:bg-violet-500/10 text-violet-400 font-medium"
+                  disabled={optimizing} 
+                  onClick={handleOptimizeAI}
+                >
+                  <Sparkles size={14} className="mr-1 text-violet-400" /> 
+                  {optimizing ? "Otimizando..." : "Otimizar com IA"}
+                </Button>
                 <Button variant="outline" onClick={runAnalysis}>
                   <FlaskConical size={14} /> Analisar no Mercado (5m)
                 </Button>
@@ -366,9 +417,20 @@ function ScalperEditor({ symbol, initialPlan, onClose, onSaved }: {
             {error && <p className="text-xs text-[var(--color-text-down)] text-center">{error}</p>}
             <div className="flex flex-col sm:flex-row justify-between gap-3 border-t border-[var(--color-border)] pt-4">
               <Button variant="ghost" onClick={() => setResult(null)}><ChevronLeft size={14} /> Ajustar variáveis</Button>
-              <Button variant="success" disabled={saving} onClick={handleSave}>
-                {saving ? "Salvando..." : "Salvar e Aplicar no Scalper"}
-              </Button>
+              <div className="flex gap-2 justify-end">
+                <Button 
+                  variant="outline"
+                  className="border-violet-500/50 hover:bg-violet-500/10 text-violet-400 font-medium"
+                  disabled={optimizing} 
+                  onClick={handleOptimizeAI}
+                >
+                  <Sparkles size={14} className="mr-1 text-violet-400" /> 
+                  {optimizing ? "Melhorando..." : "Melhorar com IA"}
+                </Button>
+                <Button variant="success" disabled={saving} onClick={handleSave}>
+                  {saving ? "Salvando..." : "Salvar e Aplicar no Scalper"}
+                </Button>
+              </div>
             </div>
           </div>
         )}

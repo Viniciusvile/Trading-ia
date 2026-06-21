@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     stripe_secret_key: str = ""
     stripe_price_basic: str = ""
     stripe_price_pro: str = ""
+    stripe_price_ultra: str = ""
     stripe_webhook_secret: str = ""
     google_client_id: str = ""
     gemini_api_key: str = ""

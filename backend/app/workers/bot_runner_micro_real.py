@@ -1,19 +1,19 @@
 """Task Celery do Micro-Scalper em modo REAL (executa ordem na Binance).
 
-Opt-in DUPLO de segurança: só opera para um usuário se
-  (1) o scalper está ligado (is_bot_enabled micro_enabled) E
+Opt-in DUPLO de seguran??a: s?? opera para um usu??rio se
+  (1) o scalper est?? ligado (is_bot_enabled micro_enabled) E
   (2) user_micro_config.data.live == True.
-Sem os dois, nada é executado — a task paper (run_micro_scalper) segue independente.
+Sem os dois, nada ?? executado ??? a task paper (run_micro_scalper) segue independente.
 
-O client é o AUTENTICADO do usuário (binance_config) e respeita is_testnet — então
-um usuário com a conta testnet ativa opera na testnet (dinheiro fake). NUNCA rodar
+O client ?? o AUTENTICADO do usu??rio (binance_config) e respeita is_testnet ??? ent??o
+um usu??rio com a conta testnet ativa opera na testnet (dinheiro fake). NUNCA rodar
 junto com o bot legado na MESMA conta real.
 
-Ciclo por usuário:
-  1. Para cada posição ABERTA do scalper: consulta OCO. Se ALL_DONE -> registra
-     saída (a Binance já vendeu via OCO). Senão decide_management: breakeven (cancela
+Ciclo por usu??rio:
+  1. Para cada posi????o ABERTA do scalper: consulta OCO. Se ALL_DONE -> registra
+     sa??da (a Binance j?? vendeu via OCO). Sen??o decide_management: breakeven (cancela
      e recoloca OCO com SL mais alto) ou timeout (fecha a mercado).
-  2. Para cada símbolo ativo SEM posição aberta: decide sinal; se 'buy', abre
+  2. Para cada s??mbolo ativo SEM posi????o aberta: decide sinal; se 'buy', abre
      (open_long) + coloca OCO (place_oco_sell) + grava Position.
 """
 from datetime import datetime, timezone
@@ -33,7 +33,7 @@ from app.services import scalper_executor as se
 from app.services.order_executor import get_binance_client
 
 SCALPER_INTERVAL = Client.KLINE_INTERVAL_5MINUTE
-CANDLE_LIMIT = 100
+CANDLE_LIMIT = 250
 
 
 def _fetch_candles(client: Client, symbol: str) -> list[dict]:
@@ -74,18 +74,18 @@ def _register_exit(db, pos: Position, exit_price: float, reason: str) -> None:
     from sqlalchemy.orm.attributes import flag_modified
     flag_modified(pos, "data")
     
-    # Adiciona notificação
+    # Adiciona notifica????o
     notif_type = "success" if pnl_val >= 0 else "error"
     db.add(Notification(
         user_id=pos.user_id,
         title=f"Fechou {pos.symbol}",
-        message=f"PnL: {'+' if pnl_val >= 0 else ''}${pnl_val:.4f} | Saída: ${exit_price:.4f} ({reason})",
+        message=f"PnL: {'+' if pnl_val >= 0 else ''}${pnl_val:.4f} | Sa??da: ${exit_price:.4f} ({reason})",
         type=notif_type,
     ))
 
 
 def _manage_position(db, client, pos: Position, cfg_plan: dict) -> dict:
-    """Gerencia UMA posição aberta. Retorna {symbol, result}."""
+    """Gerencia UMA posi????o aberta. Retorna {symbol, result}."""
     symbol = pos.symbol
     d = pos.data or {}
     oco_id = d.get("ocoOrderListId")
@@ -210,7 +210,7 @@ def run_micro_scalper_real():
                     db.add(Notification(
                         user_id=cfg.user_id,
                         title=f"Abriu LONG {symbol}",
-                        message=f"Preço de Entrada: ${entry:.4f} | Quantidade: {qty:.4f}",
+                        message=f"Pre??o de Entrada: ${entry:.4f} | Quantidade: {qty:.4f}",
                         type="info",
                     ))
                     db.commit()
@@ -231,3 +231,4 @@ def run_micro_scalper_real():
         return {"status": "ok", "results": results}
     finally:
         db.close()
+

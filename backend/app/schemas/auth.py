@@ -19,6 +19,10 @@ class UserResponse(BaseModel):
     picture: str | None = None
     plan: str
     max_bots: int
+    max_strategies: int
+    stripe_customer_id: str | None = None
+    stripe_subscription_id: str | None = None
+    plan_status: str
     is_active: bool
 
     class Config:

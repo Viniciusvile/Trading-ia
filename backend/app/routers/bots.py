@@ -39,6 +39,9 @@ def _set_bot_enabled(db: Session, user_id: str, flag: str, enabled: bool) -> Non
 
 @router.post("/master/start")
 def master_start(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services.plans import plan_allows_bot
+    if not plan_allows_bot(current_user.plan, "master"):
+        raise HTTPException(status_code=403, detail={"code": "plan_bot_disabled", "message": "Este robô não está disponível no seu plano atual. Faça upgrade."})
     _set_bot_enabled(db, current_user.id, "master_enabled", True)
     return {"success": True}
 
@@ -51,6 +54,9 @@ def master_stop(current_user: User = Depends(get_current_user), db: Session = De
 
 @router.post("/micro/start")
 def micro_start(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services.plans import plan_allows_bot
+    if not plan_allows_bot(current_user.plan, "micro"):
+        raise HTTPException(status_code=403, detail={"code": "plan_bot_disabled", "message": "Este robô não está disponível no seu plano atual. Faça upgrade."})
     _set_bot_enabled(db, current_user.id, "micro_enabled", True)
     return {"success": True}
 
@@ -63,6 +69,9 @@ def micro_stop(current_user: User = Depends(get_current_user), db: Session = Dep
 
 @router.post("/adaptive/start")
 def adaptive_start(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services.plans import plan_allows_bot
+    if not plan_allows_bot(current_user.plan, "futures"):
+        raise HTTPException(status_code=403, detail={"code": "plan_bot_disabled", "message": "Este robô não está disponível no seu plano atual. Faça upgrade."})
     _set_bot_enabled(db, current_user.id, "adaptive_enabled", True)
     return {"success": True}
 
@@ -379,6 +388,12 @@ def create_strategy(
         flag_modified(existing, "data")
         db.commit()
         return {"success": True, "strategy": _plan_to_ui(existing)}
+    
+    from app.services.plans import plan_max_strategies
+    count = db.query(MasterPlan).filter(MasterPlan.user_id == current_user.id).count()
+    if count >= plan_max_strategies(current_user.plan):
+        raise HTTPException(status_code=403, detail={"code": "plan_limit", "message": "Limite de estratégias do seu plano atingido. Faça upgrade."})
+
     plan = MasterPlan(
         id=f"PLAN-{current_user.id[:8]}-{name}",
         user_id=current_user.id,
@@ -779,11 +794,10 @@ def _map_pine_with_gemini(pine_script: str, api_key: str) -> dict:
         'Para os outros tipos (warrior, range-v2, etc.) podem ser omitidos.\n\n'
         "### Pine Script:\n```\n" + pine_script[:20000] + "\n```"
     )
-    # Modelos atuais da API Gemini (v1beta). O 1.5-flash foi descontinuado em set/2025
-    # e retorna "is not found for API version v1beta"; usamos *-latest como fallback
-    # estável para não quebrar quando o Google renomear/aposentar versões.
-    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]
+    # Modelos atuais da API Gemini (v1beta). O 2.0-flash é o padrão atual estável.
+    models = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-flash-latest"]
     last_err = None
+
     for model in models:
         try:
             resp = httpx.post(

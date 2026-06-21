@@ -6,8 +6,10 @@ from app.schemas.strategy import StrategyCreate, StrategyConditions
 
 def create_strategy(db: Session, user: User, data: StrategyCreate) -> Strategy:
     existing = db.query(Strategy).filter(Strategy.user_id == user.id).count()
-    if existing >= user.max_bots:
-        raise HTTPException(status_code=403, detail=f"Limite de {user.max_bots} estratégias atingido")
+    # Limite de estratégias usa max_strategies do plano (NÃO max_bots, que é o
+    # nº de robôs liberados). A trava primária está no router; esta é defesa extra.
+    if existing >= user.max_strategies:
+        raise HTTPException(status_code=403, detail=f"Limite de {user.max_strategies} estratégias atingido")
     strategy = Strategy(
         user_id=user.id,
         name=data.name,
