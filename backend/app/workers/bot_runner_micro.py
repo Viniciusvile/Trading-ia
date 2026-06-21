@@ -98,7 +98,12 @@ def _record_paper_signal(db, symbol: str, d: dict) -> None:
 
 @shared_task(name="optimize_micro_scalper_all_users")
 def optimize_micro_scalper_all_users():
+    """Job diário: otimiza com IA as estratégias do Micro-Scalper automaticamente,
+    sem o cliente precisar clicar. Só roda para usuários cujo plano libera a IA do
+    Micro-Scalper (micro_custom=True, hoje só o Pro)."""
     import logging
+    from app.models.user import User
+    from app.services.plans import PLAN_CATALOG
     from app.services.scalper_optimizer import optimize_symbol_for_user
     logger = logging.getLogger(__name__)
     db = _get_session_factory()()
@@ -106,15 +111,24 @@ def optimize_micro_scalper_all_users():
     try:
         configs = db.query(UserMicroConfig).all()
         for cfg in configs:
+            # Só usuários com plano que libera a IA do Micro-Scalper.
+            user = db.query(User).filter(User.id == cfg.user_id).first()
+            if not user:
+                continue
+            plan_cfg = PLAN_CATALOG.get(user.plan, PLAN_CATALOG["free"])
+            if not plan_cfg.get("micro_custom", False):
+                continue
+
             data = cfg.data or {}
             plans = data.get("plans") or {}
             for symbol in plans.keys():
                 try:
-                    res = optimize_symbol_for_user(db, cfg.user_id, symbol)
+                    # force_ia=True: no job diário sempre tenta melhorar via IA.
+                    res = optimize_symbol_for_user(db, cfg.user_id, symbol, force_ia=True)
                     results.append({"user": cfg.user_id, "symbol": symbol, "result": res})
                 except Exception as e:
                     logger.error(f"Erro ao otimizar {symbol} para usuario {cfg.user_id}: {e}")
                     results.append({"user": cfg.user_id, "symbol": symbol, "error": str(e)})
-        return {"status": "ok", "results": results}
+        return {"status": "ok", "count": len(results), "results": results}
     finally:
         db.close()

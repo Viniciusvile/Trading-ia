@@ -53,7 +53,11 @@ def optimize_symbol_for_user(db: Session, user_id: str, symbol: str, force_ia: b
     """
     Roda backtest comparativo de 'micro-dip' vs 'turbo-reversion' para o par do usuário.
     Se o resultado for ruim ou force_ia=True, aciona o Gemini para propor otimização de parâmetros.
-    Se validado pelo backtest, aplica e notifica.
+    Se validado pelo backtest, aplica.
+    
+    Adicionalmente:
+    - Se ambas as estratégias forem negativas (PnL < 0), desativa o ativo e notifica.
+    - Se o ativo estava desativado pelo sistema e voltou a ficar positivo, reativa o ativo e notifica.
     """
     cfg = db.get(UserMicroConfig, user_id)
     if not cfg:
@@ -63,16 +67,16 @@ def optimize_symbol_for_user(db: Session, user_id: str, symbol: str, force_ia: b
     data = dict(cfg.data or {})
     plans = dict(data.get("plans") or {})
     current_plan = dict(plans.get(symbol) or {})
+    active_symbols = list(data.get("active_symbols") or [])
+    deactivated_by_system = list(data.get("deactivated_by_system") or [])
     
     # 1. Rodar backtests comparativos para ambos os modos com os parâmetros atuais ou defaults
     results = {}
     for mode in ["micro-dip", "turbo-reversion"]:
         test_plan = dict(DEFAULT_PLANS[mode])
         if current_plan.get("strategy_mode") == mode:
-            # Reusa o plano atual do usuário se for do mesmo modo
             test_plan.update(current_plan)
         
-        # Constrói o shape esperado pelo backtest service
         bt_plan = {
             "strategy": mode,
             "scalper": test_plan,
@@ -179,7 +183,6 @@ def optimize_symbol_for_user(db: Session, user_id: str, symbol: str, force_ia: b
         if ia_plan:
             val_mode = ia_plan.get("strategy_mode", best_mode)
             val_plan = dict(DEFAULT_PLANS[val_mode])
-            # Mescla as sugestões da IA garantindo tipos corretos
             for k, v in ia_plan.items():
                 if k in val_plan:
                     if isinstance(val_plan[k], int):
@@ -206,33 +209,79 @@ def optimize_symbol_for_user(db: Session, user_id: str, symbol: str, force_ia: b
                     logger.info(f"Validação da IA para {symbol}: PnL={val_pnl}, WR={val_wr}% (Comparado a PnL={best_pnl}, WR={best_wr}%)")
                     
                     if val_pnl > best_pnl:
-                        # IA melhorou a performance! Atualiza plano vencedor
                         best_mode = val_mode
                         best_plan = val_plan
                         best_pnl = val_pnl
                         best_wr = val_wr
                         best_stats = val_stats
-                        
-                        # Criar notificação para o usuário informando sobre a otimização
-                        msg = (
-                            f"A Inteligência Artificial otimizou o {symbol} para o modo {best_mode}. "
-                            f"O lucro estimado subiu de ${best_res['backtest']['combined'].get('netProfitUsd', 0.0):.2f} "
-                            f"para ${val_pnl:.2f} no backtest simulado (Win Rate: {val_wr:.1f}%)."
-                        )
-                        db.add(Notification(
-                            user_id=user_id,
-                            title=f"Otimização por IA: {symbol}",
-                            message=msg,
-                            type="success"
-                        ))
-                    else:
-                        logger.info(f"Otimização da IA descartada: não superou a performance atual.")
             except Exception as e:
                 logger.error(f"Erro na validação do plano proposto pela IA para {symbol}: {e}")
 
-    # 4. Salvar o plano final otimizado
+    # 4. Regras de Desativação e Reativação Automática
+    status_change = None
+    if best_pnl < 0.0:
+        # PnL negativo mesmo após a IA -> não operar no prejuízo: desativa o ativo.
+        # (antes só desativava se já estivesse ativo; agora garante que NUNCA fica
+        # ativo um par negativo, mesmo recém-otimizado)
+        was_active = symbol in active_symbols
+        if was_active:
+            active_symbols.remove(symbol)
+        if symbol not in deactivated_by_system:
+            deactivated_by_system.append(symbol)
+        # só notifica quando houve mudança real de estado (estava ativo e saiu)
+        if was_active:
+            status_change = "deactivated"
+            msg = (
+                f"O par {symbol} foi desativado automaticamente do Micro-Scalper porque ambas as "
+                f"estratégias apresentaram performance negativa nos backtests recentes "
+                f"(Lucro estimado: -${abs(best_pnl):.2f}). A IA continuará analisando diariamente "
+                f"e reativa o ativo assim que encontrar uma configuração lucrativa."
+            )
+            db.add(Notification(
+                user_id=user_id,
+                title=f"[IA] Ativo Desativado: {symbol}",
+                message=msg,
+                type="warning"
+            ))
+            logger.info(f"Ativo {symbol} desativado pelo sistema devido a PnL negativo ({best_pnl})")
+    else:
+        # PnL positivo -> reativa se foi desativado pelo sistema
+        if symbol in deactivated_by_system:
+            deactivated_by_system.remove(symbol)
+            if symbol not in active_symbols:
+                active_symbols.append(symbol)
+            status_change = "reactivated"
+            
+            msg = (
+                f"O par {symbol} foi reativado automaticamente no Micro-Scalper após a IA encontrar "
+                f"uma configuração lucrativa no modo {best_mode} (Lucro estimado de +${best_pnl:.2f} "
+                f"e Win Rate de {best_wr:.1f}%)."
+            )
+            db.add(Notification(
+                user_id=user_id,
+                title=f"[IA] Ativo Reativado: {symbol}",
+                message=msg,
+                type="success"
+            ))
+            logger.info(f"Ativo {symbol} reativado pelo sistema devido a PnL positivo ({best_pnl})")
+        elif force_ia:
+            # Notificação padrão de otimização bem sucedida manual
+            msg = (
+                f"A Inteligência Artificial otimizou o {symbol} para o modo {best_mode}. "
+                f"O lucro estimado no backtest simulado é de ${best_pnl:.2f} (Win Rate: {best_wr:.1f}%)."
+            )
+            db.add(Notification(
+                user_id=user_id,
+                title=f"Otimização por IA: {symbol}",
+                message=msg,
+                type="success"
+            ))
+
+    # 5. Salvar o plano final otimizado e os vetores de ativos
     plans[symbol] = best_plan
     data["plans"] = plans
+    data["active_symbols"] = active_symbols
+    data["deactivated_by_system"] = deactivated_by_system
     cfg.data = data
     flag_modified(cfg, "data")
     db.commit()
@@ -242,6 +291,7 @@ def optimize_symbol_for_user(db: Session, user_id: str, symbol: str, force_ia: b
         "symbol": symbol,
         "mode": best_mode,
         "plan": best_plan,
+        "status_change": status_change,
         "stats": {
             "netProfitUsd": best_pnl,
             "winRate": best_wr,
