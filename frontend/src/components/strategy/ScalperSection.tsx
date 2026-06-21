@@ -2,10 +2,30 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Zap, X, ChevronLeft, FlaskConical, Target, Settings2, Sparkles } from "lucide-react";
-import { Card, Badge, Button } from "@/components/ui";
+import { Card, Badge, Button, Stat } from "@/components/ui";
+import { Sparkline } from "@/components/fx";
+import { fmtUSD, fmtPct } from "@/lib/format";
 import { api, type BacktestResult, type ScalperPlan } from "@/lib/api";
 import { BacktestReport } from "./BacktestReport";
 import { toast } from "sonner";
+
+type ScalperStats = {
+  winRate: number;
+  profitFactor: number;
+  netProfit: number;
+  totalTrades: number;
+  equityCurve?: number[];
+  ts?: number;
+};
+
+function agoShort(ts: number): string {
+  const diff = Date.now() - ts;
+  const min = Math.floor(diff / 60000);
+  if (min < 60) return `há ${min}min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h}h`;
+  return `há ${Math.floor(h / 24)}d`;
+}
 
 const MODE_INFO: Record<string, { title: string; desc: string }> = {
   "micro-dip": {
@@ -25,6 +45,7 @@ type ScalperConfig = {
   max_trade_usdt?: number;
   daily_profit_target_usdt?: number;
   plans: Record<string, ScalperPlan>;
+  stats?: Record<string, ScalperStats>;
 };
 
 function Slider({ label, value, display, min, max, step, onChange }: {
@@ -119,6 +140,7 @@ export function ScalperSection() {
             const plan = config.plans[symbol] || { strategy_mode: "micro-dip" as const };
             const isActive = config.active_symbols.includes(symbol);
             const mode = MODE_INFO[plan.strategy_mode] || MODE_INFO["micro-dip"];
+            const stats = config.stats?.[symbol];
             return (
               <Card key={symbol} padding="lg" className={`space-y-3 border ${isActive ? "border-[var(--color-brand-500)]" : "border-[var(--color-border)]"}`}>
                 <div className="flex items-center justify-between gap-2">
@@ -144,6 +166,31 @@ export function ScalperSection() {
                   {plan.breakeven_pct ? <span><strong className="text-[var(--color-text-2)]">BE:</strong> +{(plan.breakeven_pct * 100).toFixed(2)}%</span> : null}
                 </div>
 
+                {isActive && stats && (
+                  <div className="space-y-2 border-t border-[var(--color-border)] pt-3">
+                    <div className="flex items-center gap-2">
+                      <Badge tone="neutral" size="sm">
+                        Backtest real{stats.ts ? ` · ${agoShort(stats.ts)}` : ""}
+                      </Badge>
+                      <Badge tone="up" size="sm" dot>Auto IA</Badge>
+                      {stats.equityCurve && stats.equityCurve.length > 1 && (
+                        <Sparkline data={stats.equityCurve} width={110} height={28} className="ml-auto" />
+                      )}
+                    </div>
+                    <div className="grid grid-cols-4 gap-2">
+                      <Stat label="Win Rate" value={fmtPct(stats.winRate * 100, { sign: false })} size="sm" />
+                      <Stat label="P. Factor" value={stats.profitFactor.toFixed(2)} size="sm" />
+                      <Stat
+                        label="Lucro"
+                        value={fmtUSD(stats.netProfit)}
+                        size="sm"
+                        className={stats.netProfit >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"}
+                      />
+                      <Stat label="Trades" value={String(stats.totalTrades)} size="sm" />
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-2 pt-1">
                   <Button
                     variant={isActive ? "danger" : "success"}
@@ -167,7 +214,10 @@ export function ScalperSection() {
         <ScalperEditor
           symbol={editingSymbol}
           initialPlan={config.plans[editingSymbol] || { strategy_mode: "micro-dip" }}
-          onClose={() => setEditingSymbol(null)}
+          onClose={() => {
+            setEditingSymbol(null);
+            fetchConfig();
+          }}
           onSaved={(restarted) => {
             setNotice(restarted ? "Estratégia salva — scalper reiniciado e já operando com as novas regras." : "Estratégia salva.");
             setEditingSymbol(null);
@@ -302,6 +352,7 @@ function ScalperEditor({ symbol, initialPlan, onClose, onSaved }: {
       if (res.success && res.plan) {
         applyPlanToStates(res.plan);
         toast.success("Estratégia otimizada com sucesso pelo Gemini!");
+        fetchConfig();
         // Roda a análise após preencher os dados
         setTimeout(() => {
           runAnalysis();

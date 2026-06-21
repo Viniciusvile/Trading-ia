@@ -113,7 +113,8 @@ def optimize_symbol_for_user(db: Session, user_id: str, symbol: str, force_ia: b
     best_res = results[best_mode]
     best_plan = best_res["plan"]
     best_stats = best_res["backtest"]["combined"]
-    
+    best_equity = best_res["backtest"].get("equityCurve") or []
+
     logger.info(f"Melhor modo inicial para {symbol}: {best_mode} (PnL: {best_pnl}, WR: {best_wr}%)")
 
     # 2. Verificar se precisa acionar IA (PnL negativo, WR < 50% ou force_ia=True)
@@ -214,6 +215,7 @@ def optimize_symbol_for_user(db: Session, user_id: str, symbol: str, force_ia: b
                         best_pnl = val_pnl
                         best_wr = val_wr
                         best_stats = val_stats
+                        best_equity = val_res.get("equityCurve") or []
             except Exception as e:
                 logger.error(f"Erro na validação do plano proposto pela IA para {symbol}: {e}")
 
@@ -277,11 +279,29 @@ def optimize_symbol_for_user(db: Session, user_id: str, symbol: str, force_ia: b
                 type="success"
             ))
 
-    # 5. Salvar o plano final otimizado e os vetores de ativos
+    # 5. Salvar o plano final otimizado, os vetores de ativos e as ESTATÍSTICAS
+    # do backtest real (para o card do Micro-Scalper exibir como o do Bot Master).
+    # Reduz a equity curve para ~40 pontos (mini gráfico no card).
+    equity_vals = [p.get("equity") for p in (best_equity or []) if isinstance(p, dict) and p.get("equity") is not None]
+    if len(equity_vals) > 40:
+        step = len(equity_vals) / 40.0
+        equity_vals = [equity_vals[int(i * step)] for i in range(40)]
+
+    stats_block = dict(data.get("stats") or {})
+    stats_block[symbol] = {
+        "winRate": best_wr / 100.0,  # fração (0–1), igual ao Master
+        "profitFactor": best_stats.get("profitFactor", 0.0),
+        "netProfit": best_pnl,
+        "totalTrades": best_stats.get("totalTrades", 0),
+        "equityCurve": equity_vals,
+        "ts": int(datetime.now(timezone.utc).timestamp() * 1000),
+    }
+
     plans[symbol] = best_plan
     data["plans"] = plans
     data["active_symbols"] = active_symbols
     data["deactivated_by_system"] = deactivated_by_system
+    data["stats"] = stats_block
     cfg.data = data
     flag_modified(cfg, "data")
     db.commit()
