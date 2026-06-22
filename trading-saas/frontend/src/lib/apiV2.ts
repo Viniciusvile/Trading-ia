@@ -23,13 +23,20 @@ export async function v2<T>(path: string, init?: RequestInit, fallback?: T): Pro
       }
     }
     if (!res.ok) {
+      let errorMessage = `HTTP ${res.status}`;
       try {
         const errJson = await res.json();
         if (errJson && errJson.detail) {
-          throw new Error(errJson.detail);
+          if (typeof errJson.detail === "string") {
+            errorMessage = errJson.detail;
+          } else if (Array.isArray(errJson.detail)) {
+            errorMessage = errJson.detail.map((err: any) => err.msg || JSON.stringify(err)).join(", ");
+          } else if (typeof errJson.detail === "object") {
+            errorMessage = errJson.detail.message || JSON.stringify(errJson.detail);
+          }
         }
       } catch {}
-      throw new Error(`HTTP ${res.status}`);
+      throw new Error(errorMessage);
     }
     return (await res.json()) as T;
   } catch (err) {
