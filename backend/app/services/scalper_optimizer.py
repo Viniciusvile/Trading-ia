@@ -226,12 +226,17 @@ def optimize_symbol_for_user(db: Session, user_id: str, symbol: str, force_ia: b
         # (antes só desativava se já estivesse ativo; agora garante que NUNCA fica
         # ativo um par negativo, mesmo recém-otimizado)
         was_active = symbol in active_symbols
+        # mudança real de estado = o par AINDA não estava na lista de desativados.
+        newly_deactivated = symbol not in deactivated_by_system
         if was_active:
             active_symbols.remove(symbol)
-        if symbol not in deactivated_by_system:
+        if newly_deactivated:
             deactivated_by_system.append(symbol)
-        # só notifica quando houve mudança real de estado (estava ativo e saiu)
-        if was_active:
+        # Notifica sempre que o par ENTRA na lista de desativados, mesmo que não
+        # estivesse ativo (antes só notificava se estava ativo, e pares como o
+        # BTCUSDT entravam sem registro de data/motivo). Não notifica de novo se já
+        # estava desativado, evitando spam diário.
+        if newly_deactivated:
             status_change = "deactivated"
             msg = (
                 f"O par {symbol} foi desativado automaticamente do Micro-Scalper porque ambas as "
