@@ -68,9 +68,17 @@ def decide_signal_for_symbol(plan: dict, candles: list[dict]) -> dict:
 
 
 def active_symbols(config_data: dict) -> list[str]:
-    """Simbolos ativos a operar, a partir do user_micro_config.data."""
+    """Simbolos ativos a operar, a partir do user_micro_config.data.
+
+    NUNCA retorna simbolos que a IA desativou (deactivated_by_system): um par
+    desativado nao pode abrir trade novo. Alem disso, uma lista active_symbols
+    vazia ([]) significa "nenhum ativo" e e respeitada — so caimos no fallback
+    para todos os planos quando a chave nunca foi definida (None), evitando o
+    bug em que desativar todos os pares reativava todos via fallback.
+    """
+    deactivated = set(config_data.get("deactivated_by_system") or [])
     syms = config_data.get("active_symbols")
-    if syms:
-        return list(syms)
-    # fallback: todos os simbolos com plano definido
-    return list((config_data.get("plans") or {}).keys())
+    if syms is not None:
+        return [s for s in syms if s not in deactivated]
+    # fallback (chave ausente): todos os simbolos com plano, menos os desativados
+    return [s for s in (config_data.get("plans") or {}).keys() if s not in deactivated]

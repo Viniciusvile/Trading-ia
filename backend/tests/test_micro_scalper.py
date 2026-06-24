@@ -41,6 +41,23 @@ def test_active_symbols_fallback_to_plans():
     assert set(m.active_symbols({"plans": {"BTCUSDT": {}, "SOLUSDT": {}}})) == {"BTCUSDT", "SOLUSDT"}
 
 
+def test_active_symbols_empty_list_operates_nothing():
+    # [] explicito = nenhum ativo; NAO deve cair no fallback de todos os planos.
+    assert m.active_symbols({"active_symbols": [], "plans": {"BTCUSDT": {}, "SOLUSDT": {}}}) == []
+
+
+def test_active_symbols_excludes_deactivated_by_system():
+    # Par desativado pela IA nunca pode ser operado, mesmo na lista de ativos ou no fallback.
+    assert m.active_symbols({
+        "active_symbols": ["BTCUSDT", "SOLUSDT"],
+        "deactivated_by_system": ["SOLUSDT"],
+    }) == ["BTCUSDT"]
+    assert m.active_symbols({
+        "plans": {"BTCUSDT": {}, "SOLUSDT": {}},
+        "deactivated_by_system": ["SOLUSDT"],
+    }) == ["BTCUSDT"]
+
+
 def test_turbo_reversion_parity_with_legacy_xrp_entry():
     """Paridade de execucao: reproduz um entry real do legado (XRPUSDT migrado).
 
