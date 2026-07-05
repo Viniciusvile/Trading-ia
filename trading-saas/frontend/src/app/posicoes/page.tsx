@@ -222,6 +222,11 @@ export default function PosicoesPage() {
   const dailyPnL: Record<string, number> = {};
   const dailyCost: Record<string, number> = {};
   let totalRealizedPnL = 0;
+  let monthlyRealizedPnL = 0;
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+
   closedPositions.forEach((pos) => {
     const pnlVal = typeof (pos as any).pnl === "number" ? (pos as any).pnl : parseFloat((pos as any).pnl || "0");
     totalRealizedPnL += pnlVal;
@@ -237,6 +242,10 @@ export default function PosicoesPage() {
       
       const cost = (pos.entryPrice || 0) * (pos.quantity || 0);
       dailyCost[dateKey] = (dailyCost[dateKey] || 0) + cost;
+
+      if (closedDate.getFullYear() === currentYear && closedDate.getMonth() === currentMonth) {
+        monthlyRealizedPnL += pnlVal;
+      }
     }
   });
 
@@ -334,12 +343,12 @@ export default function PosicoesPage() {
               onClick={() => setIsChartOpen(true)}
             >
               <Stat
-                label="P&L realizado"
+                label="P&L realizado do mês"
                 value={
                   <AnimatedNumber
-                    value={totalRealizedPnL}
+                    value={monthlyRealizedPnL}
                     format={(v) => `${v > 0 ? "+" : ""}${fmtUSD(v)}`}
-                    className={totalRealizedPnL > 0 ? "text-up" : totalRealizedPnL < 0 ? "text-down" : ""}
+                    className={monthlyRealizedPnL > 0 ? "text-up" : monthlyRealizedPnL < 0 ? "text-down" : ""}
                   />
                 }
                 size="sm"

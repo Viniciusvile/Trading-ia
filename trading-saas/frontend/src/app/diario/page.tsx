@@ -135,6 +135,18 @@ export default function DiarioPage() {
   const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
   const totalPnL = closedPositions.reduce((acc, p) => acc + (p.pnl || 0), 0);
 
+  // PNL do Mês
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+  const monthlyPnL = closedPositions
+    .filter((p) => {
+      if (!p.closedAt) return false;
+      const closedDate = new Date(p.closedAt);
+      return closedDate.getFullYear() === currentYear && closedDate.getMonth() === currentMonth;
+    })
+    .reduce((acc, p) => acc + (p.pnl || 0), 0);
+
   // Fator de Lucro
   const grossProfit = closedPositions
     .filter((p) => (p.pnl || 0) > 0)
@@ -256,12 +268,12 @@ export default function DiarioPage() {
 
             <Card padding="md" className="flex items-center justify-between">
               <div>
-                <div className="text-xs text-muted font-medium uppercase tracking-wider">PnL Total Real</div>
-                <div className={`text-2xl font-bold mt-1 tabular-nums ${totalPnL >= 0 ? "text-[var(--color-up-500)]" : "text-[var(--color-down-500)]"}`}>
-                  {totalPnL >= 0 ? "+" : ""}{fmtUSD(totalPnL)}
+                <div className="text-xs text-muted font-medium uppercase tracking-wider">PnL do Mês Real</div>
+                <div className={`text-2xl font-bold mt-1 tabular-nums ${monthlyPnL >= 0 ? "text-[var(--color-up-500)]" : "text-[var(--color-down-500)]"}`}>
+                  {monthlyPnL >= 0 ? "+" : ""}{fmtUSD(monthlyPnL)}
                 </div>
               </div>
-              <div className={`h-10 w-10 rounded-[var(--radius-sm)] flex items-center justify-center ${totalPnL >= 0 ? "bg-[var(--color-up-500)]/10 text-[var(--color-up-500)]" : "bg-[var(--color-down-500)]/10 text-[var(--color-down-500)]"}`}>
+              <div className={`h-10 w-10 rounded-[var(--radius-sm)] flex items-center justify-center ${monthlyPnL >= 0 ? "bg-[var(--color-up-500)]/10 text-[var(--color-up-500)]" : "bg-[var(--color-down-500)]/10 text-[var(--color-down-500)]"}`}>
                 <DollarSign size={20} />
               </div>
             </Card>
