@@ -14,9 +14,9 @@ interface StatProps {
 }
 
 const sizes = {
-  sm: { value: "text-xl tracking-tight", label: "text-[10px]" },
-  md: { value: "text-2xl tracking-tight", label: "text-[11px]" },
-  lg: { value: "text-3xl sm:text-4xl tracking-tight", label: "text-xs" },
+  sm: { value: "text-lg sm:text-xl tracking-tight", label: "text-[10px]" },
+  md: { value: "text-xl sm:text-2xl tracking-tight", label: "text-[11px]" },
+  lg: { value: "text-2xl sm:text-3xl lg:text-4xl tracking-tight", label: "text-xs" },
 };
 
 export function Stat({ label, value, delta, hint, icon, size = "md", className }: StatProps) {
@@ -30,7 +30,7 @@ export function Stat({ label, value, delta, hint, icon, size = "md", className }
           {label}
         </span>
       </div>
-      <div className={cn("font-bold tabular-nums leading-tight text-[var(--color-text)]", s.value)}>
+      <div className={cn("font-bold tabular-nums leading-tight text-[var(--color-text)] whitespace-nowrap", s.value)}>
         {value}
       </div>
       {delta != null && (

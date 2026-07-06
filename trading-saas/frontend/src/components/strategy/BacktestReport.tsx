@@ -134,11 +134,52 @@ export function BacktestReport({ data }: { data: BacktestResult }) {
 
       {/* Stats principais */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Card><Stat label="Lucro em $10k" value={fmtUSD(c.netProfitUsd)} className={c.netProfitUsd >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"} /></Card>
-        <Card><Stat label="Win Rate" value={fmtPct(wrPct, { sign: false })} /></Card>
-        <Card><Stat label="Profit Factor" value={c.profitFactor.toFixed(2)} /></Card>
-        <Card><Stat label="Max Drawdown" value={fmtPct(c.maxDrawdownPct, { sign: false })} /></Card>
+        <Card><Stat label="Lucro em $10k" value={fmtUSD(c.netProfitUsd)} size="sm" className={c.netProfitUsd >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"} /></Card>
+        <Card><Stat label="Win Rate" value={fmtPct(wrPct, { sign: false })} size="sm" /></Card>
+        <Card><Stat label="PF pós-custos" value={(c.pfAfterCosts ?? c.profitFactor).toFixed(2)} size="sm" className={(c.pfAfterCosts ?? c.profitFactor) >= 1.3 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"} /></Card>
+        <Card><Stat label="Max Drawdown" value={fmtPct(c.maxDrawdownPct, { sign: false })} size="sm" /></Card>
       </div>
+
+      {/* Banner de custos reais */}
+      {(() => {
+        const pfNet = c.pfAfterCosts ?? c.profitFactor;
+        const pfBruto = c.pfGross;
+        const minPf = data.minPfAfterCosts ?? 1.3;
+        const slipPct = data.slippagePct ?? 0.18;
+        const feePct = data.feePctPerSide ?? 0.1;
+        const totalCostPct = (feePct + slipPct) * 2;
+        const blocked = pfNet < minPf;
+        return (
+          <div className={`flex items-start gap-3 p-3 rounded-[var(--radius-sm)] border text-xs ${
+            blocked
+              ? "border-[var(--color-text-down)]/40 bg-[var(--color-text-down)]/5"
+              : "border-[var(--color-border)] bg-[var(--color-surface-3)]"
+          }`}>
+            {blocked
+              ? <AlertTriangle size={16} className="text-[var(--color-text-down)] shrink-0 mt-0.5" />
+              : <CheckCircle2 size={16} className="text-[var(--color-text-up)] shrink-0 mt-0.5" />}
+            <div className="space-y-0.5">
+              {blocked ? (
+                <>
+                  <p className="font-semibold text-[var(--color-text-down)]">
+                    Estratégia provavelmente perde dinheiro após custos reais
+                  </p>
+                  <p className="text-muted">
+                    PF pós-custos <strong>{pfNet.toFixed(2)}</strong> está abaixo do mínimo {minPf} —
+                    taxas+slippage ({totalCostPct.toFixed(2)}%/trade) transformam o empate estatístico em prejuízo certo.
+                    {pfBruto != null && ` PF bruto: ${pfBruto.toFixed(2)}.`}
+                  </p>
+                </>
+              ) : (
+                <p className="text-muted">
+                  Inclui <strong>{feePct}% taxa</strong> + <strong>{slipPct}% slippage</strong> por perna ({totalCostPct.toFixed(2)}%/trade).
+                  {pfBruto != null && c.costDragPct != null && ` Custos consomem ${Math.abs(c.costDragPct).toFixed(3)}%/trade (PF bruto ${pfBruto.toFixed(2)} → ${pfNet.toFixed(2)} líquido).`}
+                </p>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Curva real */}
       <div className="space-y-2">

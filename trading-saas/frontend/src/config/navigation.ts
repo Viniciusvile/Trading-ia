@@ -9,6 +9,7 @@ import {
   Brain,
   History,
   Activity,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 
@@ -81,6 +82,7 @@ export const navItems: NavItem[] = [
     icon: Activity,
     description: "Saúde dos serviços do sistema",
   },
+
   {
     href: "/ajustes",
     label: "Ajustes",

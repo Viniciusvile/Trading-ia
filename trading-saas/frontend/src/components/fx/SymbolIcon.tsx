@@ -14,17 +14,21 @@ function colorFor(symbol: string) {
   return PALETTE[h];
 }
 
-export function SymbolIcon({ symbol, size = 28 }: { symbol: string; size?: number }) {
-  const base = symbol.replace(/USDT$/i, "").toUpperCase();
+export function SymbolIcon({ symbol, size = 28 }: { symbol?: string | null; size?: number }) {
+  // Blindagem: symbol pode chegar undefined/null (ex.: decisão "blocked" do
+  // MasterBot sem par). Um componente-folha NUNCA deve lançar e derrubar a página.
+  const safe = typeof symbol === "string" ? symbol : "";
+  const base = safe.replace(/USDT$/i, "").toUpperCase() || "?";
   const [hasError, setHasError] = useState(false);
-  const [lastSymbol, setLastSymbol] = useState(symbol);
+  const [lastSymbol, setLastSymbol] = useState(safe);
 
-  if (symbol !== lastSymbol) {
-    setLastSymbol(symbol);
+  if (safe !== lastSymbol) {
+    setLastSymbol(safe);
     setHasError(false);
   }
 
-  if (!hasError) {
+  // Sem símbolo válido: renderiza direto o fallback textual (evita img quebrada).
+  if (!hasError && base !== "?") {
     return (
       <img
         src={`https://assets.coincap.io/assets/icons/${base.toLowerCase()}@2x.png`}
@@ -40,7 +44,7 @@ export function SymbolIcon({ symbol, size = 28 }: { symbol: string; size?: numbe
     <span
       aria-hidden
       className="inline-flex items-center justify-center rounded-full font-bold text-white shrink-0 ring-2 ring-[var(--color-bg)]"
-      style={{ width: size, height: size, background: colorFor(symbol), fontSize: size * 0.38 }}
+      style={{ width: size, height: size, background: colorFor(safe), fontSize: size * 0.38 }}
     >
       {base.slice(0, 1)}
     </span>

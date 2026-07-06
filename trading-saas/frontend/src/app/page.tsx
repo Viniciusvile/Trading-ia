@@ -10,10 +10,10 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Card, CardHeader, Stat, Badge, Button, Tooltip, Modal } from "@/components/ui";
-import { Sparkline, AnimatedNumber, PillTabs, SymbolIcon, BalanceChartModal } from "@/components/fx";
+import { Sparkline, AnimatedNumber, PillTabs, SymbolIcon, BalanceChartModal, Stagger, StaggerItem } from "@/components/fx";
 import { fmtUSD } from "@/lib/format";
-import { api } from "@/lib/api";
 import type { SummaryTrade } from "@/lib/api";
+import { useBalance, useBotStatuses, useDashboardSummary } from "@/lib/hooks";
 
 // Tempo relativo em PT-BR para a lista de atividade (ex: "há 5 min")
 function timeAgo(iso: string): string {
@@ -36,32 +36,34 @@ interface ActivityItem {
 }
 
 export default function InicioPage() {
-  const [balance, setBalance] = useState<{ spot: number; futures: number }>({ spot: 0, futures: 0 });
-  const [loading, setLoading] = useState(true);
   const [isChartOpen, setIsChartOpen] = useState(false);
-  const [activeBotsCount, setActiveBotsCount] = useState(0);
-  const [pnl24h, setPnl24h] = useState(0);
-  const [opsToday, setOpsToday] = useState(0);
-  const [winRate30d, setWinRate30d] = useState<number | null>(null);
-  const [trades30d, setTrades30d] = useState(0);
-  const [openPositions, setOpenPositions] = useState(0);
-  const [activity, setActivity] = useState<ActivityItem[]>([]);
-  const [todayTrades, setTodayTrades] = useState<SummaryTrade[]>([]);
-  const [todayOpened, setTodayOpened] = useState<SummaryTrade[]>([]);
-  const [stats30d, setStats30d] = useState<{
-    wins: number;
-    losses: number;
-    totalPnl: number;
-    bestPnl: number;
-    worstPnl: number;
-    avgDurationMin?: number;
-    timeoutCount?: number;
-    tpCount?: number;
-    slCount?: number;
-    totalClosed?: number;
-  } | null>(null);
   const [metricModal, setMetricModal] = useState<"pnl" | "ops" | "winrate" | null>(null);
   const router = useRouter();
+
+  // Dados via SWR: cache compartilhado com a Topbar (mesma requisição),
+  // refresh a cada 15s SEM flash — keepPreviousData deixa o AnimatedNumber
+  // interpolar do valor antigo para o novo em vez de "pular".
+  const { data: balRes, isLoading: balLoading } = useBalance();
+  const { data: statuses } = useBotStatuses();
+  const { data: summaryRes, isLoading: summaryLoading } = useDashboardSummary();
+
+  const balance = {
+    spot: balRes?.success ? balRes.spot ?? 0 : 0,
+    futures: balRes?.success ? balRes.futures ?? 0 : 0,
+  };
+  const loading = (balLoading && !balRes) || (summaryLoading && !summaryRes);
+  const activeBotsCount = statuses?.activeCount ?? 0;
+
+  const summary = summaryRes?.success ? summaryRes : null;
+  const pnl24h = summary?.pnlToday || 0;
+  const opsToday = summary?.operationsToday || 0;
+  const winRate30d = summary?.winRate30d ?? null;
+  const trades30d = summary?.totalTrades30d || 0;
+  const openPositions = summary?.openPositions || 0;
+  const activity: ActivityItem[] = summary?.recentActivity || [];
+  const todayTrades: SummaryTrade[] = summary?.todayTrades || [];
+  const todayOpened: SummaryTrade[] = summary?.todayOpened || [];
+  const stats30d = summary?.stats30d || null;
 
   // Gráfico real do mercado (klines públicos da Binance, 7 dias em 1h)
   const [chartSymbol, setChartSymbol] = useState("BTCUSDT");
@@ -82,63 +84,6 @@ export default function InicioPage() {
     })();
     return () => { chartActive = false; };
   }, [chartSymbol]);
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadData() {
-      try {
-        const balRes = await api.botBalance();
-        if (active && balRes && balRes.success) {
-          setBalance({
-            spot: balRes.spot ?? 0,
-            futures: balRes.futures ?? 0,
-          });
-        }
-
-        // Fetch bot statuses to count active bots
-        let activeCount = 0;
-        const [master, scalper, futures] = await Promise.all([
-          api.botMasterStatus(),
-          api.microScalperStatus(),
-          api.botFuturesStatus(),
-        ]);
-        if (master?.isAlive) activeCount++;
-        if (scalper?.running) activeCount++;
-        if (futures?.isAlive) activeCount++;
-
-        if (active) {
-          setActiveBotsCount(activeCount);
-        }
-
-        // Métricas reais agregadas das posições (P&L do dia, operações,
-        // taxa de acerto 30d e atividade recente) — fim dos números mockados
-        const summary = await api.dashboardSummary(new Date().getTimezoneOffset());
-        if (active && summary.success) {
-          setPnl24h(summary.pnlToday || 0);
-          setOpsToday(summary.operationsToday || 0);
-          setWinRate30d(summary.winRate30d);
-          setTrades30d(summary.totalTrades30d || 0);
-          setOpenPositions(summary.openPositions || 0);
-          setActivity(summary.recentActivity || []);
-          setTodayTrades(summary.todayTrades || []);
-          setTodayOpened(summary.todayOpened || []);
-          setStats30d(summary.stats30d || null);
-        }
-      } catch (e) {
-        console.error("Erro ao carregar dados do inicio:", e);
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
-
-    loadData();
-    const timer = setInterval(loadData, 15000);
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
-  }, []);
 
   const totalBalance = balance.spot + balance.futures;
 
@@ -210,34 +155,56 @@ export default function InicioPage() {
         </div>
       </Card>
 
-      {/* Cards de métricas resumidas — clicáveis: abrem o detalhamento */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <button type="button" onClick={() => setMetricModal("pnl")} className="text-left cursor-pointer">
-          <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
-            <Stat label="P&L hoje" value={loading ? "..." : fmtUSD(pnl24h)} hint="realizado hoje (UTC) · clique p/ detalhes" size="sm" />
-          </Card>
-        </button>
-        <button type="button" onClick={() => setMetricModal("ops")} className="text-left cursor-pointer">
-          <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
-            <Stat label="Operações" value={loading ? "..." : String(opsToday)} hint="hoje · clique p/ detalhes" size="sm" />
-          </Card>
-        </button>
-        <button type="button" onClick={() => setMetricModal("winrate")} className="text-left cursor-pointer">
-          <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
-            <Stat
-              label="Taxa de acerto"
-              value={loading ? "..." : winRate30d != null ? `${Math.round(winRate30d)}%` : "—"}
-              hint={winRate30d != null ? `${trades30d} trades em 30 dias · clique p/ detalhes` : "sem trades em 30 dias"}
-              size="sm"
-            />
-          </Card>
-        </button>
-        <button type="button" onClick={() => router.push("/bots")} className="text-left cursor-pointer">
-          <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
-            <Stat label="Bots ativos" value={`${activeBotsCount} / 3`} hint="rodando agora · clique p/ gerenciar" size="sm" />
-          </Card>
-        </button>
-      </div>
+      {/* Cards de métricas resumidas — entrada em cascata, números que contam */}
+      <Stagger className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <StaggerItem>
+          <button type="button" onClick={() => setMetricModal("pnl")} className="text-left cursor-pointer w-full h-full">
+            <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
+              <Stat
+                label="P&L hoje"
+                value={loading ? "..." : (
+                  <span className={pnl24h > 0 ? "text-up" : pnl24h < 0 ? "text-down" : undefined}>
+                    <AnimatedNumber value={pnl24h} format={(v) => `${v >= 0 ? "+" : ""}${fmtUSD(v)}`} />
+                  </span>
+                )}
+                hint="realizado hoje (UTC) · clique p/ detalhes"
+                size="sm"
+              />
+            </Card>
+          </button>
+        </StaggerItem>
+        <StaggerItem>
+          <button type="button" onClick={() => setMetricModal("ops")} className="text-left cursor-pointer w-full h-full">
+            <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
+              <Stat
+                label="Operações"
+                value={loading ? "..." : <AnimatedNumber value={opsToday} format={(v) => String(Math.round(v))} />}
+                hint="hoje · clique p/ detalhes"
+                size="sm"
+              />
+            </Card>
+          </button>
+        </StaggerItem>
+        <StaggerItem>
+          <button type="button" onClick={() => setMetricModal("winrate")} className="text-left cursor-pointer w-full h-full">
+            <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
+              <Stat
+                label="Taxa de acerto"
+                value={loading ? "..." : winRate30d != null ? <AnimatedNumber value={winRate30d} format={(v) => `${Math.round(v)}%`} /> : "—"}
+                hint={winRate30d != null ? `${trades30d} trades em 30 dias · clique p/ detalhes` : "sem trades em 30 dias"}
+                size="sm"
+              />
+            </Card>
+          </button>
+        </StaggerItem>
+        <StaggerItem>
+          <button type="button" onClick={() => router.push("/bots")} className="text-left cursor-pointer w-full h-full">
+            <Card className="h-full transition-colors hover:border-[var(--color-brand-500)]">
+              <Stat label="Bots ativos" value={`${activeBotsCount} / 3`} hint="rodando agora · clique p/ gerenciar" size="sm" />
+            </Card>
+          </button>
+        </StaggerItem>
+      </Stagger>
 
       {/* Grid principal estilo "Hello" do Fey: mercado em destaque + feed */}
       <div className="grid lg:grid-cols-5 gap-4">
@@ -287,9 +254,9 @@ export default function InicioPage() {
                 {loading ? "Carregando..." : "Nenhuma operação registrada ainda."}
               </p>
             ) : (
-              <ul className="space-y-3.5">
+              <Stagger className="space-y-3.5" gap={0.05}>
                 {activity.map((a) => (
-                  <li key={`${a.kind}-${a.symbol}-${a.time}`} className="flex items-center gap-3">
+                  <StaggerItem key={`${a.kind}-${a.symbol}-${a.time}`} className="flex items-center gap-3">
                     <SymbolIcon symbol={a.symbol} size={28} />
                     <div className="min-w-0 flex-1">
                       <div className="text-sm text-[var(--color-text)] leading-snug truncate">{a.title}</div>
@@ -298,9 +265,9 @@ export default function InicioPage() {
                     <Badge tone={a.kind === "win" ? "up" : a.kind === "loss" ? "down" : "neutral"} size="sm" className="shrink-0">
                       {a.kind === "win" ? "lucro" : a.kind === "loss" ? "perda" : "abertura"}
                     </Badge>
-                  </li>
+                  </StaggerItem>
                 ))}
-              </ul>
+              </Stagger>
             )}
             <Link
               href="/posicoes"
@@ -335,7 +302,7 @@ export default function InicioPage() {
                   <span className="text-[11px] text-muted ml-2">{t.strategy || t.side}</span>
                   <div className="text-[11px] text-muted">{t.closedAt ? new Date(t.closedAt).toLocaleTimeString("pt-BR") : ""}</div>
                 </div>
-                <span className={`text-sm font-semibold tabular-nums ${t.pnl >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"}`}>
+                <span className={`text-sm font-semibold tabular-nums ${t.pnl >= 0 ? "text-up" : "text-down"}`}>
                   {t.pnl >= 0 ? "+" : ""}{fmtUSD(t.pnl)}
                 </span>
               </li>
@@ -369,7 +336,7 @@ export default function InicioPage() {
                 {t.status === "open" ? (
                   <Badge tone="neutral" dot size="sm">Aberta</Badge>
                 ) : (
-                  <span className={`text-sm font-semibold tabular-nums ${t.pnl >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"}`}>
+                  <span className={`text-sm font-semibold tabular-nums ${t.pnl >= 0 ? "text-up" : "text-down"}`}>
                     {t.pnl >= 0 ? "+" : ""}{fmtUSD(t.pnl)}
                   </span>
                 )}
@@ -396,21 +363,21 @@ export default function InicioPage() {
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-3">
               <div className="p-3 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] border border-[var(--color-border)] text-center">
-                <div className="text-lg font-bold text-[var(--color-text-up)]">{stats30d.wins}</div>
+                <div className="text-lg font-bold text-up">{stats30d.wins}</div>
                 <div className="text-[10px] text-muted uppercase">Vitórias</div>
               </div>
               <div className="p-3 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] border border-[var(--color-border)] text-center">
-                <div className="text-lg font-bold text-[var(--color-text-down)]">{stats30d.losses}</div>
+                <div className="text-lg font-bold text-down">{stats30d.losses}</div>
                 <div className="text-[10px] text-muted uppercase">Derrotas</div>
               </div>
               <div className="p-3 rounded-[var(--radius-sm)] bg-[var(--color-surface-2)] border border-[var(--color-border)] text-center">
-                <div className={`text-lg font-bold ${stats30d.totalPnl >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"}`}>{fmtUSD(stats30d.totalPnl)}</div>
+                <div className={`text-lg font-bold ${stats30d.totalPnl >= 0 ? "text-up" : "text-down"}`}>{fmtUSD(stats30d.totalPnl)}</div>
                 <div className="text-[10px] text-muted uppercase">Resultado</div>
               </div>
             </div>
             <div className="text-xs text-[var(--color-text-2)] space-y-1">
-              <div className="flex justify-between"><span className="text-muted">Melhor operação</span><span className="font-medium text-[var(--color-text-up)]">+{fmtUSD(stats30d.bestPnl)}</span></div>
-              <div className="flex justify-between"><span className="text-muted">Pior operação</span><span className="font-medium text-[var(--color-text-down)]">{fmtUSD(stats30d.worstPnl)}</span></div>
+              <div className="flex justify-between"><span className="text-muted">Melhor operação</span><span className="font-medium text-up">+{fmtUSD(stats30d.bestPnl)}</span></div>
+              <div className="flex justify-between"><span className="text-muted">Pior operação</span><span className="font-medium text-down">{fmtUSD(stats30d.worstPnl)}</span></div>
               <div className="flex justify-between"><span className="text-muted">Taxa de acerto</span><span className="font-medium">{winRate30d != null ? `${Math.round(winRate30d)}%` : "—"}</span></div>
             </div>
 
@@ -434,13 +401,13 @@ export default function InicioPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted">Fechados por Take Profit (TP)</span>
-                  <span className="font-medium text-[var(--color-text-up)]">
+                  <span className="font-medium text-up">
                     {stats30d.tpCount != null && stats30d.totalClosed ? `${stats30d.tpCount} (${Math.round((stats30d.tpCount / stats30d.totalClosed) * 100)}%)` : "0 (0%)"}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted">Fechados por Stop Loss (SL)</span>
-                  <span className="font-medium text-[var(--color-text-down)]">
+                  <span className="font-medium text-down">
                     {stats30d.slCount != null && stats30d.totalClosed ? `${stats30d.slCount} (${Math.round((stats30d.slCount / stats30d.totalClosed) * 100)}%)` : "0 (0%)"}
                   </span>
                 </div>

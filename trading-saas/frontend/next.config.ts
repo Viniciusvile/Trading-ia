@@ -16,6 +16,10 @@ const nextConfig: NextConfig = {
         source: "/api/legacy/:path*",
         destination: "http://127.0.0.1:3334/api/:path*",
       },
+      {
+        source: "/api/v2/:path*",
+        destination: "http://127.0.0.1:8000/api/:path*",
+      },
     ];
   },
 };

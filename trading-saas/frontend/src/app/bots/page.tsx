@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Bot, Pause, Play, AlertTriangle, FileText, Settings, Zap, HelpCircle, CheckCircle2, XCircle, Info } from "lucide-react";
+import { Bot, Pause, Play, AlertTriangle, FileText, Settings, Zap, HelpCircle, CheckCircle2, XCircle, Info, Lock } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardHeader, Button, Badge, Stat, Tooltip, Modal, Input } from "@/components/ui";
 import { AnimatedNumber, SymbolIcon, PillTabs } from "@/components/fx";
 import { fmtUSD } from "@/lib/format";
 import { api } from "@/lib/api";
+import { useMarketRegime } from "@/lib/hooks";
 import { toast } from "sonner";
 
 // Traduções legíveis para sinais/motivos técnicos do histórico de decisões
@@ -35,6 +36,7 @@ interface BotData {
 }
 
 export default function BotsPage() {
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [bots, setBots] = useState<BotData[]>([
     {
       id: "masterbot",
@@ -67,6 +69,9 @@ export default function BotsPage() {
       symbol: "BTCUSDT",
     },
   ]);
+
+  const { data: regimeData } = useMarketRegime("BTCUSDT");
+  const btcRegime = regimeData?.regimes?.BTCUSDT?.regime ?? null;
 
   const [emergencyOpen, setEmergencyOpen] = useState(false);
   const [isEmergencyLoading, setIsEmergencyLoading] = useState(false);
@@ -192,7 +197,19 @@ export default function BotsPage() {
     }
   };
 
+  const loadUser = async () => {
+    try {
+      const res = await api.me();
+      if (res.success) {
+        setCurrentUser(res.user);
+      }
+    } catch (e) {
+      console.error("Erro ao carregar usuário:", e);
+    }
+  };
+
   useEffect(() => {
+    loadUser();
     refreshStatuses();
     const interval = setInterval(refreshStatuses, 5000);
     return () => clearInterval(interval);
@@ -389,6 +406,24 @@ export default function BotsPage() {
             d.kind === "master" ? bot.id !== "micro-scalper" : bot.id === "micro-scalper"
           );
 
+          const isBotAllowed = (id: string) => {
+            if (!currentUser) return true; // default true while loading
+            const plan = currentUser.plan || "free";
+            if (id === "masterbot") return true;
+            if (id === "micro-scalper") return plan === "pro" || plan === "ultra";
+            if (id === "futures") return plan === "ultra";
+            return true;
+          };
+
+          const getRequiredPlanLabel = (id: string) => {
+            if (id === "micro-scalper") return "Plus";
+            if (id === "futures") return "Pro";
+            return "";
+          };
+
+          const allowed = isBotAllowed(bot.id);
+          const isFutures = bot.id === "futures";
+
           return (
             <motion.div
               key={bot.id}
@@ -396,7 +431,35 @@ export default function BotsPage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: botIdx * 0.07, duration: 0.3, ease: "easeOut" }}
             >
-              <Card padding="lg" className={`h-full flex flex-col ${isOnline ? "border-[var(--color-up-500)]/25" : ""}`}>
+              <Card padding="lg" className={`relative overflow-hidden h-full flex flex-col ${isOnline ? "border-[var(--color-up-500)]/25" : ""}`}>
+                {isFutures && (
+                  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-4 bg-black/80 backdrop-blur-[2px] text-center animate-in fade-in duration-200">
+                    <div className="text-3xl mb-3">🚀</div>
+                    <div className="font-bold text-sm text-[var(--color-text)]">Em breve</div>
+                    <p className="text-[11px] text-muted mt-1.5 max-w-[200px] leading-relaxed">
+                      O Bot de Futuros está em desenvolvimento. Quando lançado, permitirá operações LONG/SHORT com alavancagem baixa em tendências de 1H–4H.
+                    </p>
+                    <div className="mt-3 px-2.5 py-1 rounded-full border border-[var(--color-warn-500)]/40 bg-[var(--color-warn-500)]/10 text-[10px] text-warn font-medium">
+                      Lista de espera — plano Ultra
+                    </div>
+                  </div>
+                )}
+                {!isFutures && !allowed && (
+                  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-4 bg-black/85 backdrop-blur-[2px] text-center animate-in fade-in duration-200">
+                    <Lock className="h-8 w-8 text-[var(--color-brand-500)] mb-2" />
+                    <div className="font-bold text-sm text-[var(--color-text)]">Robô Bloqueado</div>
+                    <p className="text-[11px] text-muted mt-1 mb-4 max-w-[180px]">
+                      O {bot.name} está disponível a partir do plano <strong className="text-[var(--color-brand-500)]">{getRequiredPlanLabel(bot.id)}</strong>.
+                    </p>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => window.location.href = "/planos"}
+                    >
+                      Fazer Upgrade
+                    </Button>
+                  </div>
+                )}
                 <CardHeader
                   icon={<Bot size={18} className={isOnline ? "text-[var(--color-up-300)]" : "text-[var(--color-muted)]"} />}
                   title={bot.name}
@@ -456,8 +519,13 @@ export default function BotsPage() {
                       <span className="text-[var(--color-text-2)] text-[11px] truncate">
                         {(lastDecision as any).kind === "master"
                           ? `${(lastDecision as any).signal === "NEUTRO" ? "varredura sem sinal" : (lastDecision as any).signal} · ${(lastDecision as any).symbol}`
-                          : `${(lastDecision as any).event === "entry" ? "compra" : "venda"} · ${(lastDecision as any).symbol}`}
+                          : `${((lastDecision as any).event === "entry" || (lastDecision as any).event === "paper-signal") ? "compra" : "venda"} · ${(lastDecision as any).symbol}`}
                       </span>
+                    </div>
+                  )}
+                  {isOnline && btcRegime === "bear" && bot.id !== "futures" && (
+                    <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-[var(--color-border)]">
+                      <span className="text-[10px] text-down font-medium">🐻 Novas entradas bloqueadas — BTC em baixa no 4H</span>
                     </div>
                   )}
                 </div>
@@ -549,7 +617,9 @@ export default function BotsPage() {
             if (historyFilter === "all") return true;
             if (historyFilter === "scans") return item.kind === "master";
             if (item.kind === "master") return false;
-            return historyFilter === "buys" ? item.event === "entry" : item.event === "exit";
+            return historyFilter === "buys"
+              ? (item.event === "entry" || item.event === "paper-signal")
+              : (item.event === "exit" || item.event === "close");
           });
           if (filtered.length === 0) {
             return (
@@ -564,7 +634,7 @@ export default function BotsPage() {
             <div className="mt-4 divide-y divide-[var(--color-border)]">
               {filtered.map((item: any, idx: number) => {
                 const isMaster = item.kind === "master";
-                const isEntry = !isMaster && item.event === "entry";
+                const isEntry = !isMaster && (item.event === "entry" || item.event === "paper-signal");
                 const isWin = !isMaster && !isEntry && item.pnlPct > 0;
                 return (
                   <motion.div
@@ -865,9 +935,9 @@ export default function BotsPage() {
                 <Info size={16} className="shrink-0 mt-0.5 text-blue-400" />
                 <div>
                   <strong className="block text-xs font-semibold">
-                    {selectedDecision.event === "entry" ? "Entrada Executada" : "Saída Executada"}
+                    {selectedDecision.event === "entry" || selectedDecision.event === "paper-signal" ? "Entrada Executada" : "Saída Executada"}
                   </strong>
-                  {selectedDecision.event === "entry" 
+                  {selectedDecision.event === "entry" || selectedDecision.event === "paper-signal" 
                     ? `Ordem de Compra enviada via Scalper pelo sinal: ${labelFor(selectedDecision.signal)}.`
                     : `Ordem de Venda enviada via Scalper. Motivo: ${labelFor(selectedDecision.reason)}.`}
                 </div>

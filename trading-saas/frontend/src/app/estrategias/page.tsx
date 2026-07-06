@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Brain,
   Plus,
@@ -17,6 +18,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Card, Badge, Stat, Button } from "@/components/ui";
 import { fmtPct, fmtUSD } from "@/lib/format";
 import { api } from "@/lib/api";
+import { toast } from "sonner";
 import type { BacktestResult } from "@/lib/api";
 import { StrategyWizard } from "@/components/strategy/StrategyWizard";
 import { ShareStrategyModal } from "@/components/strategy/ShareStrategyModal";
@@ -42,6 +44,9 @@ interface Strategy {
   filters: any;
   sl: any;
   tp: any;
+  entry_conditions?: { indicator: string; indicator_period: number; operator: string; value?: number | null; compare_to_indicator?: string | null }[];
+  entry_side?: string;
+  exit_conditions?: { indicator: string; indicator_period: number; operator: string; value?: number | null; compare_to_indicator?: string | null }[];
   statsSource?: "real" | "backtest" | "sem-dados";
   lastBacktestAt?: number | null;
   realStats?: { totalTrades: number; winRate: number; profitFactor: number; netProfit: number } | null;
@@ -61,6 +66,7 @@ function agoShort(ts?: number | null): string {
 }
 
 export default function EstrategiasPage() {
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -87,7 +93,19 @@ export default function EstrategiasPage() {
     }
   };
 
+  const loadUser = async () => {
+    try {
+      const res = await api.me();
+      if (res.success) {
+        setCurrentUser(res.user);
+      }
+    } catch (e) {
+      console.error("Erro ao carregar usuário:", e);
+    }
+  };
+
   useEffect(() => {
+    loadUser();
     fetchStrategies();
     // O servidor reanalisa os backtests a cada 4h — este refetch leve mantém
     // os cards atualizados sem o usuário precisar recarregar a página.
@@ -172,7 +190,7 @@ export default function EstrategiasPage() {
     <div className="space-y-6 max-w-7xl mx-auto px-4 pb-12">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <PageHeader
-          title="Estratégias"
+          title={`Estratégias (${strategies.length}/${currentUser?.max_strategies || 3})`}
           description="Monitore, ative e crie conjuntos de regras automatizadas para seus bots."
         />
         <div className="flex items-center gap-2 self-start sm:self-auto">
@@ -187,7 +205,14 @@ export default function EstrategiasPage() {
           <Button
             variant="primary"
             size="md"
-            onClick={() => setShowCreateModal(true)}
+            onClick={() => {
+              if (strategies.length >= (currentUser?.max_strategies || 3)) {
+                toast.error(`Limite de estratégias atingido (${currentUser?.max_strategies || 3}). Faça upgrade do seu plano para criar mais.`);
+                window.location.href = "/planos";
+              } else {
+                setShowCreateModal(true);
+              }
+            }}
             className="flex items-center gap-2 shadow-md"
           >
             <Plus size={16} /> Nova Estratégia
@@ -207,7 +232,19 @@ export default function EstrategiasPage() {
           <p className="text-xs text-muted mt-1 max-w-sm mx-auto">
             Crie sua primeira estratégia personalizada para começar a automatizar operações na sua conta Binance.
           </p>
-          <Button variant="outline" size="sm" onClick={() => setShowCreateModal(true)} className="mt-4">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => {
+              if (strategies.length >= (currentUser?.max_strategies || 3)) {
+                toast.error(`Limite de estratégias atingido (${currentUser?.max_strategies || 3}). Faça upgrade do seu plano para criar mais.`);
+                window.location.href = "/planos";
+              } else {
+                setShowCreateModal(true);
+              }
+            }} 
+            className="mt-4"
+          >
             Criar Estratégia
           </Button>
         </div>
@@ -359,7 +396,7 @@ export default function EstrategiasPage() {
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 sm:gap-10 border-t lg:border-t-0 pt-3 lg:pt-0 border-[var(--color-border)] justify-between lg:justify-end">
                   <Stat label="Win Rate" value={fmtPct(s.winRate * 100, { sign: false })} size="sm" />
                   <Stat label="P. Factor" value={s.profitFactor.toFixed(2)} size="sm" />
-                  <Stat label="Lucro" value={fmtUSD(s.netProfit)} size="sm" className={s.netProfit >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"} />
+                  <Stat label="Lucro" value={fmtUSD(Number(s.netProfit || 0))} size="sm" className={(Number(s.netProfit) || 0) >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"} />
                   <Stat label="Trades" value={s.totalTrades.toString()} size="sm" />
                 </div>
                 </div>
@@ -409,8 +446,8 @@ export default function EstrategiasPage() {
       )}
 
       {/* STATS & BACKTEST REPORT MODAL */}
-      {showStatsModal && selectedStrategy && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
+      {showStatsModal && selectedStrategy && typeof document !== "undefined" && createPortal(
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
           <div className="relative w-full max-w-3xl bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-[var(--radius-md)] shadow-2xl p-6 my-8 max-h-[90vh] overflow-y-auto animate-in fade-in-50 zoom-in-95 duration-200">
             <button 
               onClick={() => setShowStatsModal(false)}
@@ -470,14 +507,14 @@ export default function EstrategiasPage() {
                               <td className="py-0.5 text-muted">Backtest</td>
                               <td className="text-right">{(bt.winRate * 100).toFixed(1)}%</td>
                               <td className="text-right">{bt.profitFactor.toFixed(2)}</td>
-                              <td className="text-right">{fmtUSD(bt.netProfitUsd)}</td>
+                              <td className="text-right">{fmtUSD(Number(bt.netProfitUsd || 0))}</td>
                               <td className="text-right">{bt.totalTrades}</td>
                             </tr>
                             <tr>
                               <td className="py-0.5 text-muted">Real</td>
                               <td className="text-right font-semibold">{(real.winRate * 100).toFixed(1)}%</td>
                               <td className="text-right font-semibold">{real.profitFactor.toFixed(2)}</td>
-                              <td className={`text-right font-semibold ${real.netProfit >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"}`}>{fmtUSD(real.netProfit)}</td>
+                              <td className={`text-right font-semibold ${(Number(real.netProfit) || 0) >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"}`}>{fmtUSD(Number(real.netProfit || 0))}</td>
                               <td className="text-right font-semibold">{real.totalTrades}</td>
                             </tr>
                           </tbody>
@@ -505,13 +542,14 @@ export default function EstrategiasPage() {
               )}
             </div>
 
-            <div className="flex justify-end gap-3 border-t border-[var(--color-border)] pt-4 mt-6">
-              <Button variant="outline" disabled={reanalyzing} onClick={() => handleReanalyze(selectedStrategy)}>
+            <div className="flex flex-col sm:flex-row sm:justify-end gap-2 sm:gap-3 border-t border-[var(--color-border)] pt-4 mt-6">
+              <Button variant="ghost" className="w-full sm:w-auto order-last sm:order-first" onClick={() => setShowStatsModal(false)}>Fechar Relatório</Button>
+              <Button variant="outline" className="w-full sm:w-auto" disabled={reanalyzing} onClick={() => handleReanalyze(selectedStrategy)}>
                 {reanalyzing ? "Analisando..." : "Reanalisar agora"}
               </Button>
-              <Button variant="ghost" onClick={() => setShowStatsModal(false)}>Fechar Relatório</Button>
-              <Button 
-                variant={selectedStrategy.active ? "danger" : "success"} 
+              <Button
+                variant={selectedStrategy.active ? "danger" : "success"}
+                className="w-full sm:w-auto"
                 onClick={() => {
                   handleActivateToggle(selectedStrategy);
                   setShowStatsModal(false);
@@ -521,7 +559,8 @@ export default function EstrategiasPage() {
               </Button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

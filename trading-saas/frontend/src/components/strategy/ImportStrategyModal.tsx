@@ -5,8 +5,8 @@ import { Sparkles, KeyRound, FileCode2, ArrowLeft, Check, AlertTriangle, Lightbu
 import { Modal, Button, Input } from "@/components/ui";
 import { api, type ImportedStrategy } from "@/lib/api";
 
-/** Lógicas que o motor do bot realmente executa. Qualquer outra (ex: "custom")
- * cai no fallback "warrior" ao vivo — ou seja, NÃO opera o indicador importado. */
+/** Lógicas que o motor do bot realmente executa. 'custom' é suportado quando
+ * a estratégia tem entry_conditions programáveis preenchidas pela IA. */
 const SUPPORTED_STRATEGIES = new Set([
   "warrior",
   "range-v2",
@@ -14,6 +14,7 @@ const SUPPORTED_STRATEGIES = new Set([
   "state-ma-cross",
   "micro-dip",
   "turbo-reversion",
+  "custom",
 ]);
 
 interface ImportStrategyModalProps {
@@ -101,6 +102,9 @@ export function ImportStrategyModal({ onClose, onSaved, initialCode }: ImportStr
           filters: res.strategy.filters || {},
           sl: res.strategy.sl,
           tp: res.strategy.tp,
+          entry_conditions: res.strategy.entry_conditions || [],
+          entry_side: res.strategy.entry_side || "LONG",
+          exit_conditions: res.strategy.exit_conditions || [],
           winRateTarget: res.strategy.winRateTarget ?? null,
         });
       } else {
@@ -149,7 +153,7 @@ export function ImportStrategyModal({ onClose, onSaved, initialCode }: ImportStr
     setSaving(true);
     setError(null);
     try {
-      const res = await api.botStrategyCreate({
+      const payload: Record<string, any> = {
         name: preview.name,
         description: preview.description,
         symbols: preview.symbols,
@@ -161,24 +165,23 @@ export function ImportStrategyModal({ onClose, onSaved, initialCode }: ImportStr
         tp: preview.tp,
         filters: preview.filters,
         winRateTarget: preview.winRateTarget,
-      });
+      };
+      // Condições programáveis (strategy="custom")
+      if (preview.entry_conditions?.length) {
+        payload.entry_conditions = preview.entry_conditions;
+        payload.entry_side = preview.entry_side || "LONG";
+      }
+      if (preview.exit_conditions?.length) {
+        payload.exit_conditions = preview.exit_conditions;
+      }
+      const res = await api.botStrategyCreate(payload);
       if (res.success) {
         // Roda o backtest logo após criar, para a estratégia já aparecer com
         // win rate / P.factor / lucro (como as demais), em vez de "Sem análise".
         setSaving(false);
         setAnalyzing(true);
         try {
-          await api.botBacktest({
-            name: preview.name,
-            strategy: preview.strategy,
-            symbols: preview.symbols,
-            timeframes: preview.timeframes,
-            mode: preview.mode,
-            sl: preview.sl,
-            tp: preview.tp,
-            filters: preview.filters,
-            winRateTarget: preview.winRateTarget,
-          });
+          await api.botBacktest(payload);
         } catch {
           /* análise falhou — a estratégia já foi salva; usuário pode reanalisar em Estatísticas */
         } finally {
@@ -250,6 +253,38 @@ export function ImportStrategyModal({ onClose, onSaved, initialCode }: ImportStr
                 padrão (Warrior — seguidor de tendência)</span>, e não com o indicador importado. O
                 backtest também refletirá a regra padrão, não o script.
               </p>
+            </div>
+          )}
+
+          {preview.strategy === "custom" && preview.entry_conditions && preview.entry_conditions.length > 0 && (
+            <div className="space-y-2">
+              <span className="text-xs font-semibold text-[var(--color-text)]">Condições de entrada programáveis</span>
+              <div className="flex flex-wrap gap-2">
+                {preview.entry_conditions.map((c, i) => (
+                  <div key={i} className="px-2.5 py-1.5 rounded-[var(--radius-sm)] bg-[var(--color-brand-500)]/10 border border-[var(--color-brand-500)]/30">
+                    <span className="text-[11px] font-mono text-[var(--color-text)]">
+                      {c.indicator}({c.indicator_period}) {c.operator === "greater_than" ? ">" : c.operator === "less_than" ? "<" : c.operator === "crosses_above" ? "↑" : "↓"} {c.compare_to_indicator || c.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-muted">Side: <span className="font-semibold">{preview.entry_side || "LONG"}</span> — Todas as condições devem ser atendidas (AND).</p>
+            </div>
+          )}
+
+          {preview.strategy === "custom" && preview.exit_conditions && preview.exit_conditions.length > 0 && (
+            <div className="space-y-2">
+              <span className="text-xs font-semibold text-[var(--color-text)]">Condições de saída programáveis</span>
+              <div className="flex flex-wrap gap-2">
+                {preview.exit_conditions.map((c, i) => (
+                  <div key={i} className="px-2.5 py-1.5 rounded-[var(--radius-sm)] bg-[var(--color-down-600)]/10 border border-[var(--color-down-600)]/30">
+                    <span className="text-[11px] font-mono text-[var(--color-text)]">
+                      {c.indicator}({c.indicator_period}) {c.operator === "greater_than" ? ">" : c.operator === "less_than" ? "<" : c.operator === "crosses_above" ? "↑" : "↓"} {c.compare_to_indicator || c.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-muted">A posição será encerrada se qualquer condição de saída for atendida (OR) ou via SL/TP.</p>
             </div>
           )}
 

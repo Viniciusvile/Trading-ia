@@ -43,6 +43,9 @@ export interface BacktestStats {
   breakevens: number;
   winRate: number;
   profitFactor: number;
+  pfAfterCosts?: number;
+  pfGross?: number | null;
+  costDragPct?: number | null;
   netProfitPct: number;
   netProfitUsd: number;
   expectancyPct: number;
@@ -108,6 +111,8 @@ export interface BacktestResult {
   winRateTarget: number | null;
   approved: boolean | null;
   feePctPerSide?: number;
+  slippagePct?: number;
+  minPfAfterCosts?: number;
   walkForward?: {
     splitTime: number;
     inSample: BacktestStats | null;
@@ -419,6 +424,7 @@ export const api = {
             daily_profit_target_usdt?: number;
             loop_interval_ms?: number;
             plans: Record<string, ScalperPlan>;
+            deactivated_by_system?: string[];
           } | null;
         }>)
       : safeJson<{
@@ -430,6 +436,7 @@ export const api = {
             daily_profit_target_usdt?: number;
             loop_interval_ms?: number;
             plans: Record<string, ScalperPlan>;
+            deactivated_by_system?: string[];
           } | null;
         }>("/micro-scalper/config", undefined, { success: false, config: null }),
 
@@ -445,6 +452,14 @@ export const api = {
           method: "PATCH",
           body: JSON.stringify(payload),
         }, { success: false, error: "Falha ao salvar estratégia do scalper" }),
+
+  microScalperOptimize: (payload: { symbol: string }) =>
+    BACKEND_FLAGS.positions
+      ? apiV2.microScalperOptimize(payload)
+      : safeJson<{ success: boolean; restarted?: boolean; mode?: string; plan?: any; stats?: any; error?: string }>("/micro-scalper/optimize", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        }, { success: false, error: "Falha ao otimizar estratégia do scalper" }),
 
 
   microScalperSignal: (symbol: string) =>
@@ -585,6 +600,21 @@ export const api = {
           body: JSON.stringify(params),
         }, { success: false, error: "Falha na requisição" }),
 
+  // ─── Trading manual (Mercado — ordens REAIS na conta ativa) ───
+  tradeContext: (symbol: string) => apiV2.tradeContext(symbol),
+  tradeOrder: (params: {
+    symbol: string;
+    side: "buy" | "sell";
+    amount_usdt?: number;
+    quantity?: number;
+    tp_pct?: number;
+    sl_pct?: number;
+    tp1_pct?: number;
+    tp1_size_pct?: number;
+    trailing_pct?: number;
+  }) => apiV2.tradeOrder(params),
+  tradeClose: (positionId: string) => apiV2.tradeClose(positionId),
+
   botPositions: () =>
     BACKEND_FLAGS.positions
       ? (apiV2.botPositions() as ReturnType<typeof safeJson>)
@@ -660,7 +690,7 @@ export const api = {
           }[];
         }>("/accounts", undefined, { success: false, accounts: [] }),
 
-  accountCreate: (params: { name: string; apiKey: string; secretKey: string; isTestnet: boolean }) =>
+  accountCreate: (params: { name: string; apiKey: string; secretKey: string; isTestnet: boolean; exchange?: string }) =>
     BACKEND_FLAGS.accounts
       ? apiV2.accountCreate(params)
       : safeJson<{ success: boolean; id?: string; error?: string }>("/accounts", {
@@ -737,6 +767,10 @@ export const api = {
           undefined,
           { success: false, database: "down", worker: "down", beat: "down", redis: "down", backend: "down" }
         ),
+
+  billingPlans: () => apiV2.billingPlans(),
+  billingCheckout: (plan: string) => apiV2.billingCheckout(plan),
+  billingPortal: () => apiV2.billingPortal(),
 };
 
 /** Modelo de estratégia devolvido pelo importador (IA / código P2P). */
@@ -751,6 +785,10 @@ export interface ImportedStrategy {
   filters: Record<string, any>;
   sl: any;
   tp: any;
+  /** Condições programáveis de entrada (strategy="custom"). */
+  entry_conditions?: { indicator: string; indicator_period: number; operator: string; value?: number | null; compare_to_indicator?: string | null }[];
+  entry_side?: string;
+  exit_conditions?: { indicator: string; indicator_period: number; operator: string; value?: number | null; compare_to_indicator?: string | null }[];
   winRateTarget?: number | null;
   /** Recomendação da IA (timeframe/ativo) — só vem na importação via TradingView. */
   recommendedTimeframes?: string[];

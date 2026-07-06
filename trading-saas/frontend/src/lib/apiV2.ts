@@ -207,6 +207,12 @@ export const apiV2 = {
       { method: "PATCH", body: JSON.stringify(payload) },
       { success: false, error: "Falha ao salvar estratégia" },
     ),
+  microScalperOptimize: (payload: { symbol: string }) =>
+    v2<{ success: boolean; restarted?: boolean; mode?: string; plan?: any; stats?: any; error?: string }>(
+      "/micro-scalper/optimize",
+      { method: "POST", body: JSON.stringify(payload) },
+      { success: false, error: "Falha ao otimizar estratégia" },
+    ),
   botConfigSave: (patch: Record<string, unknown>) =>
     v2<{ success: boolean }>(
       "/bot/config",
@@ -218,8 +224,10 @@ export const apiV2 = {
   // ─── Fatia H: Contas Binance (multi-conta) ───
   accountsList: () =>
     v2<{ success: boolean; accounts: unknown[] }>("/accounts", undefined, { success: false, accounts: [] }),
-  accountCreate: (params: { name: string; apiKey: string; secretKey: string; isTestnet: boolean }) =>
-    v2<{ success: boolean; id?: string }>("/accounts", { method: "POST", body: JSON.stringify(params) }, { success: false }),
+  // Sem fallback: erro de validação de credencial (HTTP 400) precisa chegar à
+  // UI com a mensagem real, não virar um { success: false } genérico.
+  accountCreate: (params: { name: string; apiKey: string; secretKey: string; isTestnet: boolean; exchange?: string }) =>
+    v2<{ success: boolean; id?: string }>("/accounts", { method: "POST", body: JSON.stringify(params) }),
   accountActivate: (id: string) =>
     v2<{ success: boolean }>(`/accounts/${encodeURIComponent(id)}/activate`, { method: "POST" }, { success: false }),
   accountDelete: (id: string) =>
@@ -262,6 +270,61 @@ export const apiV2 = {
       { method: "POST", body: JSON.stringify(params) },
       { success: false, error: "Falha na requisição" },
     ),
+  // ─── Trading manual (página Mercado — ordens REAIS na conta ativa) ───
+  tradeContext: (symbol: string) =>
+    v2<{
+      success: boolean;
+      symbol: string;
+      price: number;
+      exchange?: string;
+      quoteAsset?: string;
+      supportsTpSl?: boolean;
+      usdtFree: number;
+      baseAsset: string;
+      baseFree: number;
+      baseFreeUsdt: number;
+      regime: { allowed: boolean; reason: string; symbolRegime?: string; macroRegime?: string };
+      openPositions: {
+        id: string; plan?: string; side?: string; quantity?: number;
+        entryPrice?: number; stopPrice?: number | null; takeProfitPrice?: number | null;
+        openedAt?: string | null; unrealizedPnl?: number;
+      }[];
+      error?: string;
+    } | null>(`/trade/context?symbol=${encodeURIComponent(symbol)}`, undefined, null),
+
+  tradeOrder: (params: {
+    symbol: string;
+    side: "buy" | "sell";
+    amount_usdt?: number;
+    quantity?: number;
+    tp_pct?: number;
+    sl_pct?: number;
+    tp1_pct?: number;
+    tp1_size_pct?: number;
+    trailing_pct?: number;
+  }) =>
+    v2<{
+      success: boolean;
+      positionId?: string;
+      entryPrice?: number;
+      exitPrice?: number;
+      quantity?: number;
+      totalUsdt?: number;
+      tpPrice?: number | null;
+      slPrice?: number | null;
+      ocoOk?: boolean;
+      ocoError?: string;
+      advanced?: boolean;
+      error?: string;
+      detail?: string;
+    }>("/trade/order", { method: "POST", body: JSON.stringify(params) }),
+
+  tradeClose: (positionId: string) =>
+    v2<{ success: boolean; exitPrice?: number; pnl?: number; error?: string; detail?: string }>(
+      `/trade/close/${encodeURIComponent(positionId)}`,
+      { method: "POST" },
+    ),
+
   botFuturesStatus: () =>
     v2<{ success: boolean; isAlive: boolean; status?: string }>(
       "/bot/futures/status",
@@ -369,5 +432,24 @@ export const apiV2 = {
       "/status",
       undefined,
       { success: false, database: "down", worker: "down", beat: "down", redis: "down", backend: "down" }
+    ),
+
+  billingPlans: () =>
+    v2<{ id: string; name: string; price_brl: number; max_bots: number; max_strategies: number; features: string[] }[]>(
+      "/billing/plans",
+      undefined,
+      [],
+    ),
+
+  billingCheckout: (plan: string) =>
+    v2<{ checkout_url: string }>(
+      `/billing/checkout/${encodeURIComponent(plan)}`,
+      { method: "POST" },
+    ),
+
+  billingPortal: () =>
+    v2<{ portal_url: string }>(
+      "/billing/portal",
+      { method: "POST" },
     ),
 };

@@ -7,3 +7,6 @@ export { PageTransition } from "./PageTransition";
 export { RangeBar } from "./RangeBar";
 export { BalanceChartModal } from "./BalanceChartModal";
 export { PnlChartModal } from "./PnlChartModal";
+export { Stagger, StaggerItem, FadeSlide, springUI, springSnappy } from "./motion";
+export { EquityChart } from "./EquityChart";
+export { TradeHeatmap } from "./TradeHeatmap";
