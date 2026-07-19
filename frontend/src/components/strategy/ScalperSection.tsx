@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Zap, X, ChevronLeft, FlaskConical, Target, Settings2, Sparkles } from "lucide-react";
 import { Card, Badge, Button, Stat } from "@/components/ui";
 import { Sparkline } from "@/components/fx";
@@ -46,6 +47,7 @@ type ScalperConfig = {
   daily_profit_target_usdt?: number;
   plans: Record<string, ScalperPlan>;
   stats?: Record<string, ScalperStats>;
+  deactivated_by_system?: string[];
 };
 
 function Slider({ label, value, display, min, max, step, onChange }: {
@@ -139,6 +141,7 @@ export function ScalperSection() {
           {symbols.map((symbol) => {
             const plan = config.plans[symbol] || { strategy_mode: "micro-dip" as const };
             const isActive = config.active_symbols.includes(symbol);
+            const deactivatedByAI = !isActive && (config.deactivated_by_system || []).includes(symbol);
             const mode = MODE_INFO[plan.strategy_mode] || MODE_INFO["micro-dip"];
             const stats = config.stats?.[symbol];
             return (
@@ -146,8 +149,8 @@ export function ScalperSection() {
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-sm font-semibold text-[var(--color-text)]">{symbol}</span>
-                    <Badge tone={isActive ? "up" : "neutral"} dot={isActive} size="sm">
-                      {isActive ? "Operando" : "Pausado"}
+                    <Badge tone={isActive ? "up" : deactivatedByAI ? "warn" : "neutral"} dot={isActive} size="sm">
+                      {isActive ? "Operando" : deactivatedByAI ? "Desativado pela IA" : "Pausado"}
                     </Badge>
                   </div>
                   <Badge tone="neutral" size="sm">{mode.title}</Badge>
@@ -166,6 +169,17 @@ export function ScalperSection() {
                   {plan.breakeven_pct ? <span><strong className="text-[var(--color-text-2)]">BE:</strong> +{(plan.breakeven_pct * 100).toFixed(2)}%</span> : null}
                 </div>
 
+                {deactivatedByAI && (
+                  <div className="flex items-start gap-2 text-[11px] rounded-[var(--radius-sm)] border border-[var(--color-warn-500)]/30 bg-[var(--color-warn-500)]/5 p-2.5">
+                    <Sparkles size={13} className="text-[var(--color-warn-500)] mt-0.5 shrink-0" />
+                    <span className="text-[var(--color-text-2)]">
+                      A IA pausou este ativo{stats?.ts ? ` ${agoShort(stats.ts)}` : ""} porque ambas as estratégias ficaram
+                      negativas no backtest{stats && Number(stats.netProfit) < 0 ? ` (prejuízo estimado de ${fmtUSD(Number(stats.netProfit))})` : ""}.
+                      Ela reativa automaticamente assim que voltar a dar lucro.
+                    </span>
+                  </div>
+                )}
+
                 {isActive && stats && (
                   <div className="space-y-2 border-t border-[var(--color-border)] pt-3">
                     <div className="flex items-center gap-2">
@@ -177,14 +191,14 @@ export function ScalperSection() {
                         <Sparkline data={stats.equityCurve} width={110} height={28} className="ml-auto" />
                       )}
                     </div>
-                    <div className="grid grid-cols-4 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                       <Stat label="Win Rate" value={fmtPct(stats.winRate * 100, { sign: false })} size="sm" />
                       <Stat label="P. Factor" value={stats.profitFactor.toFixed(2)} size="sm" />
                       <Stat
                         label="Lucro"
-                        value={fmtUSD(stats.netProfit)}
+                        value={fmtUSD(Number(stats.netProfit || 0))}
                         size="sm"
-                        className={stats.netProfit >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"}
+                        className={(Number(stats.netProfit) || 0) >= 0 ? "text-[var(--color-text-up)]" : "text-[var(--color-text-down)]"}
                       />
                       <Stat label="Trades" value={String(stats.totalTrades)} size="sm" />
                     </div>
@@ -235,6 +249,11 @@ function ScalperEditor({ symbol, initialPlan, onClose, onSaved }: {
   onClose: () => void;
   onSaved: (restarted: boolean) => void;
 }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const [mode, setMode] = useState<"micro-dip" | "turbo-reversion">(initialPlan.strategy_mode || "micro-dip");
   // percentuais em % na UI (0.01 → 1.0)
   const [tpPct, setTpPct] = useState(((initialPlan.tp_pct ?? 0.01) * 100));
@@ -369,91 +388,106 @@ function ScalperEditor({ symbol, initialPlan, onClose, onSaved }: {
 
   const selectCls = "w-full text-sm bg-[var(--color-surface-3)] border border-[var(--color-border)] rounded-[var(--radius-sm)] px-3 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-brand-500)]";
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
-      <div className="relative w-full max-w-2xl bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-[var(--radius-md)] shadow-2xl p-6 my-8 max-h-[92vh] overflow-y-auto">
-        <button onClick={onClose} className="absolute top-4 right-4 p-1 rounded-full text-muted hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)]">
+  if (!mounted) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <div className="relative w-full max-w-2xl bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-[var(--radius-md)] shadow-2xl p-6 max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-4rem)] flex flex-col overflow-hidden">
+        <button onClick={onClose} className="absolute top-4 right-4 p-1 rounded-full text-muted hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)] z-10">
           <X size={18} />
         </button>
 
-        <h3 className="text-base font-semibold text-[var(--color-text)] flex items-center gap-2 mb-1">
-          <Zap className="text-[var(--color-brand-500)]" size={20} /> Scalper — {symbol}
-        </h3>
-        <p className="text-xs text-muted mb-5">
-          Personalize a estratégia deste ativo. Salvar reinicia o scalper automaticamente com as novas regras.
-        </p>
+        <div className="mb-4 pr-6">
+          <h3 className="text-base font-semibold text-[var(--color-text)] flex items-center gap-2 mb-1">
+            <Zap className="text-[var(--color-brand-500)]" size={20} /> Scalper — {symbol}
+          </h3>
+          <p className="text-xs text-muted">
+            Personalize a estratégia deste ativo. Salvar reinicia o scalper automaticamente com as novas regras.
+          </p>
+        </div>
 
         {!result && !analyzing && (
-          <div className="space-y-4">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-[var(--color-text)]">Modo da Estratégia</label>
-              <select value={mode} onChange={(e) => setMode(e.target.value as "micro-dip" | "turbo-reversion")} className={selectCls}>
-                <option value="micro-dip">Micro Dip — compra quedas curtas em tendência de alta</option>
-                <option value="turbo-reversion">Turbo Reversão — compra exaustão na banda de Bollinger</option>
-              </select>
-              <p className="text-[10px] text-muted">{MODE_INFO[mode].desc}</p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Slider label="Take Profit" value={tpPct} display={`+${tpPct.toFixed(2)}%`} min={0.2} max={3} step={0.05} onChange={setTpPct} />
-              <Slider label="Stop Loss" value={slPct} display={`-${slPct.toFixed(2)}%`} min={0.2} max={2} step={0.05} onChange={setSlPct} />
-              <Slider label="Breakeven (0 = desligado)" value={breakevenPct} display={breakevenPct > 0 ? `+${breakevenPct.toFixed(2)}%` : "desligado"} min={0} max={1.5} step={0.05} onChange={setBreakevenPct} />
-              <Slider label="RSI período" value={rsiPeriod} display={`${rsiPeriod}`} min={2} max={14} step={1} onChange={(v) => setRsiPeriod(Math.round(v))} />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-[var(--color-border)] pt-4">
-              {mode === "micro-dip" ? (
-                <>
-                  <Slider label="EMA período" value={emaPeriod} display={`${emaPeriod}`} min={5} max={50} step={1} onChange={(v) => setEmaPeriod(Math.round(v))} />
-                  <Slider label="Queda mínima (dip)" value={minDipPct} display={`${minDipPct.toFixed(2)}%`} min={0.02} max={1} step={0.02} onChange={setMinDipPct} />
-                  <Slider label="RSI mínimo" value={minRsi} display={`${minRsi}`} min={5} max={45} step={1} onChange={(v) => setMinRsi(Math.round(v))} />
-                  <Slider label="RSI máximo" value={maxRsi} display={`${maxRsi}`} min={50} max={90} step={1} onChange={(v) => setMaxRsi(Math.round(v))} />
-                </>
-              ) : (
-                <>
-                  <Slider label="Bollinger período" value={bbLength} display={`${bbLength}`} min={10} max={40} step={1} onChange={(v) => setBbLength(Math.round(v))} />
-                  <Slider label="Bollinger desvios" value={bbMult} display={`${bbMult.toFixed(1)}x`} min={1} max={3} step={0.1} onChange={setBbMult} />
-                  <Slider label="RSI limite (sobrevenda)" value={rsiLimit} display={`< ${rsiLimit}`} min={10} max={50} step={1} onChange={(v) => setRsiLimit(Math.round(v))} />
-                  <Slider label="Pico de volume mínimo" value={volMult} display={`${volMult.toFixed(1)}x`} min={1} max={3} step={0.1} onChange={setVolMult} />
-                </>
-              )}
-            </div>
-
-            <div className="p-3 bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] space-y-2">
-              <div className="flex justify-between text-xs font-medium">
-                <span className="text-[var(--color-text)] flex items-center gap-1.5"><Target size={13} /> Meta de Win Rate (para a análise)</span>
-                <span className="text-[var(--color-brand-500)] font-bold">{winRateTarget}%</span>
+          <>
+            <div className="flex-1 overflow-y-auto pr-1.5 space-y-4 mb-4">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-[var(--color-text)]">Modo da Estratégia</label>
+                <select value={mode} onChange={(e) => setMode(e.target.value as "micro-dip" | "turbo-reversion")} className={selectCls}>
+                  <option value="micro-dip">Micro Dip — compra quedas curtas em tendência de alta</option>
+                  <option value="turbo-reversion">Turbo Reversão — compra exaustão na banda de Bollinger</option>
+                </select>
+                <p className="text-[10px] text-muted">{MODE_INFO[mode].desc}</p>
               </div>
-              <input type="range" min={40} max={85} step={1} value={winRateTarget}
-                onChange={(e) => setWinRateTarget(parseInt(e.target.value))} className="w-full accent-[var(--color-brand-500)]" />
-            </div>
 
-            <div className="flex flex-col sm:flex-row justify-between gap-3 border-t border-[var(--color-border)] pt-4">
-              <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-              <div className="flex gap-2 justify-end">
-                <Button 
-                  variant="outline"
-                  className="border-violet-500/50 hover:bg-violet-500/10 text-violet-400 font-medium"
-                  disabled={optimizing} 
-                  onClick={handleOptimizeAI}
-                >
-                  <Sparkles size={14} className="mr-1 text-violet-400" /> 
-                  {optimizing ? "Otimizando..." : "Otimizar com IA"}
-                </Button>
-                <Button variant="outline" onClick={runAnalysis}>
-                  <FlaskConical size={14} /> Analisar no Mercado (5m)
-                </Button>
-                <Button variant="primary" disabled={saving} onClick={handleSave}>
-                  {saving ? "Salvando..." : "Salvar Estratégia"}
-                </Button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Slider label="Take Profit" value={tpPct} display={`+${tpPct.toFixed(2)}%`} min={0.2} max={3} step={0.05} onChange={setTpPct} />
+                <Slider label="Stop Loss" value={slPct} display={`-${slPct.toFixed(2)}%`} min={0.2} max={2} step={0.05} onChange={setSlPct} />
+                <Slider label="Breakeven (0 = desligado)" value={breakevenPct} display={breakevenPct > 0 ? `+${breakevenPct.toFixed(2)}%` : "desligado"} min={0} max={1.5} step={0.05} onChange={setBreakevenPct} />
+                <Slider label="RSI período" value={rsiPeriod} display={`${rsiPeriod}`} min={2} max={14} step={1} onChange={(v) => setRsiPeriod(Math.round(v))} />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-[var(--color-border)] pt-4">
+                {mode === "micro-dip" ? (
+                  <>
+                    <Slider label="EMA período" value={emaPeriod} display={`${emaPeriod}`} min={5} max={50} step={1} onChange={(v) => setEmaPeriod(Math.round(v))} />
+                    <Slider label="Queda mínima (dip)" value={minDipPct} display={`${minDipPct.toFixed(2)}%`} min={0.02} max={1} step={0.02} onChange={setMinDipPct} />
+                    <Slider label="RSI mínimo" value={minRsi} display={`${minRsi}`} min={5} max={45} step={1} onChange={(v) => setMinRsi(Math.round(v))} />
+                    <Slider label="RSI máximo" value={maxRsi} display={`${maxRsi}`} min={50} max={90} step={1} onChange={(v) => setMaxRsi(Math.round(v))} />
+                  </>
+                ) : (
+                  <>
+                    <Slider label="Bollinger período" value={bbLength} display={`${bbLength}`} min={10} max={40} step={1} onChange={(v) => setBbLength(Math.round(v))} />
+                    <Slider label="Bollinger desvios" value={bbMult} display={`${bbMult.toFixed(1)}x`} min={1} max={3} step={0.1} onChange={setBbMult} />
+                    <Slider label="RSI limite (sobrevenda)" value={rsiLimit} display={`< ${rsiLimit}`} min={10} max={50} step={1} onChange={(v) => setRsiLimit(Math.round(v))} />
+                    <Slider label="Pico de volume mínimo" value={volMult} display={`${volMult.toFixed(1)}x`} min={1} max={3} step={0.1} onChange={setVolMult} />
+                  </>
+                )}
+              </div>
+
+              <div className="p-3 bg-[var(--color-surface-3)] rounded-[var(--radius-sm)] border border-[var(--color-border)] space-y-2">
+                <div className="flex justify-between text-xs font-medium">
+                  <span className="text-[var(--color-text)] flex items-center gap-1.5"><Target size={13} /> Meta de Win Rate (para a análise)</span>
+                  <span className="text-[var(--color-brand-500)] font-bold">{winRateTarget}%</span>
+                </div>
+                <input type="range" min={40} max={85} step={1} value={winRateTarget}
+                  onChange={(e) => setWinRateTarget(parseInt(e.target.value))} className="w-full accent-[var(--color-brand-500)]" />
               </div>
             </div>
-            {error && <p className="text-xs text-[var(--color-text-down)] text-center">{error}</p>}
-          </div>
+
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-end gap-2 border-t border-[var(--color-border)] pt-4 mt-auto">
+              <Button variant="ghost" onClick={onClose} className="w-full sm:w-auto order-last sm:order-first sm:mr-auto">
+                Cancelar
+              </Button>
+              <Button
+                variant="secondary"
+                className="w-full sm:w-auto bg-violet-950/20 border border-violet-500/50 hover:bg-violet-900/40 text-violet-300 font-medium hover:text-white shadow-[0_0_12px_rgba(139,92,246,0.1)] hover:shadow-[0_0_18px_rgba(139,92,246,0.25)] transition-all duration-300 whitespace-nowrap"
+                disabled={optimizing}
+                onClick={handleOptimizeAI}
+              >
+                <Sparkles size={14} className="mr-1.5 text-violet-400" />
+                {optimizing ? "Otimizando..." : "Otimizar com IA"}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={runAnalysis}
+                className="w-full sm:w-auto bg-zinc-900/20 border border-zinc-700 hover:bg-zinc-800/40 text-zinc-300 font-medium hover:text-white transition-all duration-200 whitespace-nowrap"
+              >
+                <FlaskConical size={14} className="mr-1.5" /> Analisar (5m)
+              </Button>
+              <Button
+                variant="success"
+                disabled={saving}
+                onClick={handleSave}
+                className="w-full sm:w-auto font-semibold shadow-[0_4px_12px_rgba(16,185,129,0.2)] hover:shadow-[0_4px_16px_rgba(16,185,129,0.35)] transition-all duration-200 whitespace-nowrap"
+              >
+                {saving ? "Salvando..." : "Salvar Estratégia"}
+              </Button>
+            </div>
+            {error && <p className="text-xs text-[var(--color-text-down)] text-center mt-2">{error}</p>}
+          </>
         )}
 
         {analyzing && (
-          <div className="flex flex-col items-center justify-center py-16 space-y-4">
+          <div className="flex-1 flex flex-col items-center justify-center py-16 space-y-4">
             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[var(--color-brand-500)]"></div>
             <p className="text-sm font-semibold text-[var(--color-text)]">Analisando {symbol} no 5m...</p>
             <p className="text-xs text-muted text-center max-w-sm">
@@ -463,29 +497,37 @@ function ScalperEditor({ symbol, initialPlan, onClose, onSaved }: {
         )}
 
         {result && !analyzing && (
-          <div className="space-y-5">
-            <BacktestReport data={result} />
-            {error && <p className="text-xs text-[var(--color-text-down)] text-center">{error}</p>}
-            <div className="flex flex-col sm:flex-row justify-between gap-3 border-t border-[var(--color-border)] pt-4">
-              <Button variant="ghost" onClick={() => setResult(null)}><ChevronLeft size={14} /> Ajustar variáveis</Button>
-              <div className="flex gap-2 justify-end">
-                <Button 
-                  variant="outline"
-                  className="border-violet-500/50 hover:bg-violet-500/10 text-violet-400 font-medium"
-                  disabled={optimizing} 
-                  onClick={handleOptimizeAI}
-                >
-                  <Sparkles size={14} className="mr-1 text-violet-400" /> 
-                  {optimizing ? "Melhorando..." : "Melhorar com IA"}
-                </Button>
-                <Button variant="success" disabled={saving} onClick={handleSave}>
-                  {saving ? "Salvando..." : "Salvar e Aplicar no Scalper"}
-                </Button>
-              </div>
+          <>
+            <div className="flex-1 overflow-y-auto pr-1.5 space-y-5 mb-4">
+              <BacktestReport data={result} />
+              {error && <p className="text-xs text-[var(--color-text-down)] text-center">{error}</p>}
             </div>
-          </div>
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-end gap-2 border-t border-[var(--color-border)] pt-4 mt-auto">
+              <Button variant="ghost" onClick={() => setResult(null)} className="w-full sm:w-auto order-last sm:order-first sm:mr-auto whitespace-nowrap">
+                <ChevronLeft size={14} className="mr-1" /> Ajustar variáveis
+              </Button>
+              <Button
+                variant="secondary"
+                className="w-full sm:w-auto bg-violet-950/20 border border-violet-500/50 hover:bg-violet-900/40 text-violet-300 font-medium hover:text-white shadow-[0_0_12px_rgba(139,92,246,0.1)] hover:shadow-[0_0_18px_rgba(139,92,246,0.25)] transition-all duration-300 whitespace-nowrap"
+                disabled={optimizing}
+                onClick={handleOptimizeAI}
+              >
+                <Sparkles size={14} className="mr-1.5 text-violet-400" />
+                {optimizing ? "Melhorando..." : "Melhorar com IA"}
+              </Button>
+              <Button
+                variant="success"
+                disabled={saving}
+                onClick={handleSave}
+                className="w-full sm:w-auto font-semibold shadow-[0_4px_12px_rgba(16,185,129,0.2)] hover:shadow-[0_4px_16px_rgba(16,185,129,0.35)] transition-all duration-200 whitespace-nowrap"
+              >
+                {saving ? "Salvando..." : "Salvar e Aplicar no Scalper"}
+              </Button>
+            </div>
+          </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -19,68 +19,68 @@ export interface NavItem {
   icon: LucideIcon;
   /** Exibido na barra inferior mobile */
   mobile?: boolean;
-  /** Descri????o curta para tooltip/onboarding */
+  /** Descrição curta para tooltip/onboarding */
   description?: string;
 }
 
 export const navItems: NavItem[] = [
   {
     href: "/",
-    label: "In??cio",
+    label: "Início",
     icon: Home,
     mobile: true,
-    description: "Vis??o geral da sua conta e bots",
+    description: "Visão geral da sua conta e bots",
   },
   {
     href: "/mercado",
     label: "Mercado",
     icon: LineChart,
     mobile: true,
-    description: "Cota????es, gr??ficos e an??lise t??cnica",
+    description: "Cotações, gráficos e análise técnica",
   },
   {
     href: "/bots",
     label: "Bots",
     icon: Bot,
     mobile: true,
-    description: "Controle dos rob??s de opera????o",
+    description: "Controle dos robôs de operação",
   },
   {
     href: "/posicoes",
-    label: "Posi????es",
+    label: "Posições",
     icon: Wallet,
-    description: "Opera????es abertas e hist??rico",
+    description: "Operações abertas e histórico",
   },
   {
     href: "/estrategias",
-    label: "Estrat??gias",
+    label: "Estratégias",
     icon: Brain,
-    description: "Backtests e configura????es de estrat??gia",
+    description: "Backtests e configurações de estratégia",
   },
   {
     href: "/diario",
-    label: "Di??rio",
+    label: "Diário",
     icon: BookOpen,
     mobile: true,
-    description: "Anota????es e aprendizados de cada opera????o",
+    description: "Anotações e aprendizados de cada operação",
   },
   {
     href: "/alertas",
     label: "Alertas",
     icon: Bell,
-    description: "Avisos de pre??o e eventos",
+    description: "Avisos de preço e eventos",
   },
   {
     href: "/replay",
     label: "Replay",
     icon: History,
-    description: "Treine operando em modo replay hist??rico",
+    description: "Treine operando em modo replay histórico",
   },
   {
     href: "/status",
     label: "Status",
     icon: Activity,
-    description: "Sa??de dos servi??os do sistema",
+    description: "Saúde dos serviços do sistema",
   },
 
   {
@@ -88,9 +88,8 @@ export const navItems: NavItem[] = [
     label: "Ajustes",
     icon: Settings,
     mobile: true,
-    description: "Prefer??ncias, tema e seguran??a",
+    description: "Preferências, tema e segurança",
   },
 ];
 
 export const mobileNavItems = navItems.filter((i) => i.mobile);
-

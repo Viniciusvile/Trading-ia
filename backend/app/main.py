@@ -1,6 +1,12 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import auth, binance, strategy, trades, dashboard, billing, wallet, market, settings as settings_router, templates, micro_scalper, bots, accounts, notifications, status
+from app.routers import auth, binance, strategy, trades, dashboard, billing, wallet, market, settings as settings_router, templates, micro_scalper, bots, accounts, notifications, status, trade, alerts, push
+
+# httpx loga a URL completa em INFO (inclui "?key=..." das chamadas ao Gemini em
+# /api/bot), vazando a API key nos logs. WARNING corta o vazamento.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 app = FastAPI(title="Trading Bots SaaS", version="1.0.0")
 
@@ -27,6 +33,9 @@ app.include_router(bots.router, prefix="/api/bot", tags=["bots"])
 app.include_router(accounts.router, prefix="/api/accounts", tags=["accounts"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
 app.include_router(status.router, prefix="/api/status", tags=["status"])
+app.include_router(trade.router, prefix="/api/trade", tags=["trade"])
+app.include_router(alerts.router, prefix="/api/alerts", tags=["alerts"])
+app.include_router(push.router, prefix="/api/push", tags=["push"])
 
 
 @app.get("/health")

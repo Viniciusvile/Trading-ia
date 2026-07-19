@@ -3,12 +3,13 @@
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
-import { Moon, Sun, Search, Bell, ChevronDown, Check, LogOut, TrendingUp, CheckCheck, Inbox } from "lucide-react";
+import { Moon, Sun, Search, Bell, ChevronDown, Check, LogOut, TrendingUp, CheckCheck, Inbox, AlertTriangle } from "lucide-react";
 import { navItems } from "@/config/navigation";
 import { Badge } from "@/components/ui";
 import { fmtUSD } from "@/lib/format";
 import { api, type SystemNotification } from "@/lib/api";
-import { BalanceChartModal } from "@/components/fx";
+import { useBalance, useDashboardSummary, useSystemStatus, useMarketRegime } from "@/lib/hooks";
+import { BalanceChartModal, AnimatedNumber } from "@/components/fx";
 import { toast } from "sonner";
 
 export function Topbar() {
@@ -49,9 +50,25 @@ export function Topbar() {
     }
     loadUserProfile();
   }, []);
-  const [balance, setBalance] = useState<{ spot: number; futures: number }>({ spot: 0, futures: 0 });
-  const [pnl24h, setPnl24h] = useState(0);
-  const [loading, setLoading] = useState(true);
+  // Regime macro BTC 4H — cache 15 min, igual ao detector dos bots
+  const { data: regimeData } = useMarketRegime("BTCUSDT");
+  const btcRegime = regimeData?.regimes?.BTCUSDT;
+
+  // Status do sistema (worker / beat / redis) — poll 60s
+  const { data: sysStatus } = useSystemStatus();
+  const systemDegraded =
+    sysStatus &&
+    (sysStatus.worker === "down" || sysStatus.beat === "down" || sysStatus.redis === "down");
+
+  // Saldo e PnL via SWR — mesmo cache do Dashboard (uma requisição só p/ os dois)
+  const { data: balRes, isLoading: balLoading } = useBalance();
+  const { data: summaryRes } = useDashboardSummary();
+  const balance = {
+    spot: balRes?.success ? balRes.spot ?? 0 : 0,
+    futures: balRes?.success ? balRes.futures ?? 0 : 0,
+  };
+  const pnl24h = summaryRes?.success ? summaryRes.pnlToday ?? 0 : 0;
+  const loading = balLoading && !balRes;
 
   // Multi-account states
   const [accounts, setAccounts] = useState<{ id: string; name: string; isActive: boolean; isTestnet: boolean }[]>([]);
@@ -138,20 +155,7 @@ export function Topbar() {
     let active = true;
     async function fetchData() {
       try {
-        const [balRes, sumRes, notifRes] = await Promise.all([
-          api.botBalance(),
-          api.dashboardSummary(new Date().getTimezoneOffset()),
-          api.notifications(20)
-        ]);
-        if (active && balRes && balRes.success) {
-          setBalance({
-            spot: balRes.spot ?? 0,
-            futures: balRes.futures ?? 0,
-          });
-        }
-        if (active && sumRes && sumRes.success) {
-          setPnl24h(sumRes.pnlToday ?? 0);
-        }
+        const notifRes = await api.notifications(20);
         if (active && notifRes && notifRes.success) {
           const isFirstLoad = seenNotificationIds.current.size === 0;
           if (isFirstLoad) {
@@ -176,8 +180,6 @@ export function Topbar() {
         }
       } catch (e) {
         console.error("Erro ao carregar dados do topbar:", e);
-      } finally {
-        if (active) setLoading(false);
       }
     }
 
@@ -205,6 +207,18 @@ export function Topbar() {
 
   return (
     <header className="sticky top-0 z-20 bg-[var(--color-bg)]/70 backdrop-blur-xl">
+      {systemDegraded && (
+        <div className="bg-down-500/10 border-b border-down-500/20 px-4 py-1.5 flex items-center justify-center gap-2">
+          <AlertTriangle size={13} className="text-down-300 shrink-0" />
+          <span className="text-xs text-down-300 font-medium">
+            Sistema degradado —{" "}
+            {sysStatus?.worker === "down" && "worker offline · "}
+            {sysStatus?.beat === "down" && "agendador offline · "}
+            {sysStatus?.redis === "down" && "redis offline · "}
+            bots podem não estar operando
+          </span>
+        </div>
+      )}
       <div className="max-w-6xl mx-auto h-16 flex items-center gap-3 px-4 sm:px-6">
         <div className="min-w-0 flex-1 flex items-center gap-4">
           {/* Vexa Cripto Brand Logo */}
@@ -313,13 +327,32 @@ export function Topbar() {
           <div className="flex flex-col">
             <span className="text-[10px] uppercase tracking-wider">Saldo</span>
             <span className="text-[var(--color-text)] font-semibold">
-              {loading ? "Carregando..." : fmtUSD(balance.spot + balance.futures)}
+              {loading ? "Carregando..." : <AnimatedNumber value={balance.spot + balance.futures} format={fmtUSD} />}
             </span>
           </div>
           <Badge tone={tone} dot size="sm" className="ml-auto">
             {formattedPercent}
           </Badge>
         </button>
+
+        {/* Regime macro BTC 4H */}
+        {btcRegime && (
+          <div
+            title={`BTC 4H · EMA200: ${btcRegime.ema200?.toFixed(0) ?? "—"} · Inclinação EMA50: ${btcRegime.slope_pct?.toFixed(2) ?? "—"}%`}
+            className={`hidden md:flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold border select-none ${
+              btcRegime.regime === "bull"
+                ? "bg-up/10 border-up/20 text-up"
+                : btcRegime.regime === "bear"
+                ? "bg-down/10 border-down/20 text-down"
+                : "bg-[var(--color-surface-3)] border-[var(--color-border)] text-muted"
+            }`}
+          >
+            {btcRegime.regime === "bull" ? "🐂" : btcRegime.regime === "bear" ? "🐻" : "↔"}
+            <span className="hidden lg:inline">
+              {btcRegime.regime === "bull" ? "Alta" : btcRegime.regime === "bear" ? "Baixa" : "Neutro"}
+            </span>
+          </div>
+        )}
 
         <button
           type="button"

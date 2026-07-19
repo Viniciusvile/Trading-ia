@@ -22,6 +22,13 @@ TIMEFRAME_MAP = {
     "1d": Client.KLINE_INTERVAL_1DAY, "1D": Client.KLINE_INTERVAL_1DAY,
 }
 BACKTEST_LIMIT = 1400  # igual ao legado (fetchHistoricalCandles total=1400)
+# Máx. de combinações ativo×timeframe por análise. A máquina tem só ~1GB de RAM:
+# 6 combos 'custom' rodam de forma estável (~30s, backtest otimizado). As demais
+# estratégias (warrior/range-v2/state-ma-cross) recomputam indicadores por barra
+# (O(n²), sem o fast-path) e 6 combos levam ~99s — estoura o timeout do navegador.
+# Por isso o limite é MENOR para as pesadas.
+MAX_COMBOS = 6        # custom (rápido)
+MAX_COMBOS_HEAVY = 4  # warrior / range-v2 / state-ma-cross (lento)
 
 
 def fetch_historical_candles(client: Client, symbol: str, tf: str, limit: int = BACKTEST_LIMIT) -> list[dict]:
@@ -88,16 +95,45 @@ def _signal_for_window(plan: dict, window: list[dict]) -> dict | None:
 
 
 def simulate_trades(candles: list[dict], plan: dict, warmup: int = 250, max_hold: int = 96,
-                    fee_pct_per_side: float = 0.1) -> list[dict]:
+                    fee_pct_per_side: float = 0.1, slippage_pct: float = 0.05) -> list[dict]:
+    """Simula trades candle-a-candle.
+
+    fee_pct_per_side: taxa de corretagem por perna (%).
+    slippage_pct: derrapagem por perna (~0.05%, conservador p/ ordens ~$100 em pares líquidos;
+        recalibrado de 0.18% em 18/07/2026 — ver run_plan_backtest).
+    """
     trades: list[dict] = []
     n = len(candles)
     i = warmup
+    total_cost_per_trade = (fee_pct_per_side + slippage_pct) * 2  # entrada + saída
+
+    # Caminho rápido para estratégias "custom": pré-computa os sinais de entrada e
+    # saída UMA vez (série de indicadores), em vez de recomputar por barra (O(n²)).
+    # Resultado idêntico ao caminho por janela (indicadores causais).
+    custom_fast = plan.get("strategy") == "custom"
+    entry_ok: list[bool] = []
+    exit_ok: list[bool] = []
+    if custom_fast:
+        from app.services.condition_evaluator import evaluate_conditions_series
+        entry_ok = evaluate_conditions_series(plan.get("entry_conditions") or [], candles)
+        exit_ok = evaluate_conditions_series(plan.get("exit_conditions") or [], candles)
+
     while i < n - 1:
-        window = candles[: i + 1]
-        try:
-            signal = _signal_for_window(plan, window)
-        except Exception:
-            signal = None
+        if custom_fast:
+            # só chama o decisor (stop/tp/side exatos) nas barras que disparam entrada
+            if not (i < len(entry_ok) and entry_ok[i]):
+                i += 1
+                continue
+            try:
+                signal = _signal_for_window(plan, candles[: i + 1])
+            except Exception:
+                signal = None
+        else:
+            window = candles[: i + 1]
+            try:
+                signal = _signal_for_window(plan, window)
+            except Exception:
+                signal = None
         if not signal or signal.get("stop") is None or signal.get("tp") is None:
             i += 1
             continue
@@ -150,15 +186,21 @@ def simulate_trades(candles: list[dict], plan: dict, warmup: int = 250, max_hold
 
             # Verifica Saída por Sinal
             if exit_conditions:
-                try:
-                    from app.services.condition_evaluator import evaluate_candle_conditions
-                    window_at_j = candles[: j + 1]
-                    eval_res = evaluate_candle_conditions(exit_conditions, window_at_j)
-                    if eval_res["allPass"]:
+                if custom_fast:
+                    # sinal de saída pré-computado (mesmo resultado, sem recomputar)
+                    if j < len(exit_ok) and exit_ok[j]:
                         exit_price, exit_idx, result = b["close"], j, "exit_signal"
                         break
-                except Exception:
-                    pass
+                else:
+                    try:
+                        from app.services.condition_evaluator import evaluate_candle_conditions
+                        window_at_j = candles[: j + 1]
+                        eval_res = evaluate_candle_conditions(exit_conditions, window_at_j)
+                        if eval_res["allPass"]:
+                            exit_price, exit_idx, result = b["close"], j, "exit_signal"
+                            break
+                    except Exception:
+                        pass
 
         if exit_price is None:
             exit_idx = last_idx
@@ -169,7 +211,7 @@ def simulate_trades(candles: list[dict], plan: dict, warmup: int = 250, max_hold
             gross_pct = ((exit_price - entry_price) / entry_price) * 100
         else:
             gross_pct = ((entry_price - exit_price) / entry_price) * 100
-        return_pct = gross_pct - fee_pct_per_side * 2
+        return_pct = gross_pct - total_cost_per_trade
 
         trades.append({
             "entryTime": bar["time"],
@@ -180,7 +222,8 @@ def simulate_trades(candles: list[dict], plan: dict, warmup: int = 250, max_hold
             "stop": stop,
             "tp": tp,
             "result": result,
-            "returnPct": return_pct,
+            "grossReturnPct": round(gross_pct, 4),
+            "returnPct": round(return_pct, 4),
             "holdBars": exit_idx - i,
         })
         i = exit_idx + 1
@@ -212,13 +255,32 @@ def compute_stats(trades: list[dict], initial_capital: float = 10000) -> dict | 
     avg_loss = (-total_losses / len(losses)) if losses else 0
     total_pct = sum(t["returnPct"] for t in trades)
 
+    # Métricas brutas (sem custos) — para evidenciar o peso de taxas+slippage
+    has_gross = all("grossReturnPct" in t for t in trades)
+    if has_gross:
+        gross_wins = [t for t in trades if t["grossReturnPct"] > 0]
+        gross_losses = [t for t in trades if t["grossReturnPct"] < 0]
+        g_gains = sum(t["grossReturnPct"] for t in gross_wins)
+        g_losses = abs(sum(t["grossReturnPct"] for t in gross_losses))
+        pf_gross = (g_gains / g_losses) if g_losses > 0 else (99 if g_gains > 0 else 0)
+        gross_total_pct = sum(t["grossReturnPct"] for t in trades)
+        cost_drag_pct = round((gross_total_pct - total_pct) / n, 4) if n > 0 else 0
+    else:
+        pf_gross = None
+        cost_drag_pct = None
+
+    pf_after_costs = (total_gains / total_losses) if total_losses > 0 else (99 if total_gains > 0 else 0)
+
     return {
         "totalTrades": n,
         "wins": len(wins),
         "losses": len(losses),
         "breakevens": n - len(wins) - len(losses),
         "winRate": len(wins) / n,
-        "profitFactor": (total_gains / total_losses) if total_losses > 0 else (99 if total_gains > 0 else 0),
+        "profitFactor": pf_after_costs,
+        "pfAfterCosts": round(pf_after_costs, 4),
+        "pfGross": round(pf_gross, 4) if pf_gross is not None else None,
+        "costDragPct": cost_drag_pct,
         "netProfitPct": total_pct,
         "netProfitUsd": equity - initial_capital,
         "expectancyPct": total_pct / n,
@@ -256,8 +318,19 @@ def get_plan_warnings(plan: dict) -> list[str]:
     return warnings
 
 
-def run_plan_backtest(plan: dict) -> dict:
-    """Roda o backtest de um plano em todas as combinações symbol×timeframe (máx 6)."""
+MIN_PF_AFTER_COSTS = 1.3  # limiar de aprovação pós-taxas+slippage
+
+
+def run_plan_backtest(plan: dict, fee_pct_per_side: float = 0.1,
+                      slippage_pct: float = 0.05) -> dict:
+    """Roda o backtest de um plano em todas as combinações symbol×timeframe (máx 6).
+
+    fee_pct_per_side: taxa de corretagem por perna (padrão 0.1% = Binance, sem desconto BNB).
+    slippage_pct: derrapagem por perna. Recalibrado 18/07/2026 de 0.18% -> 0.05%: os 0.18%
+        de jun/2026 foram medidos em STOPS durante volatilidade e superestimavam o custo de
+        ENTRADAS de ~$100 em pares LÍQUIDOS (BTC/ETH/SOL/XRP), onde a derrapagem real é ~0.02-0.05%.
+        0.05% é conservador para o tamanho de ordem informado pelo usuário.
+    """
     import time as _time
 
     symbols = plan.get("symbols") or []
@@ -266,8 +339,17 @@ def run_plan_backtest(plan: dict) -> dict:
         raise ValueError("symbols e timeframes são obrigatórios")
 
     combos = [(s, tf) for s in symbols for tf in timeframes]
-    if len(combos) > 6:
-        raise ValueError("Máximo de 6 combinações ativo×timeframe por análise")
+    # 'custom' tem backtest otimizado; as demais são pesadas → limite menor.
+    is_heavy = plan.get("strategy", "warrior") != "custom"
+    max_combos = MAX_COMBOS_HEAVY if is_heavy else MAX_COMBOS
+    if len(combos) > max_combos:
+        extra = (" Esta estratégia é mais pesada e suporta menos combinações por análise."
+                 if is_heavy else "")
+        raise ValueError(
+            f"Máximo de {max_combos} combinações ativo×timeframe por análise "
+            f"(você selecionou {len(combos)}: {len(symbols)} ativo(s) × {len(timeframes)} timeframe(s))."
+            f"{extra} Reduza os ativos ou os timeframes."
+        )
 
     client = Client()
     results = []
@@ -281,7 +363,9 @@ def run_plan_backtest(plan: dict) -> dict:
                                 "error": "Histórico insuficiente", "stats": None, "trades": []})
                 continue
             trades = [{**t, "symbol": symbol, "timeframe": timeframe}
-                      for t in simulate_trades(candles, plan)]
+                      for t in simulate_trades(candles, plan,
+                                               fee_pct_per_side=fee_pct_per_side,
+                                               slippage_pct=slippage_pct)]
             all_trades.extend(trades)
             results.append({
                 "symbol": symbol,
@@ -299,7 +383,12 @@ def run_plan_backtest(plan: dict) -> dict:
     combined = compute_stats(all_trades)
     equity_curve = build_equity_curve(all_trades)
     win_rate_target = float(plan["winRateTarget"]) if plan.get("winRateTarget") is not None else None
-    approved = (combined["winRate"] * 100 >= win_rate_target) if (combined and win_rate_target is not None) else None
+
+    # Aprovação baseada em pfAfterCosts (> win rate target E > limiar pós-custos)
+    pf_after = combined.get("pfAfterCosts") if combined else None
+    approved_pf = (pf_after >= MIN_PF_AFTER_COSTS) if pf_after is not None else None
+    approved_wr = (combined["winRate"] * 100 >= win_rate_target) if (combined and win_rate_target is not None) else None
+    approved = (approved_pf and (approved_wr is not False)) if approved_pf is not None else approved_wr
 
     # Walk-forward 70/30
     walk_forward = None
@@ -320,7 +409,9 @@ def run_plan_backtest(plan: dict) -> dict:
         "equityCurve": equity_curve,
         "winRateTarget": win_rate_target,
         "approved": approved,
-        "feePctPerSide": 0.1,
+        "feePctPerSide": fee_pct_per_side,
+        "slippagePct": slippage_pct,
+        "minPfAfterCosts": MIN_PF_AFTER_COSTS,
         "walkForward": walk_forward,
         "warnings": get_plan_warnings(plan),
         "results": results,

@@ -24,6 +24,13 @@ router = APIRouter()
 
 HEARTBEAT_FRESH_SECONDS = 360  # bots de 5min: considera vivo se heartbeat < 6min
 
+# Cache curto do saldo por usuario: o dashboard/topbar chama /bot/balance a cada
+# 15s + revalida no foco. Sem cache, cada chamada bate na exchange (get_account +
+# tickers) e trava a UI em "Carregando...". TTL de 12s serve leituras repetidas
+# do mesmo valor sem round-trip extra.
+_BALANCE_CACHE: dict[str, tuple[float, dict]] = {}
+_BALANCE_TTL_SECONDS = 12.0
+
 
 def _set_bot_enabled(db: Session, user_id: str, flag: str, enabled: bool) -> None:
     """Liga/desliga um bot para o usuario (flag tipo 'master_enabled')."""
@@ -865,11 +872,13 @@ def import_strategy_tradingview(
     body: dict = Body(...),
     current_user: User = Depends(get_current_user),
 ):
-    """Analisa um Pine Script (colado ou via URL pública) com a IA e devolve a config."""
-    api_key = settings.gemini_api_key
-    if not api_key:
-        return {"success": False, "error": "Chave de API do Gemini não configurada no servidor"}
+    """Analisa um Pine Script (colado ou via URL pública) e devolve a config.
 
+    Caminho principal: parser DETERMINÍSTICO (app/services/pine_parser.py), sem IA
+    — lê o código e extrai indicadores/cruzamentos/comparações/SL-TP. A IA (Gemini)
+    só é usada como reforço quando explicitamente religada (scalper_ia_enabled) e
+    com chave configurada; hoje está desligada, então o parser é o único caminho.
+    """
     raw_pine = ((body or {}).get("rawPineScript") or "").strip()
     url = ((body or {}).get("url") or "").strip()
     pine_script = raw_pine
@@ -890,11 +899,31 @@ def import_strategy_tradingview(
     if not pine_script:
         return {"success": False, "error": "Informe a URL do TradingView ou cole o código Pine Script"}
 
+    # 1) IA como reforço, SOMENTE se religada e configurada (dá mapeamento mais rico).
+    if settings.scalper_ia_enabled and settings.gemini_api_key:
+        try:
+            return {"success": True, "strategy": _map_pine_with_gemini(pine_script, settings.gemini_api_key)}
+        except Exception:  # noqa: BLE001 — cai no parser determinístico
+            pass
+
+    # 2) Parser determinístico (sem IA) — caminho padrão.
+    from app.services.pine_parser import parse_pine
     try:
-        mapped = _map_pine_with_gemini(pine_script, api_key)
-        return {"success": True, "strategy": mapped}
-    except Exception as e:  # noqa: BLE001
-        return {"success": False, "error": str(e) or "Falha ao analisar o script"}
+        raw = parse_pine(pine_script)
+        return {"success": True, "strategy": _normalize_imported_strategy(raw)}
+    except ValueError as e:
+        if str(e) == "no_conditions":
+            return {
+                "success": False,
+                "reason": "no_conditions",
+                "error": "Li o script mas não consegui identificar as condições de entrada "
+                         "automaticamente. O leitor reconhece cruzamento de médias (SMA/EMA/etc.) "
+                         "e gatilhos de RSI/MACD/Bollinger/CCI. Se o script for muito específico, "
+                         "crie a estratégia manualmente em 'Nova Estratégia'.",
+            }
+        return {"success": False, "error": "O código Pine parece vazio ou inválido."}
+    except Exception:  # noqa: BLE001
+        return {"success": False, "error": "Falha ao interpretar o script."}
 
 
 def _set_plan_active(db: Session, user_id: str, name: str, active: bool) -> dict:
@@ -938,32 +967,25 @@ def delete_strategy(name: str, current_user: User = Depends(get_current_user), d
 
 @router.get("/balance")
 def bot_balance(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Saldo total em USDT (spot). futures=0 (sem bot futures no Python).
+    """Saldo total em quote (spot) da conta ATIVA — Binance ou Coinbase.
 
-    Falha graciosa: se nao houver credencial/erro Binance, retorna 0 sem quebrar a UI.
+    Antes usava a PRIMEIRA conta do usuário (não a ativa) e só Binance.
+    Falha graciosa: sem credencial/erro na exchange, retorna 0 sem quebrar a UI.
     """
-    from app.models.binance_config import BinanceConfig
-    from app.services.crypto import decrypt
-    from binance.client import Client
+    import time
+    from app.services.exchange_client import get_adapter
 
-    config = db.query(BinanceConfig).filter(BinanceConfig.user_id == current_user.id).first()
-    if not config:
-        return {"success": True, "spot": 0, "futures": 0}
+    cached = _BALANCE_CACHE.get(current_user.id)
+    if cached and (time.monotonic() - cached[0]) < _BALANCE_TTL_SECONDS:
+        return cached[1]
+
     try:
-        client = Client(decrypt(config.encrypted_api_key), decrypt(config.encrypted_secret_key), testnet=config.is_testnet)
-        account = client.get_account()
-        prices = {p["symbol"]: float(p["price"]) for p in client.get_all_tickers()}
-        total = 0.0
-        for b in account.get("balances", []):
-            qty = float(b["free"]) + float(b["locked"])
-            if qty <= 0:
-                continue
-            asset = b["asset"]
-            if asset == "USDT":
-                total += qty
-            elif f"{asset}USDT" in prices:
-                total += qty * prices[f"{asset}USDT"]
-        return {"success": True, "spot": round(total, 2), "futures": 0}
+        adapter = get_adapter(db, current_user.id)
+        total = adapter.total_quote_value()
+        result = {"success": True, "spot": round(total, 2), "futures": 0,
+                  "exchange": adapter.exchange, "quoteAsset": adapter.quote_asset}
+        _BALANCE_CACHE[current_user.id] = (time.monotonic(), result)
+        return result
     except Exception:
         return {"success": True, "spot": 0, "futures": 0}
 
@@ -1118,15 +1140,25 @@ def backtest(
     from app.services import backtest as bt
 
     plan = dict(body or {})
-    # Se veio só o nome, resolve o plano salvo do usuário.
-    if plan.get("name") and not plan.get("symbols"):
+    # Se veio o nome, resolve/completa a partir do plano salvo do usuário.
+    if plan.get("name"):
         mp = (
             db.query(MasterPlan)
             .filter(MasterPlan.user_id == current_user.id, MasterPlan.name == plan["name"])
             .first()
         )
         if mp:
-            plan = {**(mp.data or {}), "name": mp.name}
+            saved = dict(mp.data or {})
+            if not plan.get("symbols"):
+                plan = {**saved, "name": mp.name}
+            else:
+                # O "Reanalisar" do card manda só alguns campos e NÃO manda as
+                # condições programáveis. Sem elas, uma estratégia 'custom' roda
+                # sem gatilho e gera 0 trades (apagando as stats boas). Completa
+                # do plano salvo os campos que faltam.
+                for k in ("entry_conditions", "exit_conditions", "entry_side", "leverage", "mode"):
+                    if plan.get(k) in (None, [], "") and saved.get(k) is not None:
+                        plan[k] = saved[k]
 
     try:
         result = bt.run_plan_backtest(plan)

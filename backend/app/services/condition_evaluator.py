@@ -381,3 +381,103 @@ def evaluate_candle_conditions(conditions: list[dict], candles: list[Candle]) ->
     results = [evaluate_candle_condition(c, candles) for c in conditions]
     all_pass = all(r["pass"] for r in results)
     return {"allPass": all_pass, "results": results}
+
+
+# ─── Avaliação VETORIZADA (série completa) — para o backtest ────────────────
+#
+# O backtest chamava evaluate_candle_conditions() a cada barra sobre uma janela
+# crescente (candles[:i+1]), recomputando cada indicador do zero — O(n²) (chegava
+# a 11s por combo). Aqui computamos a SÉRIE de cada indicador UMA vez e avaliamos
+# barra a barra por índice. Resultado idêntico (indicadores causais: o valor no
+# índice i sobre a série completa == valor calculado sobre candles[:i+1]).
+
+
+def indicator_series(name: str, period: int, candles: list[Candle]) -> list:
+    """Série completa alinhada a `candles`; series[i] == _calc_indicator_candle(name, period, candles[:i+1]).
+
+    Caminho rápido para preço e médias com série pronta em masterbot_signals;
+    fallback O(n²) (exato) para indicadores sem série rápida — garante correção.
+    """
+    n = name.upper()
+    closes = [c["close"] for c in candles]
+    if n == "CLOSE":
+        return closes[:]
+    if n == "HIGH":
+        return [c["high"] for c in candles]
+    if n == "LOW":
+        return [c["low"] for c in candles]
+    if n == "OPEN":
+        return [c["open"] for c in candles]
+    if n == "SMA":
+        return mb.sma_series(closes, period)
+    if n == "RMA":
+        return mb.rma_series(closes, period)
+    if n == "WMA":
+        return mb.wma_series(closes, period)
+    if n == "HMA":
+        return mb.hma_series(closes, period)
+    # fallback exato (mesma função usada barra a barra), só p/ indicadores raros
+    return [_calc_indicator_candle(name, period, candles[: i + 1]) for i in range(len(candles))]
+
+
+def _target_series(cond: dict, candles: list[Candle]) -> list:
+    compare = cond.get("compare_to_indicator")
+    if compare:
+        parts = compare.rsplit("_", 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            nm, per = parts[0], int(parts[1])
+        else:
+            nm, per = compare, int(cond.get("indicator_period", 14))
+        return indicator_series(nm, per, candles)
+    v = cond.get("value")
+    val = float(v) if v is not None else None
+    return [val] * len(candles)
+
+
+def evaluate_conditions_series(conditions: list[dict], candles: list[Candle]) -> list[bool]:
+    """Retorna [bool] de tamanho len(candles): out[i] == (todas as condições passam na barra i).
+
+    Equivale a chamar evaluate_candle_conditions(conditions, candles[:i+1])["allPass"]
+    para cada i, mas em O(n) por indicador em vez de O(n²).
+    """
+    nbars = len(candles)
+    if not conditions:
+        return [False] * nbars
+
+    prepared = []
+    for c in conditions:
+        ind = c.get("indicator", "CLOSE")
+        per = int(c.get("indicator_period", 14))
+        prepared.append((c.get("operator", "greater_than"),
+                         indicator_series(ind, per, candles),
+                         _target_series(c, candles)))
+
+    out = [False] * nbars
+    for i in range(nbars):
+        ok = True
+        for op, cur, tgt in prepared:
+            a = cur[i] if i < len(cur) else None
+            b = tgt[i] if i < len(tgt) else None
+            if a is None or b is None:
+                ok = False
+                break
+            if op == "greater_than":
+                r = a > b
+            elif op == "less_than":
+                r = a < b
+            elif op in ("crosses_above", "crosses_below"):
+                pa = cur[i - 1] if i > 0 else None
+                pb = tgt[i - 1] if i > 0 else None
+                if pa is None or pb is None:
+                    r = False
+                elif op == "crosses_above":
+                    r = pa <= pb and a > b
+                else:
+                    r = pa >= pb and a < b
+            else:
+                r = False
+            if not r:
+                ok = False
+                break
+        out[i] = ok
+    return out

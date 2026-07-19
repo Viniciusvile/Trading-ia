@@ -101,15 +101,23 @@ def open_long(client: Client, symbol: str, quote_usdt: float, config: dict | Non
     return {"ok": qty > 0, "qty": qty, "avgPrice": avg_price, "raw": res}
 
 
+# Distância máxima entre o gatilho do stop e o preço-limite da venda.
+# Auditoria 11-30/jun: o buffer antigo de 1% (stop*0.99) deixava a venda executar
+# até 1% ABAIXO do stop em livro raso (saída média 0,56% abaixo do stop no 4H),
+# inflando cada perda em ~35%. 0,3% cobre o gap normal sem doar o fill.
+STOP_LIMIT_BUFFER_PCT = 0.003
+
+
 def place_oco_sell(client: Client, symbol: str, quantity: str, tp_price: float,
                    stop_price: float, stop_limit_price: float | None = None,
                    precision: int | None = None) -> dict:
     """OCO de venda: TP (limit) + SL (stop-limit) juntos. Espelha placeOCO do legado.
 
     Alinha os preços ao tickSize REAL do símbolo (evita 'Filter failure: PRICE_FILTER').
+    Sem stop_limit_price explícito, usa stop * (1 - STOP_LIMIT_BUFFER_PCT).
     """
     prec = precision if precision is not None else price_decimals_for_symbol(client, symbol)
-    sl_limit = stop_limit_price if stop_limit_price is not None else stop_price
+    sl_limit = stop_limit_price if stop_limit_price is not None else stop_price * (1 - STOP_LIMIT_BUFFER_PCT)
     # API nova da Binance (above/below): para um OCO de SELL,
     #   above = TP (LIMIT_MAKER, preço acima do mercado)
     #   below = SL (STOP_LOSS_LIMIT: stopPrice dispara, price é o limite de venda)

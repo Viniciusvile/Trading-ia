@@ -7,15 +7,16 @@ from app.models.binance_config import BinanceConfig
 from app.services.crypto import decrypt
 
 def get_binance_client(db: Session, user_id: str) -> Client:
-    # Pega a conta ATIVA do usuario (determinstico). is_valid nao e mantido, entao
-    # nao bloqueamos por ele; a Binance rejeita credencial invalida na 1a chamada.
-    config = (
-        db.query(BinanceConfig)
-        .filter(BinanceConfig.user_id == user_id, BinanceConfig.is_active == True)  # noqa: E712
-        .first()
+    # Pega a conta BINANCE ativa do usuario. Os bots só operam Binance — uma
+    # conta Coinbase ativa NUNCA pode chegar aqui (chave incompatível geraria
+    # erro obscuro na primeira ordem).
+    q = db.query(BinanceConfig).filter(
+        BinanceConfig.user_id == user_id,
+        BinanceConfig.exchange == "binance",
     )
+    config = q.filter(BinanceConfig.is_active == True).first()  # noqa: E712
     if not config:
-        config = db.query(BinanceConfig).filter(BinanceConfig.user_id == user_id).first()
+        config = q.first()
     if not config:
         raise ValueError("API Binance nao configurada")
     return Client(decrypt(config.encrypted_api_key), decrypt(config.encrypted_secret_key), testnet=config.is_testnet)

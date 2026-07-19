@@ -1,0 +1,19 @@
+{
+  "name": "VEXA Cripto",
+  "short_name": "VEXA",
+  "description": "Plataforma de trading automatizado com bots e análise de mercado",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050507",
+  "theme_color": "#050507",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["finance", "utilities"]
+}

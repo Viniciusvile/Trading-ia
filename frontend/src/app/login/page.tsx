@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { Mail, Lock, Loader2, Sparkles, Eye, EyeOff } from "lucide-react";
+import { Mail, Lock, Loader2, UserPlus, Eye, EyeOff } from "lucide-react";
 import Script from "next/script";
 
 interface CandleData {
@@ -160,6 +160,11 @@ export default function LoginPage() {
 
     if (isRegister && password !== confirmPassword) {
       toast.error("As senhas não coincidem.");
+      return;
+    }
+
+    if (isRegister && password.length < 8) {
+      toast.error("A senha deve ter pelo menos 8 caracteres.");
       return;
     }
 
@@ -946,7 +951,7 @@ export default function LoginPage() {
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : isRegister ? (
                 <>
-                  <Sparkles className="w-4 h-4" />
+                  <UserPlus className="w-4 h-4" />
                   Criar Conta
                 </>
               ) : (

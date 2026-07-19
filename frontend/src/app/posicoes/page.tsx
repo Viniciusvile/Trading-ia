@@ -7,6 +7,7 @@ import { Card, CardHeader, EmptyState, Badge, Stat, Button, Modal } from "@/comp
 import { SymbolIcon, RangeBar, AnimatedNumber, PnlChartModal } from "@/components/fx";
 import { fmtUSD } from "@/lib/format";
 import { api } from "@/lib/api";
+import { toast } from "sonner";
 
 interface Position {
   id: string;
@@ -45,6 +46,9 @@ export default function PosicoesPage() {
   const [loading, setLoading] = useState(true);
   const [closingId, setClosingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // confirmacao de fechamento (substitui o confirm() nativo do browser)
+  const [confirmCloseId, setConfirmCloseId] = useState<string | null>(null);
+  const [fallbackClose, setFallbackClose] = useState<{ id: string; error: string } | null>(null);
   
   const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
   const [reconciling, setReconciling] = useState(false);
@@ -129,30 +133,27 @@ export default function PosicoesPage() {
     };
   }, []);
 
-  const handleClosePosition = async (id: string, markOnly = false) => {
-    const confirmMsg = markOnly 
-      ? "Deseja forçar o fechamento local desta posição? Isso não enviará ordens para a Binance."
-      : "Tem certeza que deseja fechar esta posição no mercado da Binance?";
-    if (!confirm(confirmMsg)) return;
+  // Executa o fechamento de fato. A confirmação agora é feita por modal estilizado
+  // (ver <Modal> no fim do componente), não mais pelo confirm() nativo do browser.
+  const doClose = async (id: string, markOnly = false) => {
     setClosingId(id);
     try {
       const res = await api.botClosePosition(id, markOnly);
       if (res && res.success) {
         await loadPositions();
+        toast.success(markOnly ? "Posição marcada como fechada." : "Posição fechada no mercado.");
       } else {
         const errorMsg = res.error || "Erro ao fechar posição.";
         if (!markOnly) {
-          const forceLocal = confirm(`${errorMsg}\n\nDeseja forçar o fechamento local no banco de dados (marcar como fechada)?`);
-          if (forceLocal) {
-            await handleClosePosition(id, true);
-          }
+          // Falhou na Binance: oferece o fechamento local via modal (sem alert nativo)
+          setFallbackClose({ id, error: errorMsg });
         } else {
-          alert(errorMsg);
+          toast.error(errorMsg);
         }
       }
     } catch (e) {
       console.error(e);
-      alert("Erro ao enviar comando de fechamento.");
+      toast.error("Erro ao enviar comando de fechamento.");
     } finally {
       setClosingId(null);
     }
@@ -222,6 +223,11 @@ export default function PosicoesPage() {
   const dailyPnL: Record<string, number> = {};
   const dailyCost: Record<string, number> = {};
   let totalRealizedPnL = 0;
+  let monthlyRealizedPnL = 0;
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+
   closedPositions.forEach((pos) => {
     const pnlVal = typeof (pos as any).pnl === "number" ? (pos as any).pnl : parseFloat((pos as any).pnl || "0");
     totalRealizedPnL += pnlVal;
@@ -237,6 +243,10 @@ export default function PosicoesPage() {
       
       const cost = (pos.entryPrice || 0) * (pos.quantity || 0);
       dailyCost[dateKey] = (dailyCost[dateKey] || 0) + cost;
+
+      if (closedDate.getFullYear() === currentYear && closedDate.getMonth() === currentMonth) {
+        monthlyRealizedPnL += pnlVal;
+      }
     }
   });
 
@@ -334,12 +344,12 @@ export default function PosicoesPage() {
               onClick={() => setIsChartOpen(true)}
             >
               <Stat
-                label="P&L realizado"
+                label="P&L realizado do mês"
                 value={
                   <AnimatedNumber
-                    value={totalRealizedPnL}
+                    value={monthlyRealizedPnL}
                     format={(v) => `${v > 0 ? "+" : ""}${fmtUSD(v)}`}
-                    className={totalRealizedPnL > 0 ? "text-up" : totalRealizedPnL < 0 ? "text-down" : ""}
+                    className={monthlyRealizedPnL > 0 ? "text-up" : monthlyRealizedPnL < 0 ? "text-down" : ""}
                   />
                 }
                 size="sm"
@@ -442,7 +452,7 @@ export default function PosicoesPage() {
                               size="sm"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleClosePosition(pos.id);
+                                setConfirmCloseId(pos.id);
                               }}
                               disabled={closingId === pos.id}
                             >
@@ -1001,6 +1011,71 @@ export default function PosicoesPage() {
       {isChartOpen && (
         <PnlChartModal open={isChartOpen} onClose={() => setIsChartOpen(false)} />
       )}
+
+      {/* Confirmação de fechamento (substitui o confirm() nativo do navegador) */}
+      <Modal
+        open={!!confirmCloseId}
+        onClose={() => setConfirmCloseId(null)}
+        size="sm"
+        title="Fechar posição"
+        description="Esta ação envia uma ordem de fechamento a mercado para a Binance."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setConfirmCloseId(null)} disabled={!!closingId}>
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              disabled={!!closingId}
+              onClick={() => {
+                const id = confirmCloseId;
+                setConfirmCloseId(null);
+                if (id) doClose(id, false);
+              }}
+            >
+              {closingId ? "Fechando..." : "Fechar posição"}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-[var(--color-text-2)]">
+          Tem certeza que deseja fechar esta posição? O resultado será realizado imediatamente a preço de mercado.
+        </p>
+      </Modal>
+
+      {/* Fallback: falha ao fechar na Binance -> oferece fechamento local */}
+      <Modal
+        open={!!fallbackClose}
+        onClose={() => setFallbackClose(null)}
+        size="sm"
+        title="Não foi possível fechar na Binance"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setFallbackClose(null)} disabled={!!closingId}>
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              disabled={!!closingId}
+              onClick={() => {
+                const id = fallbackClose?.id;
+                setFallbackClose(null);
+                if (id) doClose(id, true);
+              }}
+            >
+              Forçar fechamento local
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-2 text-sm">
+          <p className="text-[var(--color-text-down)]">{fallbackClose?.error}</p>
+          <p className="text-[var(--color-text-2)]">
+            Deseja forçar o fechamento local no banco de dados (marcar como fechada)? Isso não envia
+            nenhuma ordem para a Binance.
+          </p>
+        </div>
+      </Modal>
     </div>
   );
 }

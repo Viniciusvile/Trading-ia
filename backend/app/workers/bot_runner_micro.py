@@ -90,6 +90,18 @@ def _record_paper_signal(db, symbol: str, d: dict) -> None:
         "tpPrice": d.get("tpPrice"),
     }
     if sess:
+        # Cooldown de 1 hora (3600s) para evitar inundar o banco/interface com sinais duplicados seguidos do mesmo ativo
+        paper_signals = [t for t in sess.trades if t.get("event") == "paper-signal"]
+        if paper_signals:
+            try:
+                last_t = datetime.fromisoformat(paper_signals[-1]["t"])
+                # Se for a mesma data UTC (timezone-aware)
+                if last_t.tzinfo is None:
+                    last_t = last_t.replace(tzinfo=timezone.utc)
+                if (now - last_t).total_seconds() < 3600:
+                    return
+            except Exception:
+                pass
         sess.trades = list(sess.trades) + [entry]
     else:
         db.add(MicroSession(session_start=day_start, symbol=symbol,

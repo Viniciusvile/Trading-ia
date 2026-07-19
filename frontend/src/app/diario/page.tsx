@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   BookOpen,
   MessageSquare,
@@ -15,11 +15,18 @@ import {
   CheckCircle2,
   Calendar,
   Lock,
+  ChevronDown,
+  ChevronUp,
+  BarChart2,
+  AlertCircle,
+  Download,
 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
-import { Card, CardHeader, Button, Badge, Modal, EmptyState } from "@/components/ui";
+import { Card, CardHeader, Button, Badge, Modal, EmptyState, Skeleton } from "@/components/ui";
+import { AnimatedNumber, Stagger, StaggerItem, EquityChart, TradeHeatmap } from "@/components/fx";
 import { fmtDateTime, fmtUSD, fmtPct } from "@/lib/format";
 import { api } from "@/lib/api";
+import { usePositions, useStrategies, useBotStatuses, useLatestReport, useEquityData } from "@/lib/hooks";
 
 interface Position {
   id: string;
@@ -50,11 +57,55 @@ interface Strategy {
 }
 
 export default function DiarioPage() {
-  const [positions, setPositions] = useState<Position[]>([]);
-  const [strategies, setStrategies] = useState<Strategy[]>([]);
-  const [microScalperRunning, setMicroScalperRunning] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  // Dados via SWR (cache compartilhado, refresh automático sem flash)
+  const {
+    data: posRes,
+    isLoading: posLoading,
+    isValidating: posValidating,
+    mutate: mutatePositions,
+  } = usePositions();
+  const { data: stratRes, mutate: mutateStrategies } = useStrategies();
+  const { data: statuses } = useBotStatuses();
+  const { data: reportRes } = useLatestReport();
+  const latestReport = reportRes?.report ?? null;
+  const [reportExpanded, setReportExpanded] = useState(false);
+
+  const { data: equityRes } = useEquityData(70);
+  const equityPoints = equityRes?.equity ?? [];
+  const equityMaxDrawdown = equityRes?.max_drawdown ?? 0;
+
+  const positions: Position[] = posRes?.positions || [];
+  const strategies: Strategy[] = (stratRes?.strategies || []).map((s: any) => ({
+    id: s.id,
+    name: s.name,
+    symbol: s.symbols?.[0] || s.symbol || "",
+    timeframe: s.timeframes?.[0] || s.timeframe || "",
+    active: s.active || s.is_active || false,
+    activated_at: s.activated_at || null,
+  }));
+  const microScalperRunning = !!statuses?.scalper?.running;
+  const loading = posLoading && !posRes;
+  const refreshing = posValidating;
+
+  function loadData() {
+    mutatePositions();
+    mutateStrategies();
+  }
+
+  async function handleExportCSV() {
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    const params = new URLSearchParams();
+    if (selectedStrategy !== "all") params.set("strategy", selectedStrategy);
+    const url = `/api/trades/export?${params.toString()}`;
+    const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `vexa_trades_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
 
   // Filters
   const [selectedStrategy, setSelectedStrategy] = useState("all");
@@ -70,54 +121,24 @@ export default function DiarioPage() {
   const [noteText, setNoteText] = useState("");
   const [savingNote, setSavingNote] = useState(false);
 
-  async function loadData() {
-    setRefreshing(true);
-    try {
-      const [posRes, stratRes, msStatusRes] = await Promise.all([
-        api.botPositions(),
-        api.botStrategies(),
-        api.microScalperStatus().catch(() => ({ success: false, running: false })),
-      ]);
-
-      if (posRes && posRes.positions) {
-        setPositions(posRes.positions);
-      }
-      if (stratRes && stratRes.strategies) {
-        const mappedStrats = stratRes.strategies.map((s: any) => ({
-          id: s.id,
-          name: s.name,
-          symbol: s.symbols?.[0] || s.symbol || "",
-          timeframe: s.timeframes?.[0] || s.timeframe || "",
-          active: s.active || s.is_active || false,
-          activated_at: s.activated_at || null,
-        }));
-        setStrategies(mappedStrats);
-      }
-      if (msStatusRes && msStatusRes.success) {
-        setMicroScalperRunning(msStatusRes.running);
-      }
-    } catch (err) {
-      console.error("Erro ao carregar dados do diário", err);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }
-
-  useEffect(() => {
-    loadData();
-  }, []);
-
   async function saveNote() {
     if (!activePosition) return;
     setSavingNote(true);
     try {
       const res = await api.botSavePositionNote(activePosition.id, noteText);
       if (res && res.success) {
-        setPositions((prev) =>
-          prev.map((p) =>
-            p.id === activePosition.id ? { ...p, journalNote: noteText } : p
-          )
+        // atualização otimista do cache SWR (sem esperar o próximo refresh)
+        mutatePositions(
+          (prev: any) =>
+            prev
+              ? {
+                  ...prev,
+                  positions: (prev.positions || []).map((p: Position) =>
+                    p.id === activePosition.id ? { ...p, journalNote: noteText } : p,
+                  ),
+                }
+              : prev,
+          { revalidate: false },
         );
         setActivePosition(null);
       }
@@ -134,6 +155,18 @@ export default function DiarioPage() {
   const wins = closedPositions.filter((p) => (p.pnl || 0) > 0).length;
   const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
   const totalPnL = closedPositions.reduce((acc, p) => acc + (p.pnl || 0), 0);
+
+  // PNL do Mês
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+  const monthlyPnL = closedPositions
+    .filter((p) => {
+      if (!p.closedAt) return false;
+      const closedDate = new Date(p.closedAt);
+      return closedDate.getFullYear() === currentYear && closedDate.getMonth() === currentMonth;
+    })
+    .reduce((acc, p) => acc + (p.pnl || 0), 0);
 
   // Fator de Lucro
   const grossProfit = closedPositions
@@ -223,77 +256,250 @@ export default function DiarioPage() {
           title="Diário de operações"
           description="Monitore os trades executados e analise a taxa de acerto real das estratégias pós-ativação."
         />
-        <Button
-          variant="outline"
-          size="sm"
-          leftIcon={<RefreshCw className={refreshing ? "animate-spin" : ""} size={14} />}
-          onClick={loadData}
-          disabled={loading || refreshing}
-        >
-          Atualizar dados
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            leftIcon={<Download size={14} />}
+            onClick={handleExportCSV}
+            disabled={loading || closedPositions.length === 0}
+          >
+            Exportar CSV
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            leftIcon={<RefreshCw className={refreshing ? "animate-spin" : ""} size={14} />}
+            onClick={loadData}
+            disabled={loading || refreshing}
+          >
+            Atualizar
+          </Button>
+        </div>
       </div>
 
-      {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => (
-            <Card key={i} className="animate-pulse h-24 bg-[var(--color-surface)]" />
-          ))}
-        </div>
-      ) : (
-        <>
-          {/* Métricas Globais Pós-Ativação */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card padding="md" className="flex items-center justify-between">
+      {/* Card de relatório semanal (colapsável) */}
+      {latestReport && (
+        <Card padding="md">
+          <button
+            type="button"
+            onClick={() => setReportExpanded((v) => !v)}
+            className="w-full flex items-center justify-between gap-3 text-left"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${
+                latestReport.verdicts.includes("semana_negativa") ? "bg-down/10" : "bg-up/10"
+              }`}>
+                {latestReport.verdicts.some(v => ["pf_baixo","win_rate_baixo","semana_negativa"].includes(v))
+                  ? <AlertCircle size={15} className="text-down" />
+                  : <BarChart2 size={15} className="text-up" />
+                }
+              </div>
               <div>
-                <div className="text-xs text-muted font-medium uppercase tracking-wider">Taxa de Acerto Real</div>
-                <div className="text-2xl font-bold mt-1 tabular-nums">{fmtPct(winRate)}</div>
+                <div className="text-sm font-semibold text-[var(--color-text)]">
+                  Relatório semanal · {latestReport.period_label}
+                </div>
+                <div className="text-xs text-muted truncate max-w-xs">{latestReport.summary}</div>
               </div>
-              <div className="h-10 w-10 rounded-[var(--radius-sm)] bg-[var(--color-brand-500)]/10 flex items-center justify-center text-[var(--color-brand-500)]">
-                <Percent size={20} />
-              </div>
-            </Card>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {latestReport.verdicts.map((v) => (
+                <span key={v} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                  v === "semana_positiva" ? "bg-up/10 border-up/20 text-up"
+                  : v === "semana_negativa" ? "bg-down/10 border-down/20 text-down"
+                  : v === "pf_baixo" || v === "win_rate_baixo" ? "bg-warn/10 border-warn/20 text-warn"
+                  : "bg-[var(--color-surface-3)] border-[var(--color-border)] text-muted"
+                }`}>
+                  {v === "semana_positiva" ? "✓ positiva" : v === "semana_negativa" ? "✗ negativa"
+                    : v === "pf_baixo" ? "PF baixo" : v === "win_rate_baixo" ? "WR baixo" : v}
+                </span>
+              ))}
+              {reportExpanded ? <ChevronUp size={15} className="text-muted" /> : <ChevronDown size={15} className="text-muted" />}
+            </div>
+          </button>
 
-            <Card padding="md" className="flex items-center justify-between">
-              <div>
-                <div className="text-xs text-muted font-medium uppercase tracking-wider">PnL Total Real</div>
-                <div className={`text-2xl font-bold mt-1 tabular-nums ${totalPnL >= 0 ? "text-[var(--color-up-500)]" : "text-[var(--color-down-500)]"}`}>
-                  {totalPnL >= 0 ? "+" : ""}{fmtUSD(totalPnL)}
+          {reportExpanded && (
+            <div className="mt-4 pt-4 border-t border-[var(--color-border)] space-y-3">
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div>
+                  <div className="text-[10px] text-muted uppercase tracking-wider">Total trades</div>
+                  <div className="text-lg font-bold">{latestReport.total_trades}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-muted uppercase tracking-wider">Win Rate</div>
+                  <div className={`text-lg font-bold ${(latestReport.win_rate ?? 0) >= 50 ? "text-up" : "text-down"}`}>
+                    {latestReport.win_rate != null ? `${latestReport.win_rate}%` : "—"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-muted uppercase tracking-wider">Profit Factor</div>
+                  <div className={`text-lg font-bold ${(latestReport.profit_factor ?? 0) >= 1 ? "text-up" : "text-down"}`}>
+                    {latestReport.profit_factor != null ? latestReport.profit_factor.toFixed(2) : "—"}
+                  </div>
                 </div>
               </div>
-              <div className={`h-10 w-10 rounded-[var(--radius-sm)] flex items-center justify-center ${totalPnL >= 0 ? "bg-[var(--color-up-500)]/10 text-[var(--color-up-500)]" : "bg-[var(--color-down-500)]/10 text-[var(--color-down-500)]"}`}>
-                <DollarSign size={20} />
-              </div>
-            </Card>
 
-            <Card padding="md" className="flex items-center justify-between">
-              <div>
-                <div className="text-xs text-muted font-medium uppercase tracking-wider">Total de Trades</div>
-                <div className="text-2xl font-bold mt-1 tabular-nums">{totalTrades}</div>
-              </div>
-              <div className="h-10 w-10 rounded-[var(--radius-sm)] bg-blue-500/10 flex items-center justify-center text-blue-500">
-                <Activity size={20} />
-              </div>
-            </Card>
+              {latestReport.strategies.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-[10px] text-muted uppercase tracking-wider font-semibold">Por estratégia</div>
+                  {latestReport.strategies.map((s) => (
+                    <div key={s.name} className="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--color-surface-2)] text-xs">
+                      <div className="min-w-0">
+                        <div className="font-semibold truncate">{s.name}</div>
+                        <div className="text-muted">{s.trades} trades · {s.win_rate}% win · RR {s.rr_realizado}</div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className={`font-bold tabular-nums ${s.pnl >= 0 ? "text-up" : "text-down"}`}>
+                          {s.pnl >= 0 ? "+" : ""}{s.pnl.toFixed(2)}
+                        </span>
+                        {s.verdicts.filter(v => v !== "ok").map((v) => (
+                          <span key={v} className="text-[9px] px-1.5 py-0.5 rounded bg-warn/10 text-warn border border-warn/20 font-semibold">
+                            {v === "rr_invertido" ? "RR ↓" : v === "pf_baixo" ? "PF<1" : v === "slippage_alto" ? "slip↑" : v}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
+      )}
 
-            <Card padding="md" className="flex items-center justify-between">
-              <div>
-                <div className="text-xs text-muted font-medium uppercase tracking-wider">Fator de Lucro</div>
-                <div className="text-2xl font-bold mt-1 tabular-nums">{profitFactor.toFixed(2)}</div>
-              </div>
-              <div className="h-10 w-10 rounded-[var(--radius-sm)] bg-purple-500/10 flex items-center justify-center text-purple-500">
-                <CheckCircle2 size={20} />
-              </div>
-            </Card>
+      {loading ? (
+        // Skeletons fiéis ao layout final (mesma grade e alturas) — zero layout shift
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[...Array(4)].map((_, i) => (
+              <Card key={i} padding="md" className="flex items-center justify-between">
+                <div className="space-y-2">
+                  <Skeleton width={110} height={12} />
+                  <Skeleton width={80} height={28} />
+                </div>
+                <Skeleton width={40} height={40} />
+              </Card>
+            ))}
           </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[...Array(3)].map((_, i) => (
+              <Card key={i} padding="md">
+                <Skeleton width={160} height={16} />
+                <Skeleton width={100} height={11} className="mt-2" />
+                <div className="grid grid-cols-3 gap-2 mt-5 pt-3 border-t border-[var(--color-border)]">
+                  {[...Array(3)].map((_, j) => (
+                    <div key={j} className="flex flex-col items-center gap-1.5">
+                      <Skeleton width={56} height={10} />
+                      <Skeleton width={44} height={16} />
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            ))}
+          </div>
+          <Card padding="md">
+            <Skeleton width={240} height={18} />
+            <div className="mt-4 space-y-3 border-t border-[var(--color-border)] pt-4">
+              {[...Array(6)].map((_, i) => (
+                <Skeleton key={i} height={40} />
+              ))}
+            </div>
+          </Card>
+        </>
+      ) : (
+        <>
+          {/* Métricas Globais Pós-Ativação — números animados, cores do design system */}
+          <Stagger className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <StaggerItem>
+              <Card padding="md" className="flex items-center justify-between h-full">
+                <div>
+                  <div className="text-xs text-muted font-medium uppercase tracking-wider">Taxa de Acerto Real</div>
+                  <div className="text-2xl font-bold mt-1 tabular-nums">
+                    <AnimatedNumber value={winRate} format={(v) => fmtPct(v)} />
+                  </div>
+                </div>
+                <div className="h-10 w-10 rounded-[var(--radius-sm)] bg-brand-soft flex items-center justify-center">
+                  <Percent size={20} />
+                </div>
+              </Card>
+            </StaggerItem>
+
+            <StaggerItem>
+              <Card padding="md" className="flex items-center justify-between h-full">
+                <div>
+                  <div className="text-xs text-muted font-medium uppercase tracking-wider">PnL do Mês Real</div>
+                  <div className={`text-2xl font-bold mt-1 tabular-nums ${monthlyPnL >= 0 ? "text-up" : "text-down"}`}>
+                    <AnimatedNumber value={monthlyPnL} format={(v) => `${v >= 0 ? "+" : ""}${fmtUSD(v)}`} />
+                  </div>
+                </div>
+                <div className={`h-10 w-10 rounded-[var(--radius-sm)] flex items-center justify-center ${monthlyPnL >= 0 ? "bg-up" : "bg-down"}`}>
+                  <DollarSign size={20} />
+                </div>
+              </Card>
+            </StaggerItem>
+
+            <StaggerItem>
+              <Card padding="md" className="flex items-center justify-between h-full">
+                <div>
+                  <div className="text-xs text-muted font-medium uppercase tracking-wider">Total de Trades</div>
+                  <div className="text-2xl font-bold mt-1 tabular-nums">
+                    <AnimatedNumber value={totalTrades} format={(v) => String(Math.round(v))} />
+                  </div>
+                </div>
+                <div className="h-10 w-10 rounded-[var(--radius-sm)] bg-brand-soft flex items-center justify-center">
+                  <Activity size={20} />
+                </div>
+              </Card>
+            </StaggerItem>
+
+            <StaggerItem>
+              <Card padding="md" className="flex items-center justify-between h-full">
+                <div>
+                  <div className="text-xs text-muted font-medium uppercase tracking-wider">Fator de Lucro</div>
+                  <div className={`text-2xl font-bold mt-1 tabular-nums ${profitFactor >= 1 ? "text-up" : "text-warn"}`}>
+                    <AnimatedNumber value={profitFactor} format={(v) => v.toFixed(2)} />
+                  </div>
+                </div>
+                <div className={`h-10 w-10 rounded-[var(--radius-sm)] flex items-center justify-center ${profitFactor >= 1 ? "bg-up" : "bg-warn"}`}>
+                  <CheckCircle2 size={20} />
+                </div>
+              </Card>
+            </StaggerItem>
+          </Stagger>
+
+          {/* Curva de Capital + Heatmap */}
+          {equityPoints.length > 0 && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <Card padding="md">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold text-[var(--color-text-2)] uppercase tracking-wider">Curva de Capital (70d)</h3>
+                  {equityRes?.total_pnl != null && (
+                    <span className={`text-xs font-bold tabular-nums ${(equityRes.total_pnl) >= 0 ? "text-up" : "text-down"}`}>
+                      {equityRes.total_pnl >= 0 ? "+" : ""}{fmtUSD(equityRes.total_pnl)}
+                    </span>
+                  )}
+                </div>
+                <EquityChart data={equityPoints} maxDrawdown={equityMaxDrawdown} />
+              </Card>
+
+              <Card padding="md">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold text-[var(--color-text-2)] uppercase tracking-wider">Heatmap de PnL Diário</h3>
+                  <span className="text-[10px] text-muted">últimos 70 dias</span>
+                </div>
+                <TradeHeatmap data={equityPoints} />
+              </Card>
+            </div>
+          )}
 
           {/* Performance Real por Estratégia */}
           <div className="space-y-3">
             <h3 className="text-xs font-semibold text-[var(--color-text-2)] uppercase tracking-wider">Performance por Estratégia (Ativas)</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              
+            <Stagger className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" delay={0.1}>
+
               {/* Card Especial para o Micro-Scalper Core */}
-              <Card padding="md" className="relative overflow-hidden border border-[var(--color-brand-500)]/30 bg-gradient-to-br from-[var(--color-surface)] to-[var(--color-brand-500)]/5 hover:border-[var(--color-brand-500)]/60 transition-all flex flex-col justify-between">
+              <StaggerItem className="h-full">
+              <Card padding="md" className="relative overflow-hidden h-full border border-[var(--color-brand-500)]/30 bg-gradient-to-br from-[var(--color-surface)] to-[var(--color-brand-500)]/5 hover:border-[var(--color-brand-500)]/60 transition-all flex flex-col justify-between">
                 <div>
                   <div className="flex justify-between items-start">
                     <div>
@@ -358,10 +564,12 @@ export default function DiarioPage() {
                   </div>
                 </div>
               </Card>
+              </StaggerItem>
 
               {/* Demais Estratégias Customizadas */}
               {strategyStats.map((strat, i) => (
-                <Card key={strat.id || i} padding="md" className="relative overflow-hidden border border-[var(--color-border)] hover:border-[var(--color-border-strong)] transition-all flex flex-col justify-between">
+                <StaggerItem key={strat.id || i} className="h-full">
+                <Card padding="md" className="relative overflow-hidden h-full border border-[var(--color-border)] hover:border-[var(--color-border-strong)] transition-all flex flex-col justify-between">
                   <div className="flex justify-between items-start">
                     <div>
                       <div className="font-semibold text-[var(--color-text)] flex items-center gap-2">
@@ -397,9 +605,10 @@ export default function DiarioPage() {
                     </div>
                   </div>
                 </Card>
+                </StaggerItem>
               ))}
 
-            </div>
+            </Stagger>
           </div>
 
           {/* Diário de Trades / Histórico */}

@@ -6,7 +6,16 @@ class Base(DeclarativeBase):
     pass
 
 def _make_engine():
-    return create_engine(settings.database_url)
+    # pool_pre_ping: testa a conexão antes de usar e reabre se o Postgres
+    #   derrubou o socket ocioso (corrige os "SSL connection has been closed
+    #   unexpectedly" que apareciam no worker).
+    # pool_recycle: recicla conexões com mais de 30 min, antes de o servidor/
+    #   firewall cortá-las.
+    return create_engine(
+        settings.database_url,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+    )
 
 def _make_session_factory(eng):
     return sessionmaker(autocommit=False, autoflush=False, bind=eng)

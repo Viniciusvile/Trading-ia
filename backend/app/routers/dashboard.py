@@ -7,6 +7,7 @@ from app.deps import get_current_user
 from app.models.user import User
 from app.models.strategy import Strategy
 from app.models.position import Position
+from app.models.performance_report import PerformanceReport
 from app.services.metrics import get_dashboard_metrics
 
 router = APIRouter()
@@ -145,3 +146,96 @@ def dashboard_summary(
         "todayOpened": [_summary_trade(p) for p in opened_today],
         "stats30d": stats_30d,
     }
+
+
+@router.get("/equity")
+def get_equity_curve(
+    days: int = Query(30),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Curva de capital: PnL dia-a-dia e acumulado para o AreaChart.
+
+    Retorna array completo do período — dias sem trade aparecem com pnl=0 para
+    a linha do gráfico ser contínua. Também calcula max drawdown do período.
+    """
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+
+    closed = (
+        db.query(Position)
+        .filter(
+            Position.user_id == user.id,
+            Position.status == "closed",
+            Position.closed_at >= since,
+        )
+        .order_by(Position.closed_at)
+        .all()
+    )
+
+    from collections import defaultdict
+    daily: dict[str, float] = defaultdict(float)
+    for p in closed:
+        date_str = p.closed_at.strftime("%Y-%m-%d")  # type: ignore[union-attr]
+        daily[date_str] += p.pnl or 0
+
+    # Gera série completa (sem buracos) desde `since` até hoje
+    rows = []
+    cursor = since.date()
+    end = now.date()
+    cumulative = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    while cursor <= end:
+        ds = cursor.strftime("%Y-%m-%d")
+        pnl = round(daily.get(ds, 0.0), 4)
+        cumulative = round(cumulative + pnl, 4)
+        if cumulative > peak:
+            peak = cumulative
+        dd = round(peak - cumulative, 4)
+        if dd > max_dd:
+            max_dd = dd
+        rows.append({"date": ds, "pnl": pnl, "cumulative": cumulative})
+        cursor = cursor + timedelta(days=1)
+
+    return {
+        "success": True,
+        "days": days,
+        "equity": rows,
+        "max_drawdown": round(max_dd, 4),
+        "total_pnl": rows[-1]["cumulative"] if rows else 0.0,
+    }
+
+
+@router.get("/reports/latest")
+def get_latest_report(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Relatório de performance mais recente do usuário (gerado toda segunda)."""
+    report = (
+        db.query(PerformanceReport)
+        .filter(PerformanceReport.user_id == user.id)
+        .order_by(PerformanceReport.created_at.desc())
+        .first()
+    )
+    if not report:
+        return {"success": True, "report": None}
+    return {
+        "success": True,
+        "report": {
+            "id": report.id,
+            "period_start": report.period_start.isoformat() + "Z",
+            "period_end": report.period_end.isoformat() + "Z",
+            "created_at": report.created_at.isoformat() + "Z",
+            **report.data,
+        },
+    }
+
+
+@router.post("/reports/run")
+def run_report_now(_user: User = Depends(get_current_user)):
+    """Dispara manualmente a auditoria semanal (útil para teste e primeira execução)."""
+    from app.workers.report_worker import weekly_performance_report
+    weekly_performance_report.delay()
+    return {"success": True, "message": "Relatório agendado para execução em background."}

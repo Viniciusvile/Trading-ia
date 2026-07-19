@@ -49,6 +49,48 @@ def _parse_gemini_json(text: str) -> dict:
         t = t[first:last + 1]
     return json.loads(t)
 
+def _refresh_current_plan_stats(db: Session, cfg, data: dict, symbol: str, current_plan: dict) -> dict:
+    """Com a IA desligada: backtesta o plano ATUAL do usuário e atualiza só as
+    estatísticas do card — NÃO mexe em plans/active/deactivated. Assim os ajustes
+    manuais salvos pelo usuário não são sobrescritos pelo job diário.
+    """
+    if not current_plan:
+        return {"success": True, "symbol": symbol, "skipped": "sem plano"}
+    mode = current_plan.get("strategy_mode") or "turbo-reversion"
+    test_plan = dict(DEFAULT_PLANS.get(mode, DEFAULT_PLANS["turbo-reversion"]))
+    test_plan.update(current_plan)
+    try:
+        res = bt.run_plan_backtest({
+            "strategy": mode, "scalper": test_plan,
+            "symbols": [symbol], "timeframes": ["5m"], "winRateTarget": 55,
+        })
+    except Exception as e:
+        logger.error(f"Erro ao atualizar stats de {symbol} (IA off): {e}")
+        return {"success": False, "symbol": symbol, "error": str(e)}
+
+    stats = (res or {}).get("combined") or {}
+    equity_pts = [p.get("equity") for p in ((res or {}).get("equityCurve") or [])
+                  if isinstance(p, dict) and p.get("equity") is not None]
+    if len(equity_pts) > 40:
+        step = len(equity_pts) / 40.0
+        equity_pts = [equity_pts[int(i * step)] for i in range(40)]
+
+    stats_block = dict(data.get("stats") or {})
+    stats_block[symbol] = {
+        "winRate": stats.get("winRate", 0.0),
+        "profitFactor": stats.get("profitFactor", 0.0),
+        "netProfit": stats.get("netProfitUsd", 0.0),
+        "totalTrades": stats.get("totalTrades", 0),
+        "equityCurve": equity_pts,
+        "ts": int(datetime.now(timezone.utc).timestamp() * 1000),
+    }
+    data["stats"] = stats_block
+    cfg.data = data
+    flag_modified(cfg, "data")
+    db.commit()
+    return {"success": True, "symbol": symbol, "stats_only": True}
+
+
 def optimize_symbol_for_user(db: Session, user_id: str, symbol: str, force_ia: bool = False) -> dict:
     """
     Roda backtest comparativo de 'micro-dip' vs 'turbo-reversion' para o par do usuário.
@@ -69,7 +111,12 @@ def optimize_symbol_for_user(db: Session, user_id: str, symbol: str, force_ia: b
     current_plan = dict(plans.get(symbol) or {})
     active_symbols = list(data.get("active_symbols") or [])
     deactivated_by_system = list(data.get("deactivated_by_system") or [])
-    
+
+    # IA desligada: NÃO reotimiza nem sobrescreve o plano — o job diário deixaria de
+    # respeitar os ajustes manuais do usuário. Só atualiza as estatísticas do card.
+    if not settings.scalper_ia_enabled:
+        return _refresh_current_plan_stats(db, cfg, data, symbol, current_plan)
+
     # 1. Rodar backtests comparativos para ambos os modos com os parâmetros atuais ou defaults
     results = {}
     for mode in ["micro-dip", "turbo-reversion"]:
@@ -118,9 +165,10 @@ def optimize_symbol_for_user(db: Session, user_id: str, symbol: str, force_ia: b
     logger.info(f"Melhor modo inicial para {symbol}: {best_mode} (PnL: {best_pnl}, WR: {best_wr}%)")
 
     # 2. Verificar se precisa acionar IA (PnL negativo, WR < 50% ou force_ia=True)
-    needs_ia = force_ia or (best_pnl < 0.0) or (best_wr < 50.0)
+    ia_enabled = settings.scalper_ia_enabled
+    needs_ia = ia_enabled and (force_ia or (best_pnl < 0.0) or (best_wr < 50.0))
     api_key = settings.gemini_api_key
-    
+
     if needs_ia and api_key:
         logger.info(f"Iniciando otimização com Gemini para {symbol}...")
         
@@ -220,8 +268,17 @@ def optimize_symbol_for_user(db: Session, user_id: str, symbol: str, force_ia: b
                 logger.error(f"Erro na validação do plano proposto pela IA para {symbol}: {e}")
 
     # 4. Regras de Desativação e Reativação Automática
+    #
+    # A desativação automática por backtest negativo só faz sentido quando a IA
+    # está LIGADA: a IA é o único mecanismo que procura uma config lucrativa e
+    # reativa o par. Com a IA desligada (padrão atual), desativar trancaria o par
+    # permanentemente — sem caminho de volta — que foi exatamente o que travou a
+    # conta (todos os pares em deactivated_by_system por 10+ dias). Então, com a
+    # IA off, nunca desativamos por backtest e garantimos que pares presos sejam
+    # reativados; a proteção passa a ser dos guards de runtime (risk_guard /
+    # market_regime), que já bloqueiam entradas ruins em tempo real.
     status_change = None
-    if best_pnl < 0.0:
+    if best_pnl < 0.0 and ia_enabled:
         # PnL negativo mesmo após a IA -> não operar no prejuízo: desativa o ativo.
         # (antes só desativava se já estivesse ativo; agora garante que NUNCA fica
         # ativo um par negativo, mesmo recém-otimizado)
@@ -252,25 +309,32 @@ def optimize_symbol_for_user(db: Session, user_id: str, symbol: str, force_ia: b
             ))
             logger.info(f"Ativo {symbol} desativado pelo sistema devido a PnL negativo ({best_pnl})")
     else:
-        # PnL positivo -> reativa se foi desativado pelo sistema
+        # PnL positivo OU IA desligada -> nunca deixar o par preso na lista do sistema.
         if symbol in deactivated_by_system:
             deactivated_by_system.remove(symbol)
             if symbol not in active_symbols:
                 active_symbols.append(symbol)
             status_change = "reactivated"
-            
-            msg = (
-                f"O par {symbol} foi reativado automaticamente no Micro-Scalper após a IA encontrar "
-                f"uma configuração lucrativa no modo {best_mode} (Lucro estimado de +${best_pnl:.2f} "
-                f"e Win Rate de {best_wr:.1f}%)."
-            )
+
+            if best_pnl >= 0.0:
+                msg = (
+                    f"O par {symbol} foi reativado automaticamente no Micro-Scalper após encontrar "
+                    f"uma configuração lucrativa no modo {best_mode} (Lucro estimado de +${best_pnl:.2f} "
+                    f"e Win Rate de {best_wr:.1f}%)."
+                )
+            else:
+                msg = (
+                    f"O par {symbol} foi reativado automaticamente no Micro-Scalper. A otimização "
+                    f"por IA está desligada, então o par volta a operar sob as proteções de risco "
+                    f"em tempo real (cooldown pós-perda, limite de perdas e regime de mercado)."
+                )
             db.add(Notification(
                 user_id=user_id,
-                title=f"[IA] Ativo Reativado: {symbol}",
+                title=f"[Sistema] Ativo Reativado: {symbol}",
                 message=msg,
                 type="success"
             ))
-            logger.info(f"Ativo {symbol} reativado pelo sistema devido a PnL positivo ({best_pnl})")
+            logger.info(f"Ativo {symbol} reativado (ia_enabled={ia_enabled}, pnl={best_pnl})")
         elif force_ia:
             # Notificação padrão de otimização bem sucedida manual
             msg = (

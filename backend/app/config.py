@@ -15,6 +15,15 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = ""
     google_client_id: str = ""
     gemini_api_key: str = ""
+    # Liga/desliga a otimização automática por IA (Gemini) do Micro-Scalper.
+    # OFF por padrão: a API do Gemini estava retornando 429/403 e, como a IA era
+    # o único caminho de reativação de um par, isso trancava todos os pares para
+    # sempre. Com OFF, o otimizador não desativa por backtest e a proteção fica
+    # com os guards de runtime (risk_guard / market_regime).
+    scalper_ia_enabled: bool = False
+    vapid_public_key: str = ""
+    vapid_private_pem_b64: str = ""
+    vapid_subject: str = "mailto:admin@vexacripto.com.br"
 
     class Config:
         env_file = ".env"

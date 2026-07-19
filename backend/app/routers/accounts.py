@@ -23,6 +23,7 @@ class AccountCreate(BaseModel):
     apiKey: str
     secretKey: str
     isTestnet: bool = False
+    exchange: str = "binance"  # "binance" | "coinbase"
 
 
 def _mask(key: str) -> str:
@@ -43,6 +44,7 @@ def list_accounts(db: Session = Depends(get_db), user: User = Depends(get_curren
                 "apiKey": _mask(decrypt(c.encrypted_api_key)),
                 "isActive": bool(c.is_active),
                 "isTestnet": bool(c.is_testnet),
+                "exchange": getattr(c, "exchange", "binance") or "binance",
                 "createdAt": c.created_at.isoformat() if c.created_at else None,
             }
             for c in rows
@@ -52,14 +54,29 @@ def list_accounts(db: Session = Depends(get_db), user: User = Depends(get_curren
 
 @router.post("")
 def create_account(body: AccountCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    exchange = (body.exchange or "binance").lower()
+    if exchange not in ("binance", "coinbase"):
+        raise HTTPException(status_code=400, detail=f"Exchange não suportada: {exchange}")
+    if exchange == "coinbase" and body.isTestnet:
+        raise HTTPException(status_code=400, detail="A Coinbase não possui testnet")
+
+    # Valida a credencial ANTES de salvar (antes aceitava qualquer chave e o
+    # erro só aparecia na primeira ordem).
+    from app.services.exchange_client import validate_credentials
+    ok, err = validate_credentials(exchange, body.apiKey, body.secretKey, body.isTestnet)
+    if not ok:
+        raise HTTPException(status_code=400, detail=f"Credencial inválida na {exchange.title()}: {err}")
+
     acc = BinanceConfig(
         id=str(uuid.uuid4()),
         user_id=user.id,
         label=body.name,
+        exchange=exchange,
         encrypted_api_key=encrypt(body.apiKey),
         encrypted_secret_key=encrypt(body.secretKey),
         is_testnet=body.isTestnet,
         is_active=False,
+        is_valid=True,
     )
     db.add(acc)
     db.commit()

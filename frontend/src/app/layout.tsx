@@ -15,6 +15,7 @@ export const metadata: Metadata = {
   description:
     "Painel inteligente para acompanhar seus bots, mercado e operações em tempo real.",
   applicationName: "Vexa Cripto",
+  manifest: "/manifest.json",
 };
 
 export const viewport: Viewport = {
@@ -34,6 +35,13 @@ export default function RootLayout({
 }) {
   return (
     <html lang="pt-BR" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: `
+          if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+          }
+        `}} />
+      </head>
       <body className={inter.variable}>
         <AppShell>{children}</AppShell>
         <Toaster

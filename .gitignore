@@ -17,3 +17,6 @@ frontend/next-env.d.ts
 *.log
 .DS_Store
 backend/celerybeat-schedule
+
+# backups de deploy (Claude)
+backend/_bak_*/

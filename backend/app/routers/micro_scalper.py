@@ -41,11 +41,78 @@ def status(current_user: User = Depends(get_current_user), db: Session = Depends
             "enabled": enabled, "activeSymbols": scalper.active_symbols(data)}
 
 
+DEFAULT_MICRO_CONFIG = {
+    "active_symbols": [],
+    "max_trade_usdt": 25,
+    "min_trade_usdt": 15,
+    "loop_interval_ms": 5000,
+    "max_session_ms": 86400000,
+    "cooldown_ms": 5000,
+    "cooldown_after_loss_ms": 10000,
+    "max_trades": 50,
+    "daily_profit_target_usdt": 0,
+    "btc_drop_block_pct": 0.015,
+    "timeout_enabled": False,
+    "plans": {
+        "BTCUSDT": {
+            "strategy_mode": "turbo-reversion",
+            "tp_pct": 0.006,
+            "sl_pct": 0.003,
+            "bb_length": 20,
+            "bb_mult": 1.8,
+            "rsi_period": 14,
+            "rsi_limit": 35,
+            "vol_mult": 1.3,
+            "qty_decimals": 5,
+            "quote_decimals": 2
+        },
+        "ETHUSDT": {
+            "strategy_mode": "micro-dip",
+            "tp_pct": 0.008,
+            "sl_pct": 0.004,
+            "ema_period": 20,
+            "rsi_period": 3,
+            "min_dip_pct": 0.0005,
+            "min_rsi": 20,
+            "max_rsi": 75,
+            "qty_decimals": 4,
+            "quote_decimals": 2
+        },
+        "SOLUSDT": {
+            "strategy_mode": "micro-dip",
+            "tp_pct": 0.010,
+            "sl_pct": 0.005,
+            "ema_period": 20,
+            "rsi_period": 3,
+            "min_dip_pct": 0.0005,
+            "min_rsi": 20,
+            "max_rsi": 75,
+            "qty_decimals": 2,
+            "quote_decimals": 2
+        },
+        "XRPUSDT": {
+            "strategy_mode": "turbo-reversion",
+            "tp_pct": 0.012,
+            "sl_pct": 0.006,
+            "bb_length": 20,
+            "bb_mult": 1.8,
+            "rsi_period": 14,
+            "rsi_limit": 45,
+            "vol_mult": 1.2,
+            "qty_decimals": 1,
+            "quote_decimals": 4
+        }
+    }
+}
+
+
 @router.get("/config")
 def config(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     cfg = db.get(UserMicroConfig, current_user.id)
     if not cfg:
-        return {"success": True, "config": None}
+        cfg = UserMicroConfig(user_id=current_user.id, data=DEFAULT_MICRO_CONFIG)
+        db.add(cfg)
+        db.commit()
     return {"success": True, "config": cfg.data}
 
 
@@ -115,13 +182,17 @@ def update_strategy(
     # 1. Active toggle
     active = body.get("active")
     active_symbols = list(data.get("active_symbols") or [])
+    deactivated_by_system = list(data.get("deactivated_by_system") or [])
     if active is not None:
         if active:
             if symbol not in active_symbols:
                 active_symbols.append(symbol)
         else:
             active_symbols = [s for s in active_symbols if s != symbol]
+        if symbol in deactivated_by_system:
+            deactivated_by_system.remove(symbol)
     data["active_symbols"] = active_symbols
+    data["deactivated_by_system"] = deactivated_by_system
 
     # 2. Plan update
     plan = body.get("plan")
@@ -136,6 +207,10 @@ def update_strategy(
         for k, v in plan.items():
             symbol_plan[k] = v
         plans[symbol] = symbol_plan
+        # Se atualizou manualmente o plano, também limpa do bloqueio do sistema para permitir nova operação
+        if symbol in deactivated_by_system:
+            deactivated_by_system.remove(symbol)
+            data["deactivated_by_system"] = deactivated_by_system
     data["plans"] = plans
 
     # 3. Global update
